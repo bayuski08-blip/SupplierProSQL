@@ -1070,7 +1070,7 @@ app.get('/api/invoices/:id/print-data', authenticateToken, async (req, res) => {
     const { id } = req.params;
     
     const invRes = await pool.query(`
-      SELECT si.*, c.name as customer_name, pt.name as payment_type_name
+      SELECT si.*, c.name as customer_name, c.address as customer_address, pt.name as payment_type_name
       FROM sales_invoices si
       LEFT JOIN customers c ON si.customer_id = c.id
       LEFT JOIN payment_types pt ON si.payment_type_id = pt.id
@@ -1121,7 +1121,8 @@ app.get('/api/invoices/:id/print-data', authenticateToken, async (req, res) => {
         payment_type_name: invoiceRow.payment_type_name || 'Tunai'
       },
       customer: {
-        name: invoiceRow.customer_name || 'Pelanggan Umum'
+        name: invoiceRow.customer_name || 'Pelanggan Umum',
+        address: invoiceRow.customer_address || ''
       },
       items: itemsRes.rows.map(item => ({
         product_name: item.product_name,

@@ -4758,6 +4758,7 @@ async function printInvoice(id) {
 
         // Populate Customer
         document.getElementById('print-customer-name').textContent = data.customer.name;
+        document.getElementById('print-customer-address').textContent = data.customer.address || '-';
 
         // Populate Invoice
         const inv = data.invoice;

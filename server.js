@@ -120,7 +120,7 @@ pool.query(`
     ('prefix_vendor', 'V'),
     ('prefix_cash_transaction', 'CT'),
     ('prefix_purchase', 'PO/{YYYY}/{MM}/'),
-    ('prefix_sales', 'INV/{YYYY}/{MM}/'),
+    ('prefix_sales', 'INV-{YYYY}-{MM}-'),
     ('modal_pemilik', '0'),
     ('company_name', ''),
     ('company_phone', ''),
@@ -142,6 +142,21 @@ pool.query(`
     }
   } catch (err) {
     console.error('[Startup] Failed to check/add brand column:', err.message);
+  }
+})();
+
+// Auto-migrate: create invoice_counters table if not exists
+(async () => {
+  try {
+    await mysqlPool.query(`
+      CREATE TABLE IF NOT EXISTS invoice_counters (
+        year INT NOT NULL PRIMARY KEY,
+        last_number INT NOT NULL DEFAULT 0
+      )
+    `);
+    console.log('[Startup] invoice_counters table ready.');
+  } catch (err) {
+    console.error('[Startup] Failed to create invoice_counters table:', err.message);
   }
 })();
 
@@ -280,6 +295,36 @@ async function generateNextId(clientOrPool, tableName, prefixSetting) {
   const nextNum = maxNum + 1;
   const padded = String(nextNum).padStart(6, '0');
   return resolvedPrefix + padded;
+}
+
+/**
+ * Generates the next invoice ID using an atomic per-year counter.
+ * Format: INV-{YYYY}-{MM}-{NNNNN}
+ * - Sequence resets only on year change, NOT on month change.
+ * - Uses LAST_INSERT_ID() trick for race-condition-safe increment.
+ * - Must be called within an open transaction (pgify client), so rollback works.
+ *
+ * @param {object} pgClient  pgify-wrapped client from pool.connect()
+ * @param {string} invoiceDate ISO date string of the invoice (e.g. '2026-09-28')
+ * @returns {string} e.g. 'INV-2026-09-00001'
+ */
+async function generateInvoiceId(pgClient, invoiceDate) {
+  const d = invoiceDate ? new Date(invoiceDate) : new Date();
+  const year = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+
+  // Atomic upsert: LAST_INSERT_ID(expr) sets the return value of LAST_INSERT_ID()
+  await pgClient.query(
+    `INSERT INTO invoice_counters (year, last_number) VALUES (?, LAST_INSERT_ID(1))
+     ON DUPLICATE KEY UPDATE last_number = LAST_INSERT_ID(last_number + 1)`,
+    [year]
+  );
+
+  // pgify wrapper returns { rows: [{next_number: N}] }
+  const result = await pgClient.query('SELECT LAST_INSERT_ID() AS next_number');
+  const nextNum = Number(result.rows[0].next_number);
+  const padded = String(nextNum).padStart(5, '0');
+  return `INV-${year}-${mm}-${padded}`;
 }
 
 // Authentication Middleware
@@ -1201,8 +1246,10 @@ app.post('/api/invoices', authenticateToken, authorizeRoles('admin', 'kasir'), a
       : (effectivePaid >= finalTotal ? 'Lunas'
         : (effectivePaid > 0 ? 'Sebagian' : 'Belum Bayar'));
 
-    const prefix = await getSetting('prefix_sales', 'INV/{YYYY}/{MM}/');
-    const id = await generateNextId(client, 'sales_invoices', prefix);
+    // Generate invoice ID using atomic per-year counter
+    // Use date from request body so year/month match the invoice date (not server clock)
+    const invoiceDateForId = req.body.date ? req.body.date.split('T')[0] : new Date().toISOString().split('T')[0];
+    const id = await generateInvoiceId(client, invoiceDateForId);
     
     console.log(`[Invoice Creation API] Saving invoice ${id} with payment_type_id: "${payment_type_id}"`);
     await client.query(insertInvoiceQuery, [id, date, customer_id, subtotal, diskon, taxAmount, finalTotal, effectivePaid, payment_type_id, due_date, status, userId]);

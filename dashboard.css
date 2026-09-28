@@ -1954,22 +1954,59 @@ textarea.form-input {
 .mb-3 { margin-bottom: 1.5rem; }
 .gap-1 { gap: 0.5rem; }
 
+@page {
+  size: 24.13cm 13.97cm;
+  margin: 0.5cm;
+}
+
 /* Print Styles */
 @media print {
-    body * {
-        visibility: hidden;
+    html, body { 
+        width: 24.13cm; 
+        height: auto; 
+        margin: 0; 
+        padding: 0; 
+        overflow: visible;
     }
-    #print-invoice-view, #print-invoice-view * {
+    
+    body > *:not(.dashboard-wrapper) {
+        display: none !important;
+    }
+    
+    .sidebar, .topbar, .sidebar-overlay, .modal-overlay, .page-section, .page-toolbar {
+        display: none !important;
+    }
+
+    #print-invoice-view {
+        display: block !important;
+        position: static !important;
+        inset: auto;
+        transform: none;
+        box-sizing: border-box;
+        width: 24.13cm !important;
+        max-width: 24.13cm !important;
+        height: 13.9cm;
+        padding: 0.5cm;
+        margin: 0;
+        overflow: hidden;
+    }
+    
+    #print-invoice-view > div {
+        max-width: 100% !important;
+        width: 100% !important;
+    }
+        page-break-after: avoid;
+        page-break-inside: avoid;
+        break-after: avoid;
+        break-inside: avoid;
+        box-shadow: none;
+        visibility: visible !important;
+    }
+    
+    #print-invoice-view * {
         visibility: visible;
     }
-    #print-invoice-view {
-        position: absolute;
-        left: 0;
-        top: 0;
-        width: 100%;
-        margin: 0;
-        padding: 0;
-    }
+    
     .no-print {
         display: none !important;
     }

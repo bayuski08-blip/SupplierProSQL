@@ -931,7 +931,7 @@ function renderInvoices(filter = '') {
             <td>${inv.type}</td>
             <td><span class="badge-status ${statusClass}">${capitalize(inv.status || 'Belum Bayar')}</span></td>
             <td style="text-align: right; white-space: nowrap;">
-                <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem;" title="Print Preview" onclick="printInvoice('${inv.id}')">
+                <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem;" title="Print Preview" onclick="window.open('/invoice-print.html?id=${encodeURIComponent(inv.id)}', '_blank', 'noopener')">
                     <i data-lucide="printer" style="width: 14px; height: 14px; margin: 0;"></i>
                 </button>
                 <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem;" title="Edit Invoice" onclick="openEditInvoiceModal('${inv.id}')">
@@ -1747,6 +1747,12 @@ document.getElementById('btn-checkout')?.addEventListener('click', async () => {
             const result = await res.json();
             const successDesc = document.querySelector('#modal-checkout-success p');
             if (successDesc) successDesc.innerHTML = `Transaksi berhasil.<br>Nomor Invoice: <b>${result.invoiceId}</b>`;
+            
+            const printBtn = document.getElementById('btn-print-new-invoice');
+            if (printBtn) {
+                printBtn.dataset.invoiceId = result.invoiceId;
+            }
+
             openModal('modal-checkout-success');
 
             cart = [];
@@ -4735,91 +4741,25 @@ async function saveCompanyProfile(e) {
     }
 }
 
-async function printInvoice(id) {
-    try {
-        showToast('Menyiapkan invoice untuk dicetak...', 'info');
-        const res = await fetch(`/api/invoices/${encodeURIComponent(id)}/print-data`, { headers: getAuthHeaders() });
-        if (!res.ok) throw new Error('Failed to load print data');
-        const data = await res.json();
-
-        // Populate Company
-        const comp = data.company;
-        document.getElementById('print-company-name').textContent = comp.name || 'Nama Bisnis';
-        document.getElementById('print-company-address').textContent = comp.address || '-';
-        document.getElementById('print-company-email').textContent = comp.email || '-';
-        document.getElementById('print-company-phone').textContent = comp.phone || '-';
-
-        if (comp.logo) {
-            document.getElementById('print-company-logo').src = comp.logo;
-            document.getElementById('print-company-logo').style.display = 'block';
-        } else {
-            document.getElementById('print-company-logo').style.display = 'none';
-        }
-
-        // Populate Customer
-        document.getElementById('print-customer-name').textContent = data.customer.name;
-        document.getElementById('print-customer-address').textContent = data.customer.address || '-';
-
-        // Populate Invoice
-        const inv = data.invoice;
-        document.getElementById('print-invoice-id').textContent = inv.id;
-        // Format dates to DD/MM/YYYY
-        const formatDate = (ds) => {
-            if (!ds) return '-';
-            const p = ds.split('-');
-            if (p.length < 3) return ds;
-            return `${p[2]}/${p[1]}/${p[0]}`;
-        };
-        document.getElementById('print-invoice-date').textContent = formatDate(inv.date);
-
-        const trDueDate = document.getElementById('print-row-due-date');
-        if (inv.payment_type_name && inv.payment_type_name.toLowerCase().includes('tempo')) {
-            document.getElementById('print-invoice-due-date').textContent = formatDate(inv.due_date);
-            trDueDate.style.display = 'table-row';
-        } else {
-            trDueDate.style.display = 'none';
-        }
-
-        document.getElementById('print-invoice-payment-type').textContent = inv.payment_type_name;
-
-        // Items
-        const tbody = document.getElementById('print-invoice-items');
-        tbody.innerHTML = data.items.map((it, idx) => `
-            <tr>
-                <td style="border: 1px solid #000; padding: 0.5rem; text-align: center;">${idx + 1}</td>
-                <td style="border: 1px solid #000; padding: 0.5rem;">${it.product_name}</td>
-                <td style="border: 1px solid #000; padding: 0.5rem; text-align: center;">${it.unit_name}</td>
-                <td style="border: 1px solid #000; padding: 0.5rem; text-align: center;">${it.quantity}</td>
-                <td style="border: 1px solid #000; padding: 0.5rem; text-align: right;">${rp(it.price).replace('Rp', '').trim()}</td>
-                <td style="border: 1px solid #000; padding: 0.5rem; text-align: right;">${rp(it.total).replace('Rp', '').trim()}</td>
-            </tr>
-        `).join('');
-
-        // Totals
-        const subtotal = inv.subtotal; // Use real subtotal from API
-        document.getElementById('print-invoice-subtotal').textContent = rp(subtotal).replace('Rp', '').trim();
-        document.getElementById('print-invoice-tax').textContent = rp(inv.tax).replace('Rp', '').trim();
-        document.getElementById('print-invoice-grand-total').textContent = rp(inv.total).replace('Rp', '').trim();
-        
-        const taxRow = document.getElementById('print-invoice-tax').closest('tr');
-        if (taxRow) {
-            taxRow.style.display = currentPpnEnabled ? 'table-row' : 'none';
-        }
-
-        // Show view
-        document.getElementById('print-invoice-view').style.display = 'block';
-        document.body.style.overflow = 'hidden'; // prevent background scroll
-
-    } catch (err) {
-        console.error(err);
-        showToast('Gagal menyiapkan print', 'error');
-    }
+// Opens invoice print preview in a new tab.
+// Must be called synchronously in a click handler to avoid popup blocker.
+function printInvoice(id) {
+    window.open(`/invoice-print.html?id=${encodeURIComponent(id)}`, '_blank', 'noopener');
 }
 
 function closePrintInvoiceView() {
     document.getElementById('print-invoice-view').style.display = 'none';
     document.body.style.overflow = 'auto';
 }
+
+window.printNewlyCreatedInvoice = function() {
+    const printBtn = document.getElementById('btn-print-new-invoice');
+    if (printBtn && printBtn.dataset.invoiceId) {
+        // Open in new tab synchronously (must be in click handler to avoid popup blocker).
+        // Modal stays open so user can still click "Selesai".
+        window.open(`/invoice-print.html?id=${encodeURIComponent(printBtn.dataset.invoiceId)}`, '_blank', 'noopener');
+    }
+};
 
 // ---------- Customer Fee Report (Admin Only) ----------
 async function renderCustomerFeeReport() {

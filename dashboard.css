@@ -1957,6 +1957,7 @@ textarea.form-input {
 @page {
   size: 24.13cm 13.97cm;
   margin: 0.5cm;
+  margin-bottom: 0.8cm;  /* Extra clearance from perforation on LQ-590 continuous form */
 }
 
 /* Print Styles — applies when printing from dashboard.html directly (legacy fallback) */

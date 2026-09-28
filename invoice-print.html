@@ -37,6 +37,11 @@
 
         /* Print: clean page, no chrome from dashboard.css @media print */
         @media print {
+            /* ─── Calibration variables — adjust here if content still clips ─── */
+            :root {
+                --print-content-width: 19.5cm;  /* LQ-590 printable area ~20.3cm; leave safety margin */
+                --print-offset-left: 0cm;       /* shift right if left edge clips */
+            }
             html, body {
                 background: white;
                 width: auto;
@@ -51,26 +56,32 @@
             .sidebar, .topbar, .sidebar-overlay, .modal-overlay, .page-section, .page-toolbar {
                 display: revert !important;
             }
-            /* Wrapper: no fixed height, no overflow clipping — let content paginate naturally */
+            /* Wrapper: constrained to printer printable width */
             #print-invoice-view {
                 display: block !important;
                 position: static !important;
                 inset: auto !important;
-                width: 100% !important;
-                max-width: 100% !important;
+                width: var(--print-content-width) !important;
+                max-width: var(--print-content-width) !important;
+                margin-left: var(--print-offset-left) !important;
+                margin-right: 0 !important;
                 height: auto !important;
                 min-height: 0 !important;
                 padding: 0 !important;
-                margin: 0 !important;
                 overflow: visible !important;
                 box-shadow: none !important;
+                box-sizing: border-box !important;
             }
-            /* Inner container: full width, no extra margins */
+            /* Inner container: full width of wrapper */
             #print-invoice-view > div {
                 max-width: 100% !important;
                 width: 100% !important;
             }
-            /* Items table: repeat thead on every page, no row splitting */
+            /* Items table: fixed layout with % widths, repeat thead, no row splitting */
+            .invoice-items-table {
+                table-layout: fixed;
+                width: 100% !important;
+            }
             .invoice-items-table thead {
                 display: table-header-group;
             }
@@ -154,15 +165,17 @@
             </div>
 
             <!-- Items Table -->
+            <!-- table-layout: fixed + % widths set in <style> @media print for LQ-590 compatibility -->
+            <!-- No. 5% | Produk 36% | Satuan 12% | Qty 8% | Harga 19% | Total 20% -->
             <table class="invoice-items-table" style="width: 100%; border-collapse: collapse; margin-bottom: 0.5rem; font-size: 0.875rem; color: #000;">
                 <thead>
                     <tr>
-                        <th style="border: 1px solid #000; padding: 0.5rem; text-align: center; width: 50px;">No.</th>
-                        <th style="border: 1px solid #000; padding: 0.5rem; text-align: left;">Produk</th>
-                        <th style="border: 1px solid #000; padding: 0.5rem; text-align: center;">Satuan</th>
-                        <th style="border: 1px solid #000; padding: 0.5rem; text-align: center;">Qty</th>
-                        <th style="border: 1px solid #000; padding: 0.5rem; text-align: right;">Harga</th>
-                        <th style="border: 1px solid #000; padding: 0.5rem; text-align: right;">Total</th>
+                        <th style="border: 1px solid #000; padding: 0.4rem 0.3rem; text-align: center; width: 5%;">No.</th>
+                        <th style="border: 1px solid #000; padding: 0.4rem 0.3rem; text-align: left; width: 36%;">Produk</th>
+                        <th style="border: 1px solid #000; padding: 0.4rem 0.3rem; text-align: center; width: 12%;">Satuan</th>
+                        <th style="border: 1px solid #000; padding: 0.4rem 0.3rem; text-align: center; width: 8%;">Qty</th>
+                        <th style="border: 1px solid #000; padding: 0.4rem 0.3rem; text-align: right; width: 19%;">Harga</th>
+                        <th style="border: 1px solid #000; padding: 0.4rem 0.3rem; text-align: right; width: 20%;">Total</th>
                     </tr>
                 </thead>
                 <tbody id="print-invoice-items">
@@ -173,7 +186,7 @@
             <!-- Footer area -->
             <div class="invoice-bottom" style="display: flex; justify-content: space-between; align-items: flex-start; color: #000;">
                 <!-- Signatures -->
-                <div style="display: flex; gap: 3rem; margin-top: 0.5rem; font-size: 0.875rem;">
+                <div style="display: flex; gap: 2rem; margin-top: 0.5rem; font-size: 0.875rem;">
                     <div style="text-align: center;">
                         <div style="margin-bottom: 3rem;">Regards,</div>
                         <div>(__________________)</div>
@@ -188,20 +201,20 @@
                     </div>
                 </div>
 
-                <!-- Totals -->
-                <div style="width: 250px; font-size: 0.875rem;">
+                <!-- Totals: min-width to accommodate large numbers; flex-shrink:0 to not get squeezed -->
+                <div style="min-width: 210px; max-width: 230px; flex-shrink: 0; font-size: 0.875rem;">
                     <table style="width: 100%; border-collapse: collapse; border: none;">
                         <tr>
                             <td style="padding: 0.25rem 0; font-weight: bold;">SUB TOTAL</td>
-                            <td style="text-align: right;" id="print-invoice-subtotal"></td>
+                            <td style="text-align: right; padding-left: 0.5rem; white-space: nowrap;" id="print-invoice-subtotal"></td>
                         </tr>
                         <tr>
                             <td style="padding: 0.25rem 0; font-weight: bold;">TAX</td>
-                            <td style="text-align: right;" id="print-invoice-tax"></td>
+                            <td style="text-align: right; padding-left: 0.5rem; white-space: nowrap;" id="print-invoice-tax"></td>
                         </tr>
                         <tr>
-                            <td style="padding: 0.5rem 0; font-weight: bold; font-size: 1rem; border-top: 2px solid #000; margin-top: 0.5rem;">GRAND TOTAL</td>
-                            <td style="text-align: right; font-weight: bold; font-size: 1rem; border-top: 2px solid #000; margin-top: 0.5rem;" id="print-invoice-grand-total"></td>
+                            <td style="padding: 0.5rem 0; font-weight: bold; font-size: 1rem; border-top: 2px solid #000;">GRAND TOTAL</td>
+                            <td style="text-align: right; font-weight: bold; font-size: 1rem; border-top: 2px solid #000; padding-left: 0.5rem; white-space: nowrap;" id="print-invoice-grand-total"></td>
                         </tr>
                     </table>
                 </div>

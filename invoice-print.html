@@ -51,24 +51,37 @@
             .sidebar, .topbar, .sidebar-overlay, .modal-overlay, .page-section, .page-toolbar {
                 display: revert !important;
             }
+            /* Wrapper: no fixed height, no overflow clipping — let content paginate naturally */
             #print-invoice-view {
                 display: block !important;
                 position: static !important;
                 inset: auto !important;
-                width: 24.13cm !important;
-                max-width: 24.13cm !important;
-                height: 13.9cm !important;
-                padding: 0.5cm !important;
+                width: 100% !important;
+                max-width: 100% !important;
+                height: auto !important;
+                min-height: 0 !important;
+                padding: 0 !important;
                 margin: 0 !important;
-                overflow: hidden !important;
+                overflow: visible !important;
                 box-shadow: none !important;
-                page-break-after: avoid;
-                page-break-inside: avoid;
-                break-inside: avoid;
             }
+            /* Inner container: full width, no extra margins */
             #print-invoice-view > div {
                 max-width: 100% !important;
                 width: 100% !important;
+            }
+            /* Items table: repeat thead on every page, no row splitting */
+            .invoice-items-table thead {
+                display: table-header-group;
+            }
+            .invoice-items-table tbody tr {
+                break-inside: avoid;
+                page-break-inside: avoid;
+            }
+            /* Footer (signatures + totals): stay together, never split */
+            .invoice-bottom {
+                break-inside: avoid;
+                page-break-inside: avoid;
             }
             .no-print {
                 display: none !important;
@@ -141,7 +154,7 @@
             </div>
 
             <!-- Items Table -->
-            <table style="width: 100%; border-collapse: collapse; margin-bottom: 0.5rem; font-size: 0.875rem; color: #000;">
+            <table class="invoice-items-table" style="width: 100%; border-collapse: collapse; margin-bottom: 0.5rem; font-size: 0.875rem; color: #000;">
                 <thead>
                     <tr>
                         <th style="border: 1px solid #000; padding: 0.5rem; text-align: center; width: 50px;">No.</th>
@@ -158,7 +171,7 @@
             </table>
 
             <!-- Footer area -->
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; color: #000;">
+            <div class="invoice-bottom" style="display: flex; justify-content: space-between; align-items: flex-start; color: #000;">
                 <!-- Signatures -->
                 <div style="display: flex; gap: 3rem; margin-top: 0.5rem; font-size: 0.875rem;">
                     <div style="text-align: center;">

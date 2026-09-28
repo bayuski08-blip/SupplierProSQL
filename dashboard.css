@@ -1959,20 +1959,21 @@ textarea.form-input {
   margin: 0.5cm;
 }
 
-/* Print Styles */
+/* Print Styles — applies when printing from dashboard.html directly (legacy fallback) */
+/* The standalone invoice-print.html has its own print rules that take precedence. */
 @media print {
-    html, body { 
-        width: 24.13cm; 
-        height: auto; 
-        margin: 0; 
-        padding: 0; 
+    html, body {
+        width: auto;
+        height: auto;
+        margin: 0;
+        padding: 0;
         overflow: visible;
     }
-    
+
     body > *:not(.dashboard-wrapper) {
         display: none !important;
     }
-    
+
     .sidebar, .topbar, .sidebar-overlay, .modal-overlay, .page-section, .page-toolbar {
         display: none !important;
     }
@@ -1983,32 +1984,21 @@ textarea.form-input {
         inset: auto;
         transform: none;
         box-sizing: border-box;
-        width: 24.13cm !important;
-        max-width: 24.13cm !important;
-        height: 13.9cm;
-        padding: 0.5cm;
-        margin: 0;
-        overflow: hidden;
-    }
-    
-    #print-invoice-view > div {
-        max-width: 100% !important;
         width: 100% !important;
-    }
-        page-break-after: avoid;
-        page-break-inside: avoid;
-        break-after: avoid;
-        break-inside: avoid;
+        max-width: 100% !important;
+        height: auto !important;
+        padding: 0 !important;
+        margin: 0;
+        overflow: visible !important;
         box-shadow: none;
         visibility: visible !important;
     }
-    
+
     #print-invoice-view * {
         visibility: visible;
     }
-    
+
     .no-print {
         display: none !important;
     }
 }
-

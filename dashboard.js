@@ -4310,10 +4310,10 @@ function downloadImportTemplate() {
     let filename = "";
 
     if (currentImportSection === 'produk') {
-        headers = ["SKU", "Nama Produk", "Kategori", "Harga Beli", "Harga Jual", "Stok", "Stok Minimum", "Satuan"];
+        headers = ["SKU", "Nama Produk", "Brand/Merk", "Kategori", "Harga Beli", "Harga Jual", "Stok", "Stok Minimum", "Satuan"];
         rows = [
-            ["MNM-001", "Kopi Arabica 250g", "Minuman", 45000, 68000, 100, 20, "pcs"],
-            ["MKN-001", "Mie Instan (dus)", "Makanan", 92000, 115000, 50, 10, "dus"]
+            ["MNM-001", "Kopi Arabica 250g", "", "Minuman", 45000, 68000, 100, 20, "pcs"],
+            ["MKN-001", "Mie Instan (dus)", "Indomie", "Makanan", 92000, 115000, 50, 10, "dus"]
         ];
         filename = "sample_produk.xlsx";
     } else if (currentImportSection === 'pelanggan') {
@@ -4435,8 +4435,9 @@ async function executeImport(rows) {
 
             try {
                 if (currentImportSection === 'produk') {
-                    const sku = row['SKU'] || '';
+                    const sku = row['SKU'] ? String(row['SKU']).trim() : '';
                     const name = row['Nama Produk'] || '';
+                    const brand = row['Brand/Merk'] !== undefined ? String(row['Brand/Merk']).trim() : '';
                     const catName = row['Kategori'] || '';
                     const cost = parseFloat(row['Harga Beli']) || 0;
                     const price = parseFloat(row['Harga Jual']) || 0;
@@ -4445,6 +4446,7 @@ async function executeImport(rows) {
                     const unitName = row['Satuan'] || '';
 
                     if (!name) throw new Error("Nama produk kosong");
+                    if (brand.length > 255) throw new Error("Brand/Merk maksimal 255 karakter");
 
                     // Dynamic Category Creation
                     let category_id = categoriesMap[catName.toLowerCase().trim()];
@@ -4476,16 +4478,22 @@ async function executeImport(rows) {
                         }
                     }
 
-                    const postRes = await fetch('/api/products', {
-                        method: 'POST',
+                    const existingProd = sku ? PRODUCTS.find(p => p.sku === sku) : null;
+                    const method = existingProd ? 'PUT' : 'POST';
+                    const endpoint = existingProd ? `/api/products/${existingProd.id}` : '/api/products';
+
+                    const payload = {
+                        sku, brand, name, category_id, cost_price: cost, sell_price: price, stock, min_stock: minStock, unit_id
+                    };
+
+                    const postRes = await fetch(endpoint, {
+                        method: method,
                         headers: getAuthHeaders(),
-                        body: JSON.stringify({
-                            sku, name, category_id, cost_price: cost, sell_price: price, stock, min_stock: minStock, unit_id
-                        })
+                        body: JSON.stringify(payload)
                     });
                     if (!postRes.ok) {
                         const err = await postRes.json();
-                        throw new Error(err.error || "Gagal menyimpan produk");
+                        throw new Error(err.error || (existingProd ? "Gagal memperbarui produk" : "Gagal menyimpan produk"));
                     }
 
                 } else if (currentImportSection === 'pelanggan') {
@@ -4689,10 +4697,11 @@ function exportSection(section) {
     let filename = "";
 
     if (section === 'produk') {
-        headers = ["SKU", "Nama Produk", "Kategori", "Harga Beli", "Harga Jual", "Stok", "Stok Minimum", "Satuan"];
+        headers = ["SKU", "Nama Produk", "Brand/Merk", "Kategori", "Harga Beli", "Harga Jual", "Stok", "Stok Minimum", "Satuan"];
         rows = PRODUCTS.map(p => [
             p.sku || '',
             p.name || '',
+            p.brand || '',
             p.category || '',
             p.cost || 0,
             p.price || 0,

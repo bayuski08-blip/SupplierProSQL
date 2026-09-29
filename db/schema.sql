@@ -62,6 +62,11 @@ CREATE TABLE IF NOT EXISTS customers (
   city VARCHAR(255),
   address TEXT,
   credit_lmt DECIMAL(20,4) DEFAULT 0,
+  ktp VARCHAR(50) DEFAULT NULL,
+  npwp VARCHAR(50) DEFAULT NULL,
+  nib VARCHAR(30) DEFAULT NULL,
+  email VARCHAR(255) DEFAULT NULL,
+  no_hp_2 VARCHAR(30) DEFAULT NULL,
   FOREIGN KEY (customer_category_id) REFERENCES customer_categories(id) ON DELETE SET NULL
 );
 
@@ -102,8 +107,8 @@ CREATE TABLE IF NOT EXISTS sales_invoices (
   total DECIMAL(20,4) DEFAULT 0,
   paid_amount DECIMAL(20,4) DEFAULT 0,
   due_date VARCHAR(255),
+  paid_date DATE DEFAULT NULL,
   payment_type_id VARCHAR(255),
-  payment_method VARCHAR(255),
   status VARCHAR(255) DEFAULT 'belum',
   user_id INT,
   FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
@@ -134,6 +139,7 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   total DECIMAL(20,4) DEFAULT 0,
   paid_amount DECIMAL(20,4) DEFAULT 0,
   due_date VARCHAR(255),
+  paid_date DATE DEFAULT NULL,
   payment_type_id VARCHAR(255),
   status VARCHAR(255) DEFAULT 'proses',
   user_id INT,
@@ -170,6 +176,11 @@ CREATE TABLE IF NOT EXISTS cash_transactions (
   FOREIGN KEY (payment_type_id) REFERENCES payment_types(id) ON DELETE SET NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
   CHECK (type IN ('IN', 'OUT'))
+);
+
+CREATE TABLE IF NOT EXISTS invoice_counters (
+  year INT NOT NULL PRIMARY KEY,
+  last_number INT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS settings (

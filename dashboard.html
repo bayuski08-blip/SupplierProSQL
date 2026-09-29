@@ -1094,6 +1094,41 @@
                             </div>
                         </div>
 
+                        <!-- Halaman Landing Demo -->
+                        <div class="settings-card" id="settings-card-landing-demo">
+                            <div class="settings-card-header">
+                                <i data-lucide="monitor"></i>
+                                <h3>Halaman Landing Demo</h3>
+                            </div>
+                            <div class="settings-card-body">
+                                <div class="form-group">
+                                    <label style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+                                        <div style="position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0;">
+                                            <input type="checkbox" id="settings-tampilkan-landing"
+                                                onchange="saveLandingDemoSetting(this.checked)"
+                                                style="opacity:0; width:0; height:0; position:absolute;">
+                                            <span id="landing-toggle-track" style="
+                                                position:absolute; inset:0; border-radius:9999px;
+                                                background:var(--gray-300); cursor:pointer;
+                                                transition:background 0.2s;
+                                            "></span>
+                                            <span id="landing-toggle-thumb" style="
+                                                position:absolute; top:3px; left:3px;
+                                                width:18px; height:18px; border-radius:50%;
+                                                background:white; cursor:pointer;
+                                                transition:transform 0.2s;
+                                                box-shadow:0 1px 3px rgba(0,0,0,0.3);
+                                            "></span>
+                                        </div>
+                                        <span style="font-weight:500; color:var(--gray-700);">Tampilkan halaman landing page demo</span>
+                                    </label>
+                                    <p class="help-text" style="font-size:0.82rem; color:var(--gray-500); margin-top:0.5rem;">
+                                        Jika dimatikan, pengunjung yang membuka alamat utama akan langsung diarahkan ke halaman login.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Tentang Aplikasi -->
                         <div class="settings-card">
                             <div class="settings-card-header">

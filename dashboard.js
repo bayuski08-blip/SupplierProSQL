@@ -2016,7 +2016,8 @@ async function init() {
         fetchCashTransactions(),
         fetchUsers(),
         loadPrefixSettings(),
-        loadInvoicePreferences()
+        loadInvoicePreferences(),
+        loadLandingDemoSetting()
     ]);
 
     // Re-render dashboard with real DB data
@@ -3948,6 +3949,66 @@ async function loadInvoicePreferences() {
         console.error('Failed to load invoice preferences', err);
     }
 }
+
+// --- Landing Demo Setting ---
+
+function syncLandingToggleUI(isOn) {
+    const track = document.getElementById('landing-toggle-track');
+    const thumb = document.getElementById('landing-toggle-thumb');
+    const checkbox = document.getElementById('settings-tampilkan-landing');
+    if (!track || !thumb || !checkbox) return;
+    checkbox.checked = isOn;
+    track.style.background = isOn ? 'var(--blue-500, #3b82f6)' : 'var(--gray-300)';
+    thumb.style.transform = isOn ? 'translateX(20px)' : 'translateX(0)';
+}
+
+async function loadLandingDemoSetting() {
+    // Card hanya ditampilkan untuk admin
+    const isAdmin = (localStorage.getItem('role') || '').toLowerCase() === 'admin';
+    const card = document.getElementById('settings-card-landing-demo');
+    if (card) card.style.display = isAdmin ? '' : 'none';
+    if (!isAdmin) return;
+
+    try {
+        const res = await fetch('/api/public/landing-status');
+        if (res.ok) {
+            const data = await res.json();
+            syncLandingToggleUI(data.tampilkan_landing_demo !== false);
+        }
+    } catch (err) {
+        console.error('Failed to load landing demo setting', err);
+    }
+}
+
+window.saveLandingDemoSetting = async function(value) {
+    syncLandingToggleUI(value);
+    try {
+        const res = await fetch('/api/pengaturan/landing-demo', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify({ tampilkan_landing_demo: Boolean(value) })
+        });
+        if (res.ok) {
+            showToast(
+                value
+                    ? 'Landing page demo diaktifkan.'
+                    : 'Landing page demo dinonaktifkan. Pengunjung akan diarahkan ke halaman login.',
+                'success'
+            );
+        } else {
+            const err = await res.json();
+            showToast('Gagal menyimpan: ' + (err.error || 'Terjadi kesalahan'), 'error');
+            // revert UI on failure
+            syncLandingToggleUI(!value);
+            const checkbox = document.getElementById('settings-tampilkan-landing');
+            if (checkbox) checkbox.checked = !value;
+        }
+    } catch (err) {
+        console.error(err);
+        showToast('Gagal menghubungi server', 'error');
+        syncLandingToggleUI(!value);
+    }
+};
 
 async function saveInvoicePreferences() {
     const payload = {

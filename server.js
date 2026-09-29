@@ -30,6 +30,27 @@ const formatDateStr = (val) => {
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// ─── Landing page gate — must be BEFORE express.static ────────────────────────
+// Intercepts requests to the root landing page (/ or /index.html) and
+// redirects to /login when the admin has disabled the landing demo page.
+app.use(async (req, res, next) => {
+  const isLandingRequest =
+    req.method === 'GET' &&
+    (req.path === '/' || req.path === '/index.html');
+  if (!isLandingRequest) return next();
+  try {
+    const val = await getSetting('tampilkan_landing_demo', 'true');
+    if (val === 'false') {
+      return res.redirect('/login');
+    }
+  } catch (_) {
+    // getSetting not yet defined at this position — pool may not be ready,
+    // default to allowing access (fail open)
+  }
+  return next();
+});
+
 app.use(express.static(__dirname)); // Serve static files from the current directory
 
 // ─── MySQL Connection Pool (with pg-compatible wrapper) ───────────────────────
@@ -622,6 +643,33 @@ app.delete('/api/master/:type/:id', authenticateToken, authorizeRoles('admin'), 
     } else {
       res.status(400).json({ error: err.message });
     }
+  }
+});
+
+// --- Public Landing Status (no JWT required) ---
+app.get('/api/public/landing-status', async (req, res) => {
+  try {
+    const val = await getSetting('tampilkan_landing_demo', 'true');
+    res.json({ tampilkan_landing_demo: val !== 'false' });
+  } catch (err) {
+    res.json({ tampilkan_landing_demo: true });
+  }
+});
+
+// --- Admin: update landing demo toggle ---
+app.put('/api/pengaturan/landing-demo', authenticateToken, authorizeRoles('admin'), async (req, res) => {
+  const { tampilkan_landing_demo } = req.body;
+  if (typeof tampilkan_landing_demo !== 'boolean') {
+    return res.status(400).json({ error: 'Parameter tampilkan_landing_demo harus boolean' });
+  }
+  try {
+    await pool.query(
+      'INSERT INTO settings (`key`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)',
+      ['tampilkan_landing_demo', tampilkan_landing_demo ? 'true' : 'false']
+    );
+    res.json({ success: true, tampilkan_landing_demo });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

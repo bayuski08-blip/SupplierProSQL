@@ -648,6 +648,8 @@
                                     <th>Dibayar</th>
                                     <th>Sisa</th>
                                     <th>Jatuh Tempo</th>
+                                    <th>Tgl Lunas</th>
+                                    <th>Tipe Pembayaran</th>
                                     <th>Status</th>
                                     <th>Aksi</th>
                                 </tr>
@@ -693,6 +695,8 @@
                                     <th>Dibayar</th>
                                     <th>Sisa</th>
                                     <th>Jatuh Tempo</th>
+                                    <th>Tgl Lunas</th>
+                                    <th>Tipe Pembayaran</th>
                                     <th>Status</th>
                                     <th>Aksi</th>
                                 </tr>
@@ -721,7 +725,7 @@
                             </div>
                         </div>
                         <div class="page-toolbar-right">
-                            <button class="btn-toolbar primary" onclick="openModal('modal-add-cash')">
+                            <button class="btn-toolbar primary" onclick="openAddCashModal()">
                                 <i data-lucide="plus"></i> Catat Transaksi
                             </button>
                         </div>
@@ -1612,6 +1616,30 @@
                         <input type="number" id="add-customer-limit" class="form-input" placeholder="5000000">
                     </div>
                 </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>No. HP Kedua <span style="color:var(--gray-400);font-size:0.75rem;">(opsional)</span></label>
+                        <input type="text" id="add-customer-no-hp-2" class="form-input" placeholder="08xx-xxxx-xxxx">
+                    </div>
+                    <div class="form-group">
+                        <label>Email <span style="color:var(--gray-400);font-size:0.75rem;">(opsional)</span></label>
+                        <input type="email" id="add-customer-email" class="form-input" placeholder="email@contoh.com">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>No. KTP <span style="color:var(--gray-400);font-size:0.75rem;">(16 digit, opsional)</span></label>
+                        <input type="text" id="add-customer-ktp" class="form-input" placeholder="16 digit NIK" maxlength="16" inputmode="numeric">
+                    </div>
+                    <div class="form-group">
+                        <label>NPWP <span style="color:var(--gray-400);font-size:0.75rem;">(opsional)</span></label>
+                        <input type="text" id="add-customer-npwp" class="form-input" placeholder="XX.XXX.XXX.X-XXX.XXX">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>NIB <span style="color:var(--gray-400);font-size:0.75rem;">(Nomor Induk Berusaha, opsional)</span></label>
+                    <input type="text" id="add-customer-nib" class="form-input" placeholder="13 digit NIB" maxlength="20" inputmode="numeric">
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn-toolbar secondary" onclick="closeModal('modal-add-customer')">Batal</button>
@@ -1667,6 +1695,30 @@
                         <input type="number" id="edit-customer-limit" class="form-input">
                     </div>
                 </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>No. HP Kedua <span style="color:var(--gray-400);font-size:0.75rem;">(opsional)</span></label>
+                        <input type="text" id="edit-customer-no-hp-2" class="form-input" placeholder="08xx-xxxx-xxxx">
+                    </div>
+                    <div class="form-group">
+                        <label>Email <span style="color:var(--gray-400);font-size:0.75rem;">(opsional)</span></label>
+                        <input type="email" id="edit-customer-email" class="form-input" placeholder="email@contoh.com">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>No. KTP <span style="color:var(--gray-400);font-size:0.75rem;">(16 digit, opsional)</span></label>
+                        <input type="text" id="edit-customer-ktp" class="form-input" placeholder="16 digit NIK" maxlength="16" inputmode="numeric">
+                    </div>
+                    <div class="form-group">
+                        <label>NPWP <span style="color:var(--gray-400);font-size:0.75rem;">(opsional)</span></label>
+                        <input type="text" id="edit-customer-npwp" class="form-input" placeholder="XX.XXX.XXX.X-XXX.XXX">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>NIB <span style="color:var(--gray-400);font-size:0.75rem;">(Nomor Induk Berusaha, opsional)</span></label>
+                    <input type="text" id="edit-customer-nib" class="form-input" placeholder="13 digit NIB" maxlength="20" inputmode="numeric">
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn-toolbar secondary" onclick="closeModal('modal-edit-customer')">Batal</button>
@@ -1713,6 +1765,31 @@
                         style="display: flex; justify-content: space-between; font-size: 0.875rem;">
                         <span class="entity-detail-label" style="color: var(--gray-500);">Telepon / WA</span>
                         <span class="entity-detail-value" id="detail-customer-phone"></span>
+                    </div>
+                    <div class="entity-detail"
+                        style="display: flex; justify-content: space-between; font-size: 0.875rem;">
+                        <span class="entity-detail-label" style="color: var(--gray-500);">No. HP Kedua</span>
+                        <span class="entity-detail-value" id="detail-customer-no-hp-2"></span>
+                    </div>
+                    <div class="entity-detail"
+                        style="display: flex; justify-content: space-between; font-size: 0.875rem;">
+                        <span class="entity-detail-label" style="color: var(--gray-500);">Email</span>
+                        <span class="entity-detail-value" id="detail-customer-email"></span>
+                    </div>
+                    <div class="entity-detail"
+                        style="display: flex; justify-content: space-between; font-size: 0.875rem;">
+                        <span class="entity-detail-label" style="color: var(--gray-500);">No. KTP</span>
+                        <span class="entity-detail-value" id="detail-customer-ktp"></span>
+                    </div>
+                    <div class="entity-detail"
+                        style="display: flex; justify-content: space-between; font-size: 0.875rem;">
+                        <span class="entity-detail-label" style="color: var(--gray-500);">NPWP</span>
+                        <span class="entity-detail-value" id="detail-customer-npwp"></span>
+                    </div>
+                    <div class="entity-detail"
+                        style="display: flex; justify-content: space-between; font-size: 0.875rem;">
+                        <span class="entity-detail-label" style="color: var(--gray-500);">NIB</span>
+                        <span class="entity-detail-value" id="detail-customer-nib"></span>
                     </div>
                     <div class="entity-detail"
                         style="display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.875rem;">

@@ -20,6 +20,13 @@ process.on('unhandledRejection', (reason) => {
 
 const SECRET_KEY = process.env.JWT_SECRET || 'supplierpro_secret_key_demo';
 
+const formatDateStr = (val) => {
+  if (!val) return '';
+  if (typeof val === 'string') return val.split('T')[0].split(' ')[0];
+  if (val.toISOString) return val.toISOString().split('T')[0];
+  return String(val).split('T')[0].split(' ')[0];
+};
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -994,12 +1001,17 @@ app.get('/api/customers/:id', authenticateToken, authorizeRoles('admin', 'kasir'
 });
 
 app.post('/api/customers', authenticateToken, authorizeRoles('admin', 'kasir'), async (req, res) => {
-  const { name, customer_category_id, phone, city, address, credit_lmt } = req.body;
-  const insertQuery = 'INSERT INTO customers (id, name, customer_category_id, phone, city, address, credit_lmt) VALUES ($1, $2, $3, $4, $5, $6, $7)';
+  const { name, customer_category_id, phone, city, address, credit_lmt, ktp, npwp, nib, email, no_hp_2 } = req.body;
+
+  // Validasi backend
+  if (ktp && !/^\d{16}$/.test(ktp)) return res.status(400).json({ error: 'Nomor KTP harus 16 digit angka' });
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Format email tidak valid' });
+
+  const insertQuery = 'INSERT INTO customers (id, name, customer_category_id, phone, city, address, credit_lmt, ktp, npwp, nib, email, no_hp_2) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)';
   try {
     const prefix = await getSetting('prefix_customer', 'C');
     const id = await generateNextId(pool, 'customers', prefix);
-    await pool.query(insertQuery, [id, name, customer_category_id, phone, city, address, credit_lmt]);
+    await pool.query(insertQuery, [id, name, customer_category_id, phone, city, address, credit_lmt, ktp || null, npwp || null, nib || null, email || null, no_hp_2 || null]);
     res.json({ success: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1008,10 +1020,15 @@ app.post('/api/customers', authenticateToken, authorizeRoles('admin', 'kasir'), 
 
 app.put('/api/customers/:id', authenticateToken, authorizeRoles('admin', 'kasir'), async (req, res) => {
   const { id } = req.params;
-  const { name, customer_category_id, phone, city, address, credit_lmt } = req.body;
-  const updateQuery = 'UPDATE customers SET name = $1, customer_category_id = $2, phone = $3, city = $4, address = $5, credit_lmt = $6 WHERE id = $7';
+  const { name, customer_category_id, phone, city, address, credit_lmt, ktp, npwp, nib, email, no_hp_2 } = req.body;
+
+  // Validasi backend
+  if (ktp && !/^\d{16}$/.test(ktp)) return res.status(400).json({ error: 'Nomor KTP harus 16 digit angka' });
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Format email tidak valid' });
+
+  const updateQuery = 'UPDATE customers SET name = $1, customer_category_id = $2, phone = $3, city = $4, address = $5, credit_lmt = $6, ktp = $7, npwp = $8, nib = $9, email = $10, no_hp_2 = $11 WHERE id = $12';
   try {
-    const result = await pool.query(updateQuery, [name, customer_category_id, phone, city, address, credit_lmt, id]);
+    const result = await pool.query(updateQuery, [name, customer_category_id, phone, city, address, credit_lmt, ktp || null, npwp || null, nib || null, email || null, no_hp_2 || null, id]);
     if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Pelanggan tidak ditemukan' });
     }
@@ -1072,16 +1089,16 @@ app.get('/api/invoices', authenticateToken, authorizeRoles('admin', 'kasir', 'fi
     `);
     res.json(result.rows.map(r => ({
       id: r.id,
-      date: r.date ? r.date.split('T')[0] : '',
+      date: formatDateStr(r.date),
       customerId: r.customer_id,
       customer: r.customer || 'Tanpa Pelanggan',
       total: parseFloat(r.total),
       paid: parseFloat(r.paid_amount),
+      paidDate: formatDateStr(r.paid_date) || null,
       type: r.payment_type_name || 'Tunai',
       paymentTypeId: r.payment_type_id,
-      method: r.payment_method || '-',
       status: r.status,
-      dueDate: r.due_date ? r.due_date.split('T')[0] : ''
+      dueDate: formatDateStr(r.due_date)
     })));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1300,16 +1317,14 @@ app.post('/api/invoices', authenticateToken, authorizeRoles('admin', 'kasir'), a
 // --- Finance Routes ---
 
 app.post('/api/invoices/manual', authenticateToken, authorizeRoles('admin', 'kasir', 'finance'), async (req, res) => {
-  const { id, date, due_date, customer_id, total, payment_type_id, payment_method } = req.body;
+  const { id, date, due_date, customer_id, total, payment_type_id } = req.body;
   const userId = req.user.id;
 
-
-
   const status = 'Belum Bayar';
-  const insertQuery = 'INSERT INTO sales_invoices (id, date, customer_id, subtotal, total, paid_amount, payment_type_id, payment_method, due_date, status, user_id) VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, $9, $10)';
+  const insertQuery = 'INSERT INTO sales_invoices (id, date, customer_id, subtotal, total, paid_amount, payment_type_id, due_date, status, user_id) VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, $9)';
 
   try {
-    await pool.query(insertQuery, [id, date, customer_id, total, total, payment_type_id, payment_method, due_date, status, userId]);
+    await pool.query(insertQuery, [id, date, customer_id, total, total, payment_type_id, due_date, status, userId]);
     res.json({ success: true, invoiceId: id });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1337,11 +1352,16 @@ app.post('/api/finance/receivables/:id/pay', authenticateToken, authorizeRoles('
     const total = parseFloat(invoice.total);
     const newPaid = currentPaid + parseFloat(amount);
     const newStatus = newPaid >= total ? 'Lunas' : 'Sebagian';
+    const paidDate = newStatus === 'Lunas' ? new Date().toISOString().split('T')[0] : null;
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query('UPDATE sales_invoices SET paid_amount = $1, status = $2 WHERE id = $3', [newPaid, newStatus, id]);
+      if (paidDate) {
+        await client.query('UPDATE sales_invoices SET paid_amount = $1, status = $2, paid_date = $3 WHERE id = $4', [newPaid, newStatus, paidDate, id]);
+      } else {
+        await client.query('UPDATE sales_invoices SET paid_amount = $1, status = $2 WHERE id = $3', [newPaid, newStatus, id]);
+      }
 
       // Log cash transaction IN
       const ctPrefix = await getSetting('prefix_cash_transaction', 'CT');
@@ -1381,6 +1401,19 @@ pool.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS status VARCHA
     await pool.query(`ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS cost_price_snapshot DECIMAL(20,4) DEFAULT 0`);
     console.log('[Migration] purchase_orders: subtotal, discount, tax columns ensured');
     console.log('[Migration] invoice_items: cost_price_snapshot column ensured');
+
+    // Add paid_date to invoices and purchases
+    await pool.query(`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS paid_date DATE DEFAULT NULL`);
+    await pool.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS paid_date DATE DEFAULT NULL`);
+    console.log('[Migration] sales_invoices & purchase_orders: paid_date column ensured');
+
+    // Auto-migrasi field baru tabel customers
+    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS ktp VARCHAR(50) NULL`);
+    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS npwp VARCHAR(50) NULL`);
+    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS nib VARCHAR(30) NULL`);
+    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS email VARCHAR(255) NULL`);
+    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS no_hp_2 VARCHAR(30) NULL`);
+    console.log('[Migration] customers: ktp, npwp, nib, email, no_hp_2 columns ensured');
   } catch (err) {
     console.error('[Migration] Failed to execute migrations:', err.message);
   }
@@ -1391,7 +1424,7 @@ app.get('/api/finance/cash-flow', authenticateToken, authorizeRoles('admin', 'fi
     const result = await pool.query('SELECT * FROM cash_transactions ORDER BY date DESC, id DESC');
     res.json(result.rows.map(r => ({
       id: r.id,
-      date: r.date ? r.date.toISOString ? r.date.toISOString().split('T')[0] : String(r.date).split('T')[0] : '',
+      date: formatDateStr(r.date),
       type: r.type,
       category: r.category,
       desc: r.description,
@@ -1962,8 +1995,13 @@ app.post('/api/finance/payables/:id/pay', authenticateToken, authorizeRoles('adm
     const total = parseFloat(po.total || 0);
     const newPaid = currentPaid + payAmount;
     const newStatus = newPaid >= total ? 'Selesai' : 'Dalam Proses';
+    const paidDate = newStatus === 'Selesai' ? new Date().toISOString().split('T')[0] : null;
 
-    await client.query('UPDATE purchase_orders SET paid_amount = $1, status = $2 WHERE id = $3', [newPaid, newStatus, id]);
+    if (paidDate) {
+      await client.query('UPDATE purchase_orders SET paid_amount = $1, status = $2, paid_date = $3 WHERE id = $4', [newPaid, newStatus, paidDate, id]);
+    } else {
+      await client.query('UPDATE purchase_orders SET paid_amount = $1, status = $2 WHERE id = $3', [newPaid, newStatus, id]);
+    }
 
     // Log cash transaction OUT
     const ctPrefix = await getSetting('prefix_cash_transaction', 'CT');
@@ -2038,15 +2076,16 @@ app.get('/api/purchases', authenticateToken, authorizeRoles('admin', 'gudang', '
     `);
     res.json(result.rows.map(row => ({
       id: row.id,
-      date: row.date,
+      date: formatDateStr(row.date),
       vendorId: row.vendor_id,
       vendor: row.vendor_name || 'Tanpa Vendor',
       total: parseFloat(row.total),
       paid: parseFloat(row.paid_amount),
+      paidDate: formatDateStr(row.paid_date) || null,
       type: row.payment_type || 'Tunai',
       status: row.status,
       paymentTypeId: row.payment_type_id,
-      dueDate: row.due_date ? row.due_date.split('T')[0] : ''
+      dueDate: formatDateStr(row.due_date)
     })));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2375,7 +2414,7 @@ app.get('/api/finance/cashflow', authenticateToken, authorizeRoles('admin', 'fin
     const result = await pool.query('SELECT * FROM cash_transactions ORDER BY date DESC, id DESC');
     res.json(result.rows.map(r => ({
       id: r.id,
-      date: r.date ? new Date(r.date).toISOString().split('T')[0] : '',
+      date: formatDateStr(r.date),
       type: r.type,
       category: r.category,
       desc: r.description,
@@ -2693,7 +2732,7 @@ app.get('/api/reports/customer-fee', authenticateToken, authorizeRoles('admin'),
         })),
         detail: resDetail.rows.map(r => ({
           invoice_id: r.invoice_id,
-          date: r.date ? String(r.date).split('T')[0] : '',
+          date: formatDateStr(r.date),
           customer_name: r.customer_name,
           product_name: r.product_name,
           quantity: parseFloat(r.quantity || 0),
@@ -2761,7 +2800,7 @@ async function runDailyReconciliation() {
         const d = String(rawEndDate.getDate()).padStart(2, '0');
         endDate = `${y}-${m}-${d}`;
       } else {
-        endDate = rawEndDate ? String(rawEndDate).split('T')[0] : '';
+        endDate = formatDateStr(rawEndDate);
       }
 
       logEntries.push(`Reconciling Periode: ${startDate} -> ${endDate}`);

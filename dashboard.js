@@ -1007,7 +1007,9 @@ function renderPiutang(filter = '') {
                 <td style="font-weight:700;">${rp(inv.total)}</td>
                 <td>${rp(inv.paid)}</td>
                 <td style="font-weight:700; color: ${sisa > 0 ? 'var(--rose-500)' : 'var(--emerald-500)'}">${rp(sisa)}</td>
-                <td>${inv.dueDate}</td>
+                <td>${inv.dueDate || '-'}</td>
+                <td>${inv.status.toLowerCase().includes('belum') ? '-' : (inv.paidDate || '-')}</td>
+                <td>${inv.status.toLowerCase().includes('belum') ? '-' : (inv.type || '-')}</td>
                 <td><span class="badge-status ${inv.status.toLowerCase().includes('belum') ? 'belum' : inv.status.toLowerCase().replace(/\s+/g, '-')}">${capitalize(inv.status)}</span></td>
                 <td>${inv.status.toLowerCase() !== 'lunas' ? `<button class="btn-toolbar primary" style="padding:0.3rem 0.65rem; font-size:0.75rem;" onclick="openPiutangPaymentModal('${inv.id}', ${sisa})">Input Bayar</button>` : '—'}</td>
             </tr>
@@ -1069,7 +1071,9 @@ function renderHutang(filter = '') {
                 <td style="font-weight:700;">${rp(p.total)}</td>
                 <td>${rp(p.paid)}</td>
                 <td style="font-weight:700; color: ${sisa > 0 ? 'var(--rose-500)' : 'var(--emerald-500)'}">${rp(sisa)}</td>
-                <td>${p.date}</td>
+                <td>${p.dueDate || p.date || '-'}</td>
+                <td>${sisa > 0 && parseFloat(p.paid) === 0 ? '-' : (p.paidDate || '-')}</td>
+                <td>${sisa > 0 && parseFloat(p.paid) === 0 ? '-' : (p.type || '-')}</td>
                 <td><span class="badge-status ${st}">${sisa > 0 ? 'Belum Lunas' : 'Lunas'}</span></td>
                 <td>${sisa > 0 ? `<button class="btn-toolbar primary" style="padding:0.3rem 0.65rem; font-size:0.75rem;" onclick="openHutangPaymentModal('${p.id}', ${sisa})">Bayar</button>` : '—'}</td>
             </tr>
@@ -2274,13 +2278,37 @@ async function saveCustomer(isEdit) {
     const id = isEdit ? document.getElementById('edit-customer-id').value : null;
     const prefix = isEdit ? 'edit' : 'add';
 
+    // Ambil nilai semua field
+    const name = document.getElementById(`${prefix}-customer-name`).value.trim();
+    const ktp = document.getElementById(`${prefix}-customer-ktp`)?.value.trim() || '';
+    const email = document.getElementById(`${prefix}-customer-email`)?.value.trim() || '';
+
+    // Validasi frontend
+    if (!name) {
+        showToast('Nama pelanggan wajib diisi!', 'warning');
+        return;
+    }
+    if (ktp && !/^\d{16}$/.test(ktp)) {
+        showToast('Nomor KTP harus 16 digit angka!', 'warning');
+        return;
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        showToast('Format email tidak valid!', 'warning');
+        return;
+    }
+
     const payload = {
-        name: document.getElementById(`${prefix}-customer-name`).value,
+        name,
         customer_category_id: document.getElementById(`${prefix}-customer-type`).value,
         city: document.getElementById(`${prefix}-customer-city`).value,
         address: document.getElementById(`${prefix}-customer-address`)?.value || '',
         phone: document.getElementById(`${prefix}-customer-phone`).value,
-        credit_lmt: document.getElementById(`${prefix}-customer-limit`).value
+        credit_lmt: document.getElementById(`${prefix}-customer-limit`).value,
+        ktp: ktp || null,
+        npwp: document.getElementById(`${prefix}-customer-npwp`)?.value.trim() || null,
+        nib: document.getElementById(`${prefix}-customer-nib`)?.value.trim() || null,
+        email: email || null,
+        no_hp_2: document.getElementById(`${prefix}-customer-no-hp-2`)?.value.trim() || null
     };
 
     const url = isEdit ? `/api/customers/${id}` : '/api/customers';
@@ -2307,7 +2335,7 @@ async function saveCustomer(isEdit) {
 }
 
 function openAddCustomerModal() {
-    const fields = ['name', 'city', 'phone', 'limit'];
+    const fields = ['name', 'city', 'phone', 'limit', 'no-hp-2', 'email', 'ktp', 'npwp', 'nib'];
     fields.forEach(f => {
         const el = document.getElementById(`add-customer-${f}`);
         if (el) el.value = '';
@@ -2331,6 +2359,17 @@ function openEditCustomerModal(id) {
     if (addrEl) addrEl.value = c.address || '';
     document.getElementById('edit-customer-phone').value = c.phone || '';
     document.getElementById('edit-customer-limit').value = c.creditLimit;
+    // Field baru
+    const noHp2El = document.getElementById('edit-customer-no-hp-2');
+    if (noHp2El) noHp2El.value = c.no_hp_2 || '';
+    const emailEl = document.getElementById('edit-customer-email');
+    if (emailEl) emailEl.value = c.email || '';
+    const ktpEl = document.getElementById('edit-customer-ktp');
+    if (ktpEl) ktpEl.value = c.ktp || '';
+    const npwpEl = document.getElementById('edit-customer-npwp');
+    if (npwpEl) npwpEl.value = c.npwp || '';
+    const nibEl = document.getElementById('edit-customer-nib');
+    if (nibEl) nibEl.value = c.nib || '';
     openModal('modal-edit-customer');
 }
 
@@ -2355,6 +2394,18 @@ function openCustomerDetail(id) {
     document.getElementById('detail-customer-city').textContent = c.city || '-';
     document.getElementById('detail-customer-phone').textContent = c.phone || '-';
     document.getElementById('detail-customer-address').textContent = c.address || 'Tidak ada alamat lengkap';
+
+    // Field baru
+    const noHp2El = document.getElementById('detail-customer-no-hp-2');
+    if (noHp2El) noHp2El.textContent = c.no_hp_2 || '-';
+    const emailEl = document.getElementById('detail-customer-email');
+    if (emailEl) emailEl.textContent = c.email || '-';
+    const ktpEl = document.getElementById('detail-customer-ktp');
+    if (ktpEl) ktpEl.textContent = c.ktp || '-';
+    const npwpEl = document.getElementById('detail-customer-npwp');
+    if (npwpEl) npwpEl.textContent = c.npwp || '-';
+    const nibEl = document.getElementById('detail-customer-nib');
+    if (nibEl) nibEl.textContent = c.nib || '-';
 
     const sisa = c.sisaLimitPiutang ?? c.remainingLimit;
     const totalSpent = c.totalBelanja ?? c.totalSpent;
@@ -2551,10 +2602,15 @@ async function fetchPurchases() {
     try {
         const res = await fetch(`/api/purchases?_t=${Date.now()}`, { headers: getAuthHeaders() });
         const data = await res.json();
+        if (!res.ok || data.error) {
+            showToast('Gagal memuat data purchase, coba lagi.', 'error');
+            return;
+        }
         PURCHASES = data;
         renderPurchases();
     } catch (err) {
         console.error('Failed to fetch purchases', err);
+        showToast('Gagal memuat data purchase, coba lagi.', 'error');
     }
 }
 
@@ -2905,6 +2961,10 @@ async function fetchInvoices() {
         // FIX: correct endpoint is /api/invoices not /api/sales; cache buster prevents stale data after checkout
         const res = await fetch(`/api/invoices?_t=${Date.now()}`, { headers: getAuthHeaders() });
         const data = await res.json();
+        if (!res.ok || data.error) {
+            showToast('Gagal memuat data invoice, coba lagi.', 'error');
+            return;
+        }
         INVOICES = data;
         renderInvoices();
         renderPiutang();
@@ -2913,6 +2973,7 @@ async function fetchInvoices() {
         refreshCharts();
     } catch (err) {
         console.error('Failed to fetch invoices', err);
+        showToast('Gagal memuat data invoice, coba lagi.', 'error');
     }
 }
 
@@ -3229,6 +3290,24 @@ async function fetchCashTransactions() {
     }
 }
 
+function openAddCashModal() {
+    // Reset semua field ke kosong/default
+    const today = new Date().toISOString().split('T')[0];
+    const typeEl = document.getElementById('add-cash-type');
+    if (typeEl) typeEl.value = 'IN';
+    const dateEl = document.getElementById('add-cash-date');
+    if (dateEl) dateEl.value = today;
+    const descEl = document.getElementById('add-cash-desc');
+    if (descEl) descEl.value = '';
+    const amountEl = document.getElementById('add-cash-amount');
+    if (amountEl) amountEl.value = '';
+    const methodEl = document.getElementById('add-cash-method');
+    if (methodEl) methodEl.selectedIndex = 0;
+    const catEl = document.getElementById('add-cash-category');
+    if (catEl) catEl.selectedIndex = 0;
+    openModal('modal-add-cash');
+}
+
 async function saveCashTransaction() {
     const type = document.getElementById('add-cash-type').value;
     const category = document.getElementById('add-cash-category').value;
@@ -3369,6 +3448,7 @@ async function submitPayment() {
         ? `/api/finance/receivables/${encodeURIComponent(id)}/pay`
         : `/api/finance/payables/${encodeURIComponent(id)}/pay`;
 
+    let paymentSuccess = false;
     try {
         const res = await fetch(url, {
             method: 'POST',
@@ -3376,17 +3456,9 @@ async function submitPayment() {
             body: JSON.stringify({ amount: parseFloat(amount), payment_type_id: method })
         });
         if (res.ok) {
+            paymentSuccess = true;
             closeModal('modal-payment');
             showToast('Pembayaran berhasil dicatat!', 'success');
-            if (isReceivable) {
-                await fetchInvoices();
-                renderPiutang();
-            } else {
-                await fetchPurchases();
-                renderHutang();
-            }
-            await fetchCashTransactions();
-            await fetchVendors();
         } else {
             let errMsg = 'Gagal memproses pembayaran';
             try {
@@ -3401,7 +3473,25 @@ async function submitPayment() {
         }
     } catch (err) {
         console.error(err);
-        showToast('Gagal menghubungi server', 'error');
+        showToast('Gagal mengirim data pembayaran ke server', 'error');
+        return;
+    }
+
+    if (paymentSuccess) {
+        try {
+            if (isReceivable) {
+                await fetchInvoices();
+                renderPiutang();
+            } else {
+                await fetchPurchases();
+                renderHutang();
+            }
+            await fetchCashTransactions();
+            await fetchVendors();
+        } catch (err) {
+            console.error('Refresh data error', err);
+            showToast('Pembayaran sukses, tapi gagal me-refresh tampilan tabel', 'warning');
+        }
     }
 }
 
@@ -3975,8 +4065,7 @@ async function saveManualInvoice() {
         date: document.getElementById('manual-invoice-date').value,
         due_date: document.getElementById('manual-invoice-duedate').value,
         total: parseFloat(document.getElementById('manual-invoice-total').value) || 0,
-        payment_type_id: document.getElementById('manual-invoice-payment-type').value,
-        payment_method: null
+        payment_type_id: document.getElementById('manual-invoice-payment-type').value
     };
 
     if (!payload.id || !payload.customer_id || !payload.total) {

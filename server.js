@@ -23,6 +23,14 @@ const SECRET_KEY = process.env.JWT_SECRET || 'supplierpro_secret_key_demo';
 const formatDateStr = (val) => {
   if (!val) return '';
   if (typeof val === 'string') return val.split('T')[0].split(' ')[0];
+  // Date objects from mysql2 DATE columns: use local date components (NOT toISOString which is UTC
+  // and can shift to previous day for UTC+ timezones, e.g. 2026-06-12 00:00 WIB → 2026-06-11T17:00Z)
+  if (val instanceof Date) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
   if (val.toISOString) return val.toISOString().split('T')[0];
   return String(val).split('T')[0].split(' ')[0];
 };
@@ -1223,8 +1231,8 @@ app.get('/api/invoices/:id/print-data', authenticateToken, async (req, res) => {
     res.json({
       invoice: {
         id: invoiceRow.id,
-        date: invoiceRow.date ? String(invoiceRow.date).split('T')[0] : '',
-        due_date: invoiceRow.due_date ? String(invoiceRow.due_date).split('T')[0] : '',
+        date: formatDateStr(invoiceRow.date),
+        due_date: formatDateStr(invoiceRow.due_date),
         total: recalculatedTotal,
         subtotal: subtotal,
         tax: recalculatedTax,
@@ -1301,7 +1309,7 @@ app.post('/api/invoices', authenticateToken, authorizeRoles('admin', 'kasir'), a
     const taxAmount = ppnEnabled ? Math.round((subtotal - diskon) * (pajakDefault / 100)) : 0;
     const finalTotal = subtotal - diskon + taxAmount;
 
-    const date = req.body.date ? new Date(req.body.date).toISOString() : new Date().toISOString();
+    const date = req.body.date ? req.body.date.split('T')[0] : new Date().toISOString().split('T')[0];
 
     // Determine status based on payment type:
     // Tunai / Transfer = instant settlement (Lunas), Kredit X Hari = Belum Bayar

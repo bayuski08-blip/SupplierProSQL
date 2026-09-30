@@ -99,14 +99,14 @@ CREATE TABLE IF NOT EXISTS stock_adjustments (
 
 CREATE TABLE IF NOT EXISTS sales_invoices (
   id VARCHAR(255) PRIMARY KEY,
-  date VARCHAR(255),
+  date DATE,
   customer_id VARCHAR(255),
   subtotal DECIMAL(20,4) DEFAULT 0,
   discount DECIMAL(20,4) DEFAULT 0,
   tax DECIMAL(20,4) DEFAULT 0,
   total DECIMAL(20,4) DEFAULT 0,
   paid_amount DECIMAL(20,4) DEFAULT 0,
-  due_date VARCHAR(255),
+  due_date DATE DEFAULT NULL,
   paid_date DATE DEFAULT NULL,
   payment_type_id VARCHAR(255),
   status VARCHAR(255) DEFAULT 'belum',
@@ -131,14 +131,14 @@ CREATE TABLE IF NOT EXISTS invoice_items (
 
 CREATE TABLE IF NOT EXISTS purchase_orders (
   id VARCHAR(255) PRIMARY KEY,
-  date VARCHAR(255),
+  date DATE,
   vendor_id VARCHAR(255),
   subtotal DECIMAL(20,4) DEFAULT 0,
   discount DECIMAL(20,4) DEFAULT 0,
   tax DECIMAL(20,4) DEFAULT 0,
   total DECIMAL(20,4) DEFAULT 0,
   paid_amount DECIMAL(20,4) DEFAULT 0,
-  due_date VARCHAR(255),
+  due_date DATE DEFAULT NULL,
   paid_date DATE DEFAULT NULL,
   payment_type_id VARCHAR(255),
   status VARCHAR(255) DEFAULT 'proses',

@@ -2252,6 +2252,7 @@ async function fetchCustomers() {
         const res = await fetch('/api/customers', { headers: getAuthHeaders() });
         const data = await res.json();
         CUSTOMERS = data.map(c => ({
+            ...c,
             id: c.id,
             name: c.name,
             type: c.category_name || c.customer_category_id || c.type || '',
@@ -2307,6 +2308,8 @@ async function saveCustomer(isEdit) {
         credit_lmt: document.getElementById(`${prefix}-customer-limit`).value,
         ktp: ktp || null,
         npwp: document.getElementById(`${prefix}-customer-npwp`)?.value.trim() || null,
+        npwp_name: document.getElementById(`${prefix}-customer-npwp-name`)?.value.trim() || null,
+        npwp_address: document.getElementById(`${prefix}-customer-npwp-address`)?.value.trim() || null,
         nib: document.getElementById(`${prefix}-customer-nib`)?.value.trim() || null,
         email: email || null,
         no_hp_2: document.getElementById(`${prefix}-customer-no-hp-2`)?.value.trim() || null
@@ -2336,7 +2339,7 @@ async function saveCustomer(isEdit) {
 }
 
 function openAddCustomerModal() {
-    const fields = ['name', 'city', 'phone', 'limit', 'no-hp-2', 'email', 'ktp', 'npwp', 'nib'];
+    const fields = ['name', 'city', 'phone', 'limit', 'no-hp-2', 'email', 'ktp', 'npwp', 'npwp-name', 'npwp-address', 'nib'];
     fields.forEach(f => {
         const el = document.getElementById(`add-customer-${f}`);
         if (el) el.value = '';
@@ -2369,6 +2372,10 @@ function openEditCustomerModal(id) {
     if (ktpEl) ktpEl.value = c.ktp || '';
     const npwpEl = document.getElementById('edit-customer-npwp');
     if (npwpEl) npwpEl.value = c.npwp || '';
+    const npwpNameEl = document.getElementById('edit-customer-npwp-name');
+    if (npwpNameEl) npwpNameEl.value = c.npwp_name || '';
+    const npwpAddressEl = document.getElementById('edit-customer-npwp-address');
+    if (npwpAddressEl) npwpAddressEl.value = c.npwp_address || '';
     const nibEl = document.getElementById('edit-customer-nib');
     if (nibEl) nibEl.value = c.nib || '';
     openModal('modal-edit-customer');
@@ -2405,6 +2412,10 @@ function openCustomerDetail(id) {
     if (ktpEl) ktpEl.textContent = c.ktp || '-';
     const npwpEl = document.getElementById('detail-customer-npwp');
     if (npwpEl) npwpEl.textContent = c.npwp || '-';
+    const npwpNameEl = document.getElementById('detail-customer-npwp-name');
+    if (npwpNameEl) npwpNameEl.textContent = c.npwp_name || '-';
+    const npwpAddressEl = document.getElementById('detail-customer-npwp-address');
+    if (npwpAddressEl) npwpAddressEl.textContent = c.npwp_address || '-';
     const nibEl = document.getElementById('detail-customer-nib');
     if (nibEl) nibEl.textContent = c.nib || '-';
 

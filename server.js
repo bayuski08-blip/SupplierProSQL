@@ -1057,17 +1057,17 @@ app.get('/api/customers/:id', authenticateToken, authorizeRoles('admin', 'kasir'
 });
 
 app.post('/api/customers', authenticateToken, authorizeRoles('admin', 'kasir'), async (req, res) => {
-  const { name, customer_category_id, phone, city, address, credit_lmt, ktp, npwp, nib, email, no_hp_2 } = req.body;
+  const { name, customer_category_id, phone, city, address, credit_lmt, ktp, npwp, npwp_name, npwp_address, nib, email, no_hp_2 } = req.body;
 
   // Validasi backend
   if (ktp && !/^\d{16}$/.test(ktp)) return res.status(400).json({ error: 'Nomor KTP harus 16 digit angka' });
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Format email tidak valid' });
 
-  const insertQuery = 'INSERT INTO customers (id, name, customer_category_id, phone, city, address, credit_lmt, ktp, npwp, nib, email, no_hp_2) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)';
+  const insertQuery = 'INSERT INTO customers (id, name, customer_category_id, phone, city, address, credit_lmt, ktp, npwp, npwp_name, npwp_address, nib, email, no_hp_2) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)';
   try {
     const prefix = await getSetting('prefix_customer', 'C');
     const id = await generateNextId(pool, 'customers', prefix);
-    await pool.query(insertQuery, [id, name, customer_category_id, phone, city, address, credit_lmt, ktp || null, npwp || null, nib || null, email || null, no_hp_2 || null]);
+    await pool.query(insertQuery, [id, name, customer_category_id, phone, city, address, credit_lmt, ktp || null, npwp || null, npwp_name || null, npwp_address || null, nib || null, email || null, no_hp_2 || null]);
     res.json({ success: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1076,15 +1076,15 @@ app.post('/api/customers', authenticateToken, authorizeRoles('admin', 'kasir'), 
 
 app.put('/api/customers/:id', authenticateToken, authorizeRoles('admin', 'kasir'), async (req, res) => {
   const { id } = req.params;
-  const { name, customer_category_id, phone, city, address, credit_lmt, ktp, npwp, nib, email, no_hp_2 } = req.body;
+  const { name, customer_category_id, phone, city, address, credit_lmt, ktp, npwp, npwp_name, npwp_address, nib, email, no_hp_2 } = req.body;
 
   // Validasi backend
   if (ktp && !/^\d{16}$/.test(ktp)) return res.status(400).json({ error: 'Nomor KTP harus 16 digit angka' });
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Format email tidak valid' });
 
-  const updateQuery = 'UPDATE customers SET name = $1, customer_category_id = $2, phone = $3, city = $4, address = $5, credit_lmt = $6, ktp = $7, npwp = $8, nib = $9, email = $10, no_hp_2 = $11 WHERE id = $12';
+  const updateQuery = 'UPDATE customers SET name = $1, customer_category_id = $2, phone = $3, city = $4, address = $5, credit_lmt = $6, ktp = $7, npwp = $8, npwp_name = $9, npwp_address = $10, nib = $11, email = $12, no_hp_2 = $13 WHERE id = $14';
   try {
-    const result = await pool.query(updateQuery, [name, customer_category_id, phone, city, address, credit_lmt, ktp || null, npwp || null, nib || null, email || null, no_hp_2 || null, id]);
+    const result = await pool.query(updateQuery, [name, customer_category_id, phone, city, address, credit_lmt, ktp || null, npwp || null, npwp_name || null, npwp_address || null, nib || null, email || null, no_hp_2 || null, id]);
     if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Pelanggan tidak ditemukan' });
     }
@@ -1466,10 +1466,12 @@ pool.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS status VARCHA
     // Auto-migrasi field baru tabel customers
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS ktp VARCHAR(50) NULL`);
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS npwp VARCHAR(50) NULL`);
+    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS npwp_name VARCHAR(255) NULL`);
+    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS npwp_address TEXT NULL`);
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS nib VARCHAR(30) NULL`);
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS email VARCHAR(255) NULL`);
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS no_hp_2 VARCHAR(30) NULL`);
-    console.log('[Migration] customers: ktp, npwp, nib, email, no_hp_2 columns ensured');
+    console.log('[Migration] customers: ktp, npwp, npwp_name, npwp_address, nib, email, no_hp_2 columns ensured');
   } catch (err) {
     console.error('[Migration] Failed to execute migrations:', err.message);
   }

@@ -1,5 +1,5 @@
 // ==========================================================================
-// SupplierPro Dashboard — JavaScript
+// SupplierPro Dashboard â€” JavaScript
 // ==========================================================================
 
 // Auth check
@@ -20,7 +20,7 @@ function showToast(message, type = 'success') {
     }
     const toast = document.createElement('div');
     const colors = { success: '#10b981', error: '#ef4444', warning: '#f59e0b', info: '#3b82f6' };
-    const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
+    const icons = { success: 'âœ“', error: 'âœ•', warning: 'âš ', info: 'â„¹' };
     toast.style.cssText = `background:${colors[type] || colors.success};color:white;padding:0.75rem 1.25rem;border-radius:0.75rem;font-size:0.875rem;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,0.15);display:flex;align-items:center;gap:0.5rem;min-width:200px;max-width:360px;transform:translateX(120%);transition:transform 0.3s ease;`;
     toast.innerHTML = `<span style="font-size:1rem;">${icons[type]}</span><span>${message}</span>`;
     container.appendChild(toast);
@@ -87,6 +87,9 @@ let INVOICES = [];
 let PURCHASES = [];
 let CASH_TRANSACTIONS = [];
 let USERS = [];
+let PRICELISTS = [];
+// POS effective prices cache
+let currentPOSCustomerEffectivePrices = {};
 
 // Sales data for chart (dynamic)
 let SALES_CHART_DATA = [];
@@ -96,7 +99,7 @@ let DONUT_DATA = [];
 
 // Page title mapping
 const PAGE_TITLES = {
-    dashboard: { title: 'Dashboard', subtitle: 'Selamat pagi, Ahmad 👋' },
+    dashboard: { title: 'Dashboard', subtitle: 'Selamat pagi, Ahmad ðŸ‘‹' },
     pos: { title: 'Order / Kasir', subtitle: 'Buat transaksi penjualan baru' },
     products: { title: 'Produk & Stok', subtitle: 'Kelola inventaris produk Anda' },
     customers: { title: 'Pelanggan', subtitle: 'Daftar pelanggan dan reseller' },
@@ -112,11 +115,12 @@ const PAGE_TITLES = {
     settings: { title: 'Pengaturan', subtitle: 'Konfigurasi profil dan preferensi' },
     roles: { title: 'Otoritas Akses', subtitle: 'Kelola hak akses dan peran staff' },
     'master-data': { title: 'Master Data', subtitle: 'Kelola kategori, satuan, dan tipe pembayaran' },
+    pricelists: { title: 'Daftar Harga Khusus', subtitle: 'Kelola pricelist harga bertingkat untuk pelanggan' },
 };
 
 // ---------- Role Based Access Control (RBAC) ----------
 const ROLE_PERMISSIONS = {
-    admin: ['dashboard', 'pos', 'products', 'customers', 'vendors', 'purchases', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'reports', 'settings', 'roles', 'master-data', 'customerfee'],
+    admin: ['dashboard', 'pos', 'products', 'customers', 'vendors', 'purchases', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'reports', 'settings', 'roles', 'master-data', 'customerfee', 'pricelists'],
     finance: ['dashboard', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'reports'],
     gudang: ['dashboard', 'products', 'purchases', 'vendors'],
     kasir: ['dashboard', 'pos', 'customers', 'invoices', 'piutang']
@@ -187,6 +191,9 @@ function navigateTo(page) {
 
     if (page === 'settings') {
         loadCompanyProfile();
+    }
+    if (page === 'pricelists') {
+        fetchPricelists();
     }
 
     // Close mobile sidebar
@@ -370,7 +377,7 @@ async function checkReconciliationStatus() {
             const alertText = document.getElementById('reconciliation-alert-text');
             if (data.success && data.status && !data.status.balanced) {
                 alertText.innerHTML = `Ditemukan ketidaksesuaian data keuangan pada pencatatan otomatis harian. Masalah:<br/>` + 
-                    data.status.issues.map(issue => `• ${issue}`).join('<br/>') +
+                    data.status.issues.map(issue => `â€¢ ${issue}`).join('<br/>') +
                     `<br/><span style="font-weight: 600; margin-top: 0.5rem; display: inline-block;">Silakan periksa laporan keuangan dan log transaksi cash flow.</span>`;
                 alertEl.style.display = 'block';
                 if (window.lucide) window.lucide.createIcons();
@@ -422,7 +429,7 @@ function renderSummaryCards() {
         <div class="summary-card ${c.color}">
             <div class="summary-card-header">
                 <div class="summary-card-icon ${c.color}"><i data-lucide="${c.icon}"></i></div>
-                <span class="summary-card-trend ${c.trendDir}">${c.trendDir === 'up' ? '↑' : '↓'} ${c.trend}</span>
+                <span class="summary-card-trend ${c.trendDir}">${c.trendDir === 'up' ? 'â†‘' : 'â†“'} ${c.trend}</span>
             </div>
             <div class="summary-card-value">${c.value}</div>
             <div class="summary-card-label">${c.label}</div>
@@ -555,7 +562,7 @@ function renderLowStock() {
     `).join('');
 
     if (lowStock.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--gray-400); padding:2rem;">Semua stok aman ✓</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--gray-400); padding:2rem;">Semua stok aman âœ“</td></tr>';
     }
 }
 
@@ -653,6 +660,7 @@ function renderCustomers(filter = '', type = '') {
                 <div>
                     <div class="entity-name">${c.name}</div>
                     <div class="entity-type">${c.type} &bull; ${c.city}</div>
+                    ${c.pricelistName ? `<div style="margin-top:0.25rem;"><span class="badge-pricelist-source" style="font-size:0.7rem; padding:0.15rem 0.4rem;">ðŸ·ï¸ ${c.pricelistName}</span></div>` : ''}
                 </div>
             </div>
             <div class="entity-details">
@@ -692,7 +700,10 @@ function renderCustomers(filter = '', type = '') {
             return `
             <tr style="cursor:pointer;" onclick="openCustomerDetail('${c.id}')">
                 <td style="font-weight:600; color: var(--blue-600);">${c.id}</td>
-                <td style="font-weight:600;">${c.name}</td>
+                <td style="font-weight:600;">
+                    ${c.name}
+                    ${c.pricelistName ? `<div style="margin-top:0.2rem;"><span class="badge-pricelist-source" style="font-size:0.65rem; padding:0.1rem 0.35rem;">ðŸ·ï¸ ${c.pricelistName}</span></div>` : ''}
+                </td>
                 <td><span class="badge-status aman">${c.type}</span></td>
                 <td>${c.city}</td>
                 <td>${c.phone}</td>
@@ -772,7 +783,7 @@ function renderVendors(filter = '') {
                 <div class="entity-avatar ${v.color}">${v.name.charAt(0)}</div>
                 <div>
                     <div class="entity-name">${v.name}</div>
-                    <div class="entity-type">${v.category} • ${v.city}</div>
+                    <div class="entity-type">${v.category} â€¢ ${v.city}</div>
                 </div>
             </div>
             <div class="entity-details">
@@ -790,7 +801,7 @@ function renderVendors(filter = '') {
                 </div>
                 <div class="entity-detail">
                     <span class="entity-detail-label">Hutang</span>
-                    <span class="entity-detail-value" style="color: ${v.debt > 0 ? 'var(--rose-500)' : 'var(--emerald-500)'}; font-weight:700;">${v.debt > 0 ? rp(v.debt) : 'Lunas ✓'}</span>
+                    <span class="entity-detail-value" style="color: ${v.debt > 0 ? 'var(--rose-500)' : 'var(--emerald-500)'}; font-weight:700;">${v.debt > 0 ? rp(v.debt) : 'Lunas âœ“'}</span>
                 </div>
             </div>
         </div>
@@ -804,7 +815,7 @@ function renderVendors(filter = '') {
                 <td><span class="badge-status aman">${v.category}</span></td>
                 <td>${v.city}</td>
                 <td>${v.phone}</td>
-                <td style="font-weight:700; color: ${v.debt > 0 ? 'var(--rose-500)' : 'var(--emerald-500)'};">${v.debt > 0 ? rp(v.debt) : 'Lunas ✓'}</td>
+                <td style="font-weight:700; color: ${v.debt > 0 ? 'var(--rose-500)' : 'var(--emerald-500)'};">${v.debt > 0 ? rp(v.debt) : 'Lunas âœ“'}</td>
                 <td style="text-align: right; white-space: nowrap;">
                     <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" title="Edit Vendor" onclick="openEditVendorModal('${v.id}')">
                         <i data-lucide="edit-2" style="width: 14px; height: 14px; margin: 0;"></i>
@@ -919,7 +930,7 @@ function renderInvoices(filter = '') {
 
     tbody.innerHTML = filtered.map(inv => {
         const statusLower = (inv.status || '').toLowerCase();
-        // Normalize status to single-word CSS class (e.g. 'Belum Bayar' → 'belum')
+        // Normalize status to single-word CSS class (e.g. 'Belum Bayar' â†’ 'belum')
         const statusClass = statusLower.includes('belum') ? 'belum' : statusLower.replace(/\s+/g, '-');
         return `
         <tr>
@@ -949,72 +960,101 @@ function renderInvoices(filter = '') {
 }
 
 // ---------- Piutang Page ----------
-function renderPiutang(filter = '') {
+function renderPiutang(filter) {
     if (!filter || typeof filter !== 'string') {
         const sel = document.getElementById('piutang-status-filter');
         filter = sel ? sel.value : 'all';
     }
-    // Summary
     const piutangInvoices = INVOICES.filter(i => !['lunas', 'batal'].includes(i.status.toLowerCase()));
     const totalPiutang = piutangInvoices.reduce((s, i) => s + (i.total - i.paid), 0);
-    // Backend stores 'Belum Bayar' (not 'belum') — match with includes() to handle both formats
     const belumBayar = INVOICES.filter(i => i.status.toLowerCase().includes('belum')).reduce((s, i) => s + i.total, 0);
     const sebagian = INVOICES.filter(i => i.status.toLowerCase() === 'sebagian').reduce((s, i) => s + (i.total - i.paid), 0);
 
-    document.getElementById('piutang-summary').innerHTML = `
-        <div class="finance-summary-card highlight">
-            <div class="fs-value">${rp(totalPiutang)}</div>
-            <div class="fs-label">Total Piutang</div>
-        </div>
-        <div class="finance-summary-card">
-            <div class="fs-value" style="color: var(--rose-500);">${rp(belumBayar)}</div>
-            <div class="fs-label">Belum Dibayar</div>
-        </div>
-        <div class="finance-summary-card">
-            <div class="fs-value" style="color: var(--amber-500);">${rp(sebagian)}</div>
-            <div class="fs-label">Dibayar Sebagian</div>
-        </div>
-    `;
+    document.getElementById('piutang-summary').innerHTML =
+        '<div class="finance-summary-card highlight">' +
+            '<div class="fs-value">' + rp(totalPiutang) + '</div>' +
+            '<div class="fs-label">Total Piutang</div>' +
+        '</div>' +
+        '<div class="finance-summary-card">' +
+            '<div class="fs-value" style="color:var(--rose-500);">' + rp(belumBayar) + '</div>' +
+            '<div class="fs-label">Belum Dibayar</div>' +
+        '</div>' +
+        '<div class="finance-summary-card">' +
+            '<div class="fs-value" style="color:var(--amber-500);">' + rp(sebagian) + '</div>' +
+            '<div class="fs-label">Dibayar Sebagian</div>' +
+        '</div>';
 
-    // Table
+    // Populate customer filter dropdown (preserving current selection)
+    const custFilterEl = document.getElementById('piutang-customer-filter');
+    if (custFilterEl) {
+        const selectedCust = custFilterEl.value;
+        const uniqueCustomers = [...new Map(
+            INVOICES.filter(i => i.customer).map(i => [String(i.customerId), i.customer])
+        ).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+        custFilterEl.innerHTML = '<option value="all">Semua Pelanggan</option>' +
+            uniqueCustomers.map(([cid, cname]) =>
+                '<option value="' + cid + '" ' + (selectedCust === cid ? 'selected' : '') + '>' + cname + '</option>'
+            ).join('');
+    }
+
     const tbody = document.getElementById('piutang-body');
-    // Hide 'batal' (cancelled) invoices by default
     let filtered = INVOICES.filter(i => i.status.toLowerCase() !== 'batal');
+    const today = new Date().toISOString().split('T')[0];
 
     if (filter && filter !== 'all') {
-        filtered = filtered.filter(i => {
-            if (filter === 'belum bayar' || filter === 'belum') {
-                return i.status.toLowerCase().includes('belum');
-            }
-            return i.status.toLowerCase() === filter;
-        });
+        if (filter === 'overdue') {
+            filtered = filtered.filter(i => { const sisa = i.total - i.paid; return sisa > 0 && i.dueDate && i.dueDate < today; });
+        } else if (filter === 'belum bayar' || filter === 'belum') {
+            filtered = filtered.filter(i => i.status.toLowerCase().includes('belum'));
+        } else {
+            filtered = filtered.filter(i => i.status.toLowerCase() === filter);
+        }
     }
+
+    const custFilter = custFilterEl ? custFilterEl.value : 'all';
+    if (custFilter && custFilter !== 'all') {
+        filtered = filtered.filter(i => String(i.customerId) === String(custFilter));
+    }
+
     const searchEl = document.getElementById('piutang-search');
     if (searchEl && searchEl.value) {
         const q = searchEl.value.toLowerCase();
-        filtered = filtered.filter(i =>
-            i.id.toLowerCase().includes(q) ||
-            (i.customer && i.customer.toLowerCase().includes(q))
-        );
+        filtered = filtered.filter(i => i.id.toLowerCase().includes(q) || (i.customer && i.customer.toLowerCase().includes(q)));
     }
+
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    const canPayOrVoid = role === 'admin' || role === 'finance';
 
     tbody.innerHTML = filtered.map(inv => {
         const sisa = inv.total - inv.paid;
-        return `
-            <tr>
-                <td style="font-weight:600; color: var(--blue-600);">${inv.id}</td>
-                <td>${inv.customer}</td>
-                <td style="font-weight:700;">${rp(inv.total)}</td>
-                <td>${rp(inv.paid)}</td>
-                <td style="font-weight:700; color: ${sisa > 0 ? 'var(--rose-500)' : 'var(--emerald-500)'}">${rp(sisa)}</td>
-                <td>${inv.dueDate || '-'}</td>
-                <td>${inv.status.toLowerCase().includes('belum') ? '-' : (inv.paidDate || '-')}</td>
-                <td>${inv.status.toLowerCase().includes('belum') ? '-' : (inv.type || '-')}</td>
-                <td><span class="badge-status ${inv.status.toLowerCase().includes('belum') ? 'belum' : inv.status.toLowerCase().replace(/\s+/g, '-')}">${capitalize(inv.status)}</span></td>
-                <td>${inv.status.toLowerCase() !== 'lunas' ? `<button class="btn-toolbar primary" style="padding:0.3rem 0.65rem; font-size:0.75rem;" onclick="openPiutangPaymentModal('${inv.id}', ${sisa})">Input Bayar</button>` : '—'}</td>
-            </tr>
-        `;
+        const isOverdue = sisa > 0 && inv.dueDate && inv.dueDate < today;
+        const statusLower = (inv.status || '').toLowerCase();
+        const overdueBadge = isOverdue
+            ? '<span class="badge-status overdue" style="display:inline-flex;align-items:center;gap:3px;font-size:0.7rem;padding:2px 7px;margin-left:4px;vertical-align:middle;"><i data-lucide="clock" style="width:11px;height:11px;"></i> Lewat JT</span>'
+            : '';
+        let actionButtons;
+        if (canPayOrVoid) {
+            const bayarBtn = statusLower !== 'lunas'
+                ? '<button class="btn-toolbar primary" style="padding:0.25rem 0.5rem;font-size:0.75rem;" onclick="openPiutangPaymentModal(\'' + inv.id + '\',' + sisa + ')">Bayar</button>'
+                : '<span style="color:var(--gray-400);font-size:0.8rem;">Lunas</span>';
+            actionButtons = '<button class="btn-toolbar secondary" style="padding:0.25rem 0.5rem;font-size:0.75rem;margin-right:0.25rem;" title="Riwayat Cicilan" onclick="openPaymentHistoryModal(\'' + inv.id + '\')"><i data-lucide="list" style="width:13px;height:13px;margin:0;"></i></button>' + bayarBtn;
+        } else {
+            actionButtons = '<button class="btn-toolbar secondary" style="padding:0.25rem 0.5rem;font-size:0.75rem;" title="Riwayat Cicilan" onclick="openPaymentHistoryModal(\'' + inv.id + '\')"><i data-lucide="list" style="width:13px;height:13px;margin:0;"></i></button>';
+        }
+        return '<tr>' +
+            '<td style="font-weight:600;color:var(--blue-600);">' + inv.id + '</td>' +
+            '<td>' + inv.customer + '</td>' +
+            '<td style="font-weight:700;">' + rp(inv.total) + '</td>' +
+            '<td>' + rp(inv.paid) + '</td>' +
+            '<td style="font-weight:700;color:' + (sisa > 0 ? 'var(--rose-500)' : 'var(--emerald-500)') + ';">' + rp(sisa) + '</td>' +
+            '<td>' + (inv.dueDate || '-') + overdueBadge + '</td>' +
+            '<td>' + (statusLower.includes('belum') ? '-' : (inv.paidDate || '-')) + '</td>' +
+            '<td>' + (statusLower.includes('belum') ? '-' : (inv.type || '-')) + '</td>' +
+            '<td><span class="badge-status ' + (statusLower.includes('belum') ? 'belum' : statusLower.replace(/\s+/g, '-')) + '">' + capitalize(inv.status) + '</span></td>' +
+            '<td style="white-space:nowrap;">' + actionButtons + '</td>' +
+            '</tr>';
     }).join('');
+    if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
 // ---------- Hutang Page ----------
@@ -1075,7 +1115,7 @@ function renderHutang(filter = '') {
                 <td>${sisa > 0 && parseFloat(p.paid) === 0 ? '-' : (p.paidDate || '-')}</td>
                 <td>${sisa > 0 && parseFloat(p.paid) === 0 ? '-' : (p.type || '-')}</td>
                 <td><span class="badge-status ${st}">${sisa > 0 ? 'Belum Lunas' : 'Lunas'}</span></td>
-                <td>${sisa > 0 ? `<button class="btn-toolbar primary" style="padding:0.3rem 0.65rem; font-size:0.75rem;" onclick="openHutangPaymentModal('${p.id}', ${sisa})">Bayar</button>` : '—'}</td>
+                <td>${sisa > 0 ? `<button class="btn-toolbar primary" style="padding:0.3rem 0.65rem; font-size:0.75rem;" onclick="openHutangPaymentModal('${p.id}', ${sisa})">Bayar</button>` : 'â€”'}</td>
             </tr>
         `;
     }).join('');
@@ -1126,7 +1166,7 @@ function renderCashFlow(filter = '') {
             <td>${t.date}</td>
             <td style="font-weight:600;">${t.desc}</td>
             <td><span class="badge-status ${t.category === 'Penjualan' || t.category === 'Piutang' ? 'lunas' : 'tempo'}">${t.category}</span></td>
-            <td><span class="badge-status ${t.type.toLowerCase()}">${t.type === 'IN' ? '↑ Masuk' : '↓ Keluar'}</span></td>
+            <td><span class="badge-status ${t.type.toLowerCase()}">${t.type === 'IN' ? 'â†‘ Masuk' : 'â†“ Keluar'}</span></td>
             <td style="font-weight:700; color: ${t.type === 'IN' ? 'var(--emerald-500)' : 'var(--rose-500)'};">${t.type === 'IN' ? '+' : '-'}${rp(t.amount)}</td>
             <td><span class="badge-status ${t.status === 'cancelled' ? 'batal' : 'lunas'}">${t.status === 'cancelled' ? 'Dibatalkan' : 'Aktif'}</span></td>
             <td>${t.method}</td>
@@ -1367,12 +1407,12 @@ async function renderBalance() {
                 statusEl.style.background = 'var(--emerald-50)';
                 statusEl.style.color = 'var(--emerald-700)';
                 statusEl.style.border = '1px solid var(--emerald-200)';
-                statusEl.innerHTML = `<i data-lucide="check-circle"></i> Neraca Seimbang — Total Aset = Total Liabilitas &amp; Ekuitas`;
+                statusEl.innerHTML = `<i data-lucide="check-circle"></i> Neraca Seimbang â€” Total Aset = Total Liabilitas &amp; Ekuitas`;
             } else {
                 statusEl.style.background = 'var(--rose-50)';
                 statusEl.style.color = 'var(--rose-700)';
                 statusEl.style.border = '1px solid var(--rose-200)';
-                statusEl.innerHTML = `<i data-lucide="alert-triangle"></i> Neraca Tidak Seimbang — Periksa kembali data transaksi`;
+                statusEl.innerHTML = `<i data-lucide="alert-triangle"></i> Neraca Tidak Seimbang â€” Periksa kembali data transaksi`;
             }
             if (typeof lucide !== 'undefined') lucide.createIcons();
         }
@@ -1528,8 +1568,24 @@ function addToCart(productId) {
     if (existing) {
         existing.qty += 1;
     } else {
-        // Initialize with fee fields
-        cart.push({ ...product, qty: 1, fee: 0, feeNotes: '' });
+        // Apply pricelist effective price if customer is selected
+        const eff = currentPOSCustomerEffectivePrices[productId];
+        const effectivePrice = eff ? parseFloat(eff.harga_efektif) : parseFloat(product.price);
+        const sumberHarga = eff ? eff.sumber_harga : 'master';
+        const pricelistNama = eff ? (eff.pricelist_nama || '') : '';
+        const cost = parseFloat(product.cost_price || product.cost || 0);
+        cart.push({
+            ...product,
+            price: effectivePrice,
+            originalPrice: parseFloat(product.price),
+            sumberHarga,
+            pricelistNama,
+            cost,
+            manual_override: false,
+            qty: 1,
+            fee: 0,
+            feeNotes: ''
+        });
     }
     renderCart();
 }
@@ -1578,7 +1634,11 @@ function renderCart() {
         <div class="cart-item">
             <div class="cart-item-row">
                 <div class="cart-item-info">
-                    <div class="cart-item-name">${item.emoji} ${item.name}</div>
+                    <div class="cart-item-name">
+                        ${item.emoji} ${item.name}
+                        ${item.manual_override ? '<span class="badge-manual-source" style="font-size:0.65rem; margin-left:4px;">✏️ Manual</span>' : (item.sumberHarga === 'pricelist' ? `<span class="badge-pricelist-source" style="font-size:0.65rem; margin-left:4px;">🏷️ ${item.pricelistNama || 'Pricelist'}</span>` : '')}
+                        ${(item.cost > 0 && item.price < item.cost) ? '<span class="badge-hpp-warning" style="font-size:0.65rem; margin-left:4px;">⚠️ Bawah HPP</span>' : ''}
+                    </div>
                     <div class="cart-item-price-edit" style="display:flex; align-items:center; gap:0.25rem;">
                         <span style="font-size:0.75rem; color:var(--gray-500);">Rp</span>
                         <input type="number" value="${item.price}" onchange="updateCartPrice('${item.id}', this.value)" style="width:70px; padding:0.1rem 0.25rem; font-size:0.875rem; border:1px solid var(--gray-200); border-radius:0.25rem;" />
@@ -1586,7 +1646,7 @@ function renderCart() {
                     </div>
                 </div>
                 <div class="cart-item-qty">
-                    <button class="cart-qty-btn" onclick="updateCartQty('${item.id}', -1)">−</button>
+                    <button class="cart-qty-btn" onclick="updateCartQty('${item.id}', -1)">âˆ’</button>
                     <span class="cart-qty-val">${item.qty}</span>
                     <button class="cart-qty-btn" onclick="updateCartQty('${item.id}', 1)">+</button>
                 </div>
@@ -1595,7 +1655,7 @@ function renderCart() {
             </div>
             ${isAdmin ? `
             <div class="cart-item-fee-row">
-                <span class="cart-item-fee-label">🔒 Fee (Rp)</span>
+                <span class="cart-item-fee-label">ðŸ”’ Fee (Rp)</span>
                 <input type="number" min="0" value="${item.fee || 0}" placeholder="0"
                     class="cart-item-fee-input"
                     onchange="updateCartFee('${item.id}', this.value)"
@@ -1613,7 +1673,8 @@ function renderCart() {
         const item = cart.find(c => c.id === id);
         if (item) {
             item.price = parseFloat(newPrice) || 0;
-            renderCart();
+            item.manual_override = true; // R3: track manual edit
+            // Re-render without full re-render so input focus is kept
         }
     };
 
@@ -1682,6 +1743,17 @@ document.addEventListener('change', (e) => {
     if (e.target && e.target.id === 'cart-payment-type') {
         selectedCartPaymentTypeId = e.target.value;
         console.log(`[Frontend State] Payment method changed to: ${selectedCartPaymentTypeId}`);
+        // Show/hide DP wrapper based on payment type
+        const payName = getPaymentTypeName(e.target).toLowerCase();
+        const isKredit = payName.includes('tempo') || payName.includes('kredit') || payName.includes('credit');
+        const dpWrapper = document.getElementById('cart-dp-wrapper');
+        if (dpWrapper) {
+            dpWrapper.style.display = isKredit ? 'block' : 'none';
+            if (!isKredit) {
+                const dpInput = document.getElementById('cart-dp-amount');
+                if (dpInput) dpInput.value = '';
+            }
+        }
     }
 });
 
@@ -1718,8 +1790,9 @@ document.getElementById('btn-checkout')?.addEventListener('click', async () => {
     const ppnAmount = subtotal * (currentPpnRate / 100);
     const total = subtotal + ppnAmount;
 
-    // Tempo/credit: no upfront payment; all other methods (Tunai, Transfer, etc.) = full paid
-    const paid = isTempo ? 0 : total;
+    // Tempo/credit: if DP entered use it, otherwise 0; Tunai/Transfer = full paid
+    const dpAmount = isTempo ? (parseFloat(document.getElementById('cart-dp-amount')?.value) || 0) : 0;
+    const paid = isTempo ? dpAmount : total;
 
     console.log(`[Checkout] payment_type_id=${payment_type_id} | name=${payTypeName} | isTempo=${isTempo} | paid=${paid} | total=${total}`);
 
@@ -1760,8 +1833,11 @@ document.getElementById('btn-checkout')?.addEventListener('click', async () => {
             openModal('modal-checkout-success');
 
             cart = [];
+            currentPOSCustomerEffectivePrices = {};
             document.getElementById('pos-customer-id').value = '';
             document.getElementById('pos-customer-search').value = '';
+            const posBadge = document.getElementById('pos-customer-pricelist-badge');
+            if (posBadge) posBadge.innerHTML = '';
             selectedCartPaymentTypeId = 'PT-1';
             document.getElementById('cart-payment-type').value = 'PT-1';
 
@@ -1807,7 +1883,7 @@ function populateCustomerSelect(filter = '') {
     dropdown.innerHTML = filtered.map(c => `
         <div class="customer-dropdown-item" data-id="${c.id}" data-name="${c.name}" style="padding: 0.5rem 0.75rem; cursor: pointer; border-bottom: 1px solid var(--gray-100); display: flex; flex-direction: column; transition: background-color 0.2s;">
             <span style="font-weight: 500; font-size: 0.875rem;">${c.name}</span>
-            <span style="font-size: 0.75rem; color: var(--gray-500);">${c.type} • ${c.phone}</span>
+            <span style="font-size: 0.75rem; color: var(--gray-500);">${c.type} â€¢ ${c.phone}</span>
         </div>
     `).join('');
 
@@ -1819,6 +1895,7 @@ function populateCustomerSelect(filter = '') {
             document.getElementById('pos-customer-search').value = name;
             document.getElementById('pos-customer-id').value = id;
             dropdown.style.display = 'none';
+            handlePOSCustomerChange(id);
         });
 
         // Add hover effect
@@ -1952,7 +2029,7 @@ async function init() {
     const userRole = localStorage.getItem('role') || 'Staff';
     const capitalizedRole = userRole.charAt(0).toUpperCase() + userRole.slice(1).toLowerCase();
 
-    PAGE_TITLES.dashboard.subtitle = `Selamat Datang, ${userDisplayName} 👋`;
+    PAGE_TITLES.dashboard.subtitle = `Selamat Datang, ${userDisplayName} ðŸ‘‹`;
     const subtitleEl = document.getElementById('topbar-subtitle');
     if (subtitleEl && currentPage === 'dashboard') {
         subtitleEl.textContent = PAGE_TITLES.dashboard.subtitle;
@@ -2010,6 +2087,7 @@ async function init() {
         fetchDashboardSummary(),
         fetchProducts(),
         fetchCustomers(),
+        fetchPricelists(),
         fetchVendors(),
         fetchPurchases(),
         fetchInvoices(),
@@ -2099,7 +2177,7 @@ async function fetchProducts() {
             minStock: parseFloat(p.min_stock),
             unit: p.unit || 'pcs',
             unit_id: p.unit_id,
-            emoji: '📦'
+            emoji: 'ðŸ“¦'
         }));
         renderProducts(document.getElementById('product-search')?.value, document.getElementById('product-category-filter')?.value);
     } catch (err) {
@@ -2163,7 +2241,7 @@ function openEditProductModal(id) {
     if (brandEl) brandEl.value = p.brand || '';
     document.getElementById('edit-product-name').value = p.name;
     document.getElementById('edit-product-sku').value = p.sku;
-    // FIX: set category select — try both category_id and category name
+    // FIX: set category select â€” try both category_id and category name
     const catEl = document.getElementById('edit-product-category');
     if (catEl) {
         // Try setting by value (which is the name from master)
@@ -2268,6 +2346,9 @@ async function fetchCustomers() {
             totalSpent: parseFloat(c.total_belanja) || 0,
             outstandingReceivables: parseFloat(c.total_piutang_berjalan) || 0,
             remainingLimit: parseFloat(c.sisa_limit_piutang) ?? parseFloat(c.credit_lmt) ?? 0,
+            pricelistId: c.pricelist_id || null,
+            pricelistName: c.pricelist_nama || c.pricelist_name || '',
+            pricelistKode: c.pricelist_kode || '',
             color: 'blue'
         }));
         renderCustomers(document.getElementById('customer-search')?.value, document.getElementById('customer-type-filter')?.value);
@@ -2312,7 +2393,8 @@ async function saveCustomer(isEdit) {
         npwp_address: document.getElementById(`${prefix}-customer-npwp-address`)?.value.trim() || null,
         nib: document.getElementById(`${prefix}-customer-nib`)?.value.trim() || null,
         email: email || null,
-        no_hp_2: document.getElementById(`${prefix}-customer-no-hp-2`)?.value.trim() || null
+        no_hp_2: document.getElementById(`${prefix}-customer-no-hp-2`)?.value.trim() || null,
+        pricelist_id: document.getElementById(`${prefix}-customer-pricelist`)?.value ? parseInt(document.getElementById(`${prefix}-customer-pricelist`).value) : null
     };
 
     const url = isEdit ? `/api/customers/${id}` : '/api/customers';
@@ -2348,6 +2430,7 @@ function openAddCustomerModal() {
     if (addrEl) addrEl.value = '';
     const typeEl = document.getElementById('add-customer-type');
     if (typeEl) typeEl.selectedIndex = 0;
+    populateCustomerPricelistDropdown('add-customer-pricelist', '');
     openModal('modal-add-customer');
 }
 
@@ -2378,6 +2461,7 @@ function openEditCustomerModal(id) {
     if (npwpAddressEl) npwpAddressEl.value = c.npwp_address || '';
     const nibEl = document.getElementById('edit-customer-nib');
     if (nibEl) nibEl.value = c.nib || '';
+    populateCustomerPricelistDropdown('edit-customer-pricelist', c.pricelistId);
     openModal('modal-edit-customer');
 }
 
@@ -2418,6 +2502,10 @@ function openCustomerDetail(id) {
     if (npwpAddressEl) npwpAddressEl.textContent = c.npwp_address || '-';
     const nibEl = document.getElementById('detail-customer-nib');
     if (nibEl) nibEl.textContent = c.nib || '-';
+    const plDetailEl = document.getElementById('detail-customer-pricelist');
+    if (plDetailEl) {
+        plDetailEl.textContent = c.pricelistName ? `${c.pricelistName} (${c.pricelistKode || '-'})` : 'Harga Standar (Master)';
+    }
 
     const sisa = c.sisaLimitPiutang ?? c.remainingLimit;
     const totalSpent = c.totalBelanja ?? c.totalSpent;
@@ -2487,7 +2575,7 @@ async function deleteCustomer(id) {
 }
 
 // ==========================================================================
-// VENDORS — CRUD
+// VENDORS â€” CRUD
 // ==========================================================================
 
 async function fetchVendors() {
@@ -2607,7 +2695,7 @@ async function deleteVendor(id) {
 }
 
 // ==========================================================================
-// PURCHASE ORDERS — CRUD
+// PURCHASE ORDERS â€” CRUD
 // ==========================================================================
 
 async function fetchPurchases() {
@@ -2884,7 +2972,7 @@ async function openEditPurchaseModal(id) {
     } catch (err) {
         console.error('Failed to load PO items', err);
     }
-    // Always render — will show 'Belum ada item' if array empty
+    // Always render â€” will show 'Belum ada item' if array empty
     renderEditPurchaseItems();
 
     openModal('modal-edit-purchase');
@@ -2965,7 +3053,7 @@ async function savePurchase(isEdit) {
 }
 
 // ==========================================================================
-// INVOICES — CRUD
+// INVOICES â€” CRUD
 // ==========================================================================
 
 async function fetchInvoices() {
@@ -3149,11 +3237,13 @@ async function openEditInvoiceModal(id) {
     } catch (err) {
         console.error('Failed to load invoice items', err);
     }
-    // Always render — will show 'Belum ada item' if array empty
+    // Always render â€” will show 'Belum ada item' if array empty
     renderEditInvoiceItems();
 
     openModal('modal-edit-invoice');
 }
+
+let pendingSaveInvoicePayload = null;
 
 async function saveInvoiceEdits() {
     const id = document.getElementById('edit-invoice-id').value;
@@ -3165,33 +3255,62 @@ async function saveInvoiceEdits() {
     const inv = INVOICES.find(x => x.id === id);
     const customer_id = inv ? inv.customerId : null;
 
-    const subtotal = editInvoiceItems.reduce((s, i) => s + (parseFloat(i.price) * parseInt(i.quantity)), 0);
-    const total = subtotal * 1.11; // including 11% tax
+    const subtotal = editInvoiceItems.reduce((s, i) => s + (parseFloat(i.price || i.sell_price || 0) * parseInt(i.quantity || i.qty || 0)), 0);
+    const ppnRate = (typeof currentPpnEnabled !== 'undefined' && !currentPpnEnabled) ? 0 : ((typeof currentPpnRate !== 'undefined' ? currentPpnRate : 11) / 100);
+    const newTotal = subtotal + Math.round(subtotal * ppnRate);
 
-    // Determine paid amount based on old paid amount. If it was fully paid, should we adjust paid amount?
-    // Let's assume paid_amount stays the same unless it exceeds new total.
-    let paid_amount = inv ? inv.paid : 0;
-    if (status === 'lunas') {
-        paid_amount = total;
-    } else if (status === 'belum') {
-        paid_amount = 0;
-    } else {
-        if (paid_amount > total) paid_amount = total;
+    const paidAmount = inv ? parseFloat(inv.paid || 0) : 0;
+
+    // Soft-lock Guard: new total must not be smaller than active payments received
+    if (paidAmount > 0 && newTotal < paidAmount) {
+        showToast(`Total invoice baru (${rp(newTotal)}) tidak boleh lebih kecil dari pembayaran yang sudah diterima (${rp(paidAmount)}).`, 'warning');
+        return;
     }
+
+    pendingSaveInvoicePayload = {
+        id,
+        date,
+        status,
+        customer_id,
+        total: newTotal,
+        paid_amount: paidAmount,
+        payment_type_id: inv ? inv.paymentTypeId : 'PT-1',
+        items: editInvoiceItems
+    };
+
+    // If invoice already has active payments, trigger the soft-lock confirmation modal
+    if (paidAmount > 0) {
+        const statsEl = document.getElementById('confirm-edit-invoice-stats');
+        if (statsEl) {
+            const sisaBaru = Math.max(0, newTotal - paidAmount);
+            statsEl.innerHTML = `
+                <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                    <span>Total Baru:</span> <b>${rp(newTotal)}</b>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 6px; color: var(--emerald-600);">
+                    <span>Total Pembayaran Diterima:</span> <b>${rp(paidAmount)}</b>
+                </div>
+                <div style="display: flex; justify-content: space-between; color: ${sisaBaru > 0 ? 'var(--rose-600)' : 'var(--emerald-600)'};">
+                    <span>Sisa Tagihan Baru:</span> <b>${rp(sisaBaru)}</b>
+                </div>
+            `;
+        }
+        openModal('modal-confirm-edit-invoice');
+    } else {
+        await executeSaveInvoiceEdits();
+    }
+}
+
+async function executeSaveInvoiceEdits() {
+    if (!pendingSaveInvoicePayload) return;
+    const { id, ...bodyData } = pendingSaveInvoicePayload;
+    closeModal('modal-confirm-edit-invoice');
 
     try {
         const res = await fetch(`/api/invoices/${encodeURIComponent(id)}`, {
             method: 'PUT',
             headers: getAuthHeaders(),
-            body: JSON.stringify({
-                date,
-                status,
-                customer_id,
-                total,
-                paid_amount,
-                payment_type_id: inv ? inv.paymentTypeId : 'PT-1',
-                items: editInvoiceItems
-            })
+            body: JSON.stringify(bodyData)
         });
         if (res.ok) {
             closeModal('modal-edit-invoice');
@@ -3213,6 +3332,8 @@ async function saveInvoiceEdits() {
     } catch (err) {
         console.error(err);
         showToast('Gagal menghubungi server', 'error');
+    } finally {
+        pendingSaveInvoicePayload = null;
     }
 }
 
@@ -3220,6 +3341,27 @@ let cancelInvoiceId = null;
 
 async function cancelInvoice(id) {
     cancelInvoiceId = id;
+    const inv = INVOICES.find(x => x.id === id);
+    const paidAmount = inv ? parseFloat(inv.paid || 0) : 0;
+    const alertEl = document.getElementById('cancel-invoice-payments-alert');
+    const textEl = document.getElementById('cancel-invoice-payments-text');
+    const btnConfirm = document.getElementById('btn-confirm-cancel-invoice');
+
+    if (paidAmount > 0) {
+        if (alertEl) alertEl.style.display = 'block';
+        if (textEl) {
+            textEl.innerHTML = `Invoice ini memiliki pembayaran aktif sebesar <b>${rp(paidAmount)}</b>. Membatalkan invoice akan <b>otomatis membatalkan (void) semua pembayaran</b> dan membalikkan posting kas. Lanjutkan?`;
+        }
+        if (btnConfirm) {
+            btnConfirm.innerHTML = '<i data-lucide="x-circle"></i> Ya, Batalkan & Void Pembayaran';
+        }
+    } else {
+        if (alertEl) alertEl.style.display = 'none';
+        if (btnConfirm) {
+            btnConfirm.innerHTML = '<i data-lucide="x-circle"></i> Ya, Batalkan';
+        }
+    }
+    if (typeof lucide !== 'undefined') lucide.createIcons();
     openModal('modal-cancel-invoice');
 }
 
@@ -3288,7 +3430,7 @@ window.cancelPurchaseFromEdit = () => {
         window.cancelPurchase(id);
     }
 };// ==========================================================================
-// CASH FLOW — CRUD
+// CASH FLOW â€” CRUD
 // ==========================================================================
 
 async function fetchCashTransactions() {
@@ -3431,14 +3573,34 @@ function openHutangPaymentModal(poId, sisa) {
     openModal('modal-payment');
 }
 
-// FIX: helper to open piutang payment modal with correct invoice id pre-filled
+// Open piutang payment modal â€” fills invoice info box, date, and max hint
 function openPiutangPaymentModal(invoiceId, sisa) {
     const typeEl = document.getElementById('payment-type');
     const refEl = document.getElementById('payment-ref-id');
     const amtEl = document.getElementById('payment-amount');
+    const dateEl = document.getElementById('payment-date');
+    const maxHint = document.getElementById('payment-max-hint');
+    const infoBox = document.getElementById('payment-invoice-info-box');
+    const notesEl = document.getElementById('payment-notes');
     if (typeEl) typeEl.value = 'receivable';
     if (refEl) refEl.value = invoiceId;
-    if (amtEl) amtEl.value = sisa || '';
+    if (amtEl) { amtEl.value = ''; amtEl.max = sisa || ''; }
+    if (notesEl) notesEl.value = '';
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (dateEl) { dateEl.value = todayStr; dateEl.max = todayStr; }
+    if (maxHint) maxHint.textContent = 'Maks: ' + rp(sisa || 0) + ' (sisa tagihan)';
+    const inv = INVOICES.find(i => i.id === invoiceId);
+    if (infoBox) {
+        infoBox.style.display = 'block';
+        const infoId = document.getElementById('payment-info-id');
+        const infoCust = document.getElementById('payment-info-customer');
+        const infoTotal = document.getElementById('payment-info-total');
+        const infoSisa = document.getElementById('payment-info-sisa');
+        if (infoId) infoId.textContent = invoiceId;
+        if (infoCust) infoCust.textContent = inv ? inv.customer : '-';
+        if (infoTotal) infoTotal.textContent = inv ? rp(inv.total) : '-';
+        if (infoSisa) infoSisa.textContent = rp(sisa || 0);
+    }
     openModal('modal-payment');
 }
 
@@ -3449,23 +3611,27 @@ async function submitPayment() {
     const amount = document.getElementById('payment-amount').value;
     const methodEl = document.getElementById('payment-method');
     const method = methodEl ? methodEl.value : 'Transfer Bank';
-
-    if (!id || !amount || parseFloat(amount) <= 0) {
-        showToast('ID dan jumlah pembayaran wajib diisi!', 'warning');
-        return;
-    }
-
-    // FIX: use correct endpoints
+    const dateEl = document.getElementById('payment-date');
+    const notesEl = document.getElementById('payment-notes');
+    const paymentDate = dateEl ? dateEl.value : new Date().toISOString().split('T')[0];
+    const notes = notesEl ? notesEl.value.trim() : '';
+    if (!id) { showToast('Referensi invoice tidak ditemukan!', 'warning'); return; }
+    if (!amount || parseFloat(amount) <= 0) { showToast('Jumlah pembayaran wajib diisi dan > 0!', 'warning'); return; }
+    if (!paymentDate) { showToast('Tanggal pembayaran wajib diisi!', 'warning'); return; }
+    const today = new Date().toISOString().split('T')[0];
+    if (paymentDate > today) { showToast('Tanggal pembayaran tidak boleh di masa depan!', 'warning'); return; }
     const url = isReceivable
-        ? `/api/finance/receivables/${encodeURIComponent(id)}/pay`
-        : `/api/finance/payables/${encodeURIComponent(id)}/pay`;
-
+        ? '/api/invoices/' + encodeURIComponent(id) + '/payments'
+        : '/api/finance/payables/' + encodeURIComponent(id) + '/pay';
+    const body = isReceivable
+        ? { amount: parseFloat(amount), payment_date: paymentDate, payment_method: method, notes }
+        : { amount: parseFloat(amount), payment_type_id: method };
     let paymentSuccess = false;
     try {
         const res = await fetch(url, {
             method: 'POST',
             headers: getAuthHeaders(),
-            body: JSON.stringify({ amount: parseFloat(amount), payment_type_id: method })
+            body: JSON.stringify(body)
         });
         if (res.ok) {
             paymentSuccess = true;
@@ -3477,8 +3643,8 @@ async function submitPayment() {
                 const errData = await res.json();
                 if (errData.error) errMsg = errData.error;
             } catch (e) {
-                if (res.status === 401 || res.status === 403) errMsg = 'Sesi habis, silakan login ulang.';
-                else errMsg = `Error ${res.status} dari server.`;
+                if (res.status === 401 || res.status === 403) errMsg = 'Akses ditolak. Hanya Admin/Finance yang bisa mencatat pembayaran.';
+                else errMsg = 'Error ' + res.status + ' dari server.';
             }
             showToast('Error: ' + errMsg, 'error');
             if (res.status === 401 || res.status === 403) setTimeout(() => window.location.reload(), 1500);
@@ -3488,7 +3654,6 @@ async function submitPayment() {
         showToast('Gagal mengirim data pembayaran ke server', 'error');
         return;
     }
-
     if (paymentSuccess) {
         try {
             if (isReceivable) {
@@ -3507,8 +3672,153 @@ async function submitPayment() {
     }
 }
 
+
+// Fill the payment amount field with full remaining balance
+function fillFullPayment() {
+    const amtEl = document.getElementById('payment-amount');
+    if (!amtEl) return;
+    const max = parseFloat(amtEl.max) || 0;
+    if (max > 0) { amtEl.value = max; return; }
+    const sisaText = document.getElementById('payment-info-sisa')?.textContent || '';
+    const numStr = sisaText.replace(/[^0-9]/g, '');
+    if (numStr) amtEl.value = parseInt(numStr, 10);
+}
+
+// State for void/history modals
+let _voidPaymentId = null;
+let _voidInvoiceId = null;
+
+// Open payment history modal and fetch cicilan list
+async function openPaymentHistoryModal(invoiceId) {
+    _voidInvoiceId = invoiceId;
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    const canVoid = role === 'admin' || role === 'finance';
+    const subtitleEl = document.getElementById('hist-invoice-subtitle');
+    const totalEl = document.getElementById('hist-total-display');
+    const paidEl = document.getElementById('hist-paid-display');
+    const sisaEl = document.getElementById('hist-sisa-display');
+    const dueEl = document.getElementById('hist-due-display');
+    const overdueBadgeWrap = document.getElementById('hist-overdue-badge-wrap');
+    const tbody = document.getElementById('hist-payments-body');
+    const footerLeft = document.getElementById('hist-footer-left');
+    if (subtitleEl) subtitleEl.textContent = 'Memuat...';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:2rem;color:var(--gray-400);">Memuat data...</td></tr>';
+    if (footerLeft) footerLeft.style.display = canVoid ? '' : 'none';
+    openModal('modal-payment-history');
+    try {
+        const res = await fetch('/api/invoices/' + encodeURIComponent(invoiceId) + '/payments', { headers: getAuthHeaders() });
+        if (!res.ok) {
+            const err = await res.json();
+            if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:2rem;color:var(--rose-500);">' + (err.error || 'Gagal memuat data') + '</td></tr>';
+            return;
+        }
+        const data = await res.json();
+        const inv = data.invoice;
+        const payments = data.payments || [];
+        if (subtitleEl) subtitleEl.textContent = 'Invoice: ' + inv.id + ' â€” ' + inv.customer;
+        if (totalEl) totalEl.textContent = rp(inv.total);
+        if (paidEl) paidEl.textContent = rp(inv.paid);
+        if (sisaEl) sisaEl.textContent = rp(inv.sisa);
+        if (dueEl) dueEl.textContent = inv.dueDate || '-';
+        if (overdueBadgeWrap) {
+            overdueBadgeWrap.innerHTML = inv.isOverdue
+                ? '<span class="badge-status overdue" style="display:inline-flex;align-items:center;gap:3px;font-size:0.7rem;padding:2px 7px;"><i data-lucide="clock" style="width:11px;height:11px;"></i> Lewat Jatuh Tempo</span>'
+                : '';
+        }
+        if (payments.length === 0) {
+            if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:2rem;color:var(--gray-400);">Belum ada pembayaran tercatat.</td></tr>';
+        } else if (tbody) {
+            tbody.innerHTML = payments.map(p => {
+                const isVoid = p.status === 'void';
+                const rowStyle = isVoid ? 'opacity:0.55;' : '';
+                const statusBadge = isVoid
+                    ? '<span class="badge-status batal" style="font-size:0.72rem;">Void</span>'
+                    : '<span class="badge-status lunas" style="font-size:0.72rem;">Aktif</span>';
+                const dpBadge = p.isDownPayment ? '<span class="badge-dp" style="font-size:0.68rem;margin-left:4px;">DP</span>' : '';
+                const voidBtn = (canVoid && !isVoid)
+                    ? '<button class="btn-toolbar secondary" style="padding:0.2rem 0.4rem;font-size:0.72rem;color:var(--rose-600);" title="Void Pembayaran" onclick="openVoidPaymentModal(' + p.id + ',\'' + p.paymentNo + '\',' + p.amount + ',\'' + p.date + '\')"><i data-lucide="trash-2" style="width:12px;height:12px;margin:0;"></i></button>'
+                    : '';
+                const voidInfo = (isVoid && p.voidReason)
+                    ? '<div style="font-size:0.7rem;color:var(--rose-600);margin-top:2px;">Alasan: ' + p.voidReason + '</div>'
+                    : '';
+                return '<tr style="' + rowStyle + '">' +
+                    '<td style="font-size:0.8rem;">' + (p.paymentNo || '-') + dpBadge + '</td>' +
+                    '<td style="font-size:0.8rem;">' + (p.date || '-') + '</td>' +
+                    '<td style="font-weight:700;font-size:0.85rem;">' + rp(p.amount) + '</td>' +
+                    '<td style="font-size:0.8rem;">' + (p.method || '-') + '</td>' +
+                    '<td style="font-size:0.8rem;">' + (p.isDownPayment ? 'Down Payment' : 'Cicilan') + '</td>' +
+                    '<td style="font-size:0.8rem;">' + (p.notes || '-') + '</td>' +
+                    '<td>' + statusBadge + voidInfo + '</td>' +
+                    '<td style="font-size:0.75rem;color:var(--gray-500);">' + (p.createdBy || '-') + '</td>' +
+                    '<td style="text-align:right;">' + voidBtn + '</td>' +
+                    '</tr>';
+            }).join('');
+        }
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    } catch (err) {
+        console.error('Error loading payment history', err);
+        if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:2rem;color:var(--rose-500);">' + err.message + '</td></tr>';
+    }
+}
+
+// Called from payment history modal footer button
+function triggerPayFromHistory() {
+    if (!_voidInvoiceId) return;
+    const inv = INVOICES.find(i => i.id === _voidInvoiceId);
+    const sisa = inv ? (inv.total - inv.paid) : 0;
+    closeModal('modal-payment-history');
+    openPiutangPaymentModal(_voidInvoiceId, sisa);
+}
+
+// Open void payment confirmation modal
+function openVoidPaymentModal(paymentId, paymentNo, amount, date) {
+    _voidPaymentId = paymentId;
+    const noEl = document.getElementById('void-info-no');
+    const amtEl = document.getElementById('void-info-amount');
+    const dateEl = document.getElementById('void-info-date');
+    const reasonEl = document.getElementById('void-payment-reason');
+    if (noEl) noEl.textContent = paymentNo || '-';
+    if (amtEl) amtEl.textContent = rp(amount || 0);
+    if (dateEl) dateEl.textContent = date || '-';
+    if (reasonEl) reasonEl.value = '';
+    openModal('modal-void-payment');
+}
+
+// Submit void payment
+async function submitVoidPayment() {
+    if (!_voidPaymentId) { showToast('ID pembayaran tidak ditemukan!', 'warning'); return; }
+    const reasonEl = document.getElementById('void-payment-reason');
+    const reason = reasonEl ? reasonEl.value.trim() : '';
+    if (!reason) { showToast('Alasan pembatalan wajib diisi!', 'warning'); return; }
+    const btn = document.getElementById('btn-submit-void');
+    if (btn) { btn.disabled = true; btn.textContent = 'Memproses...'; }
+    try {
+        const res = await fetch('/api/invoices/payments/' + encodeURIComponent(_voidPaymentId) + '/void', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ void_reason: reason })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            closeModal('modal-void-payment');
+            showToast('Pembayaran berhasil di-void dan posting kas dibalik.', 'success');
+            _voidPaymentId = null;
+            await fetchInvoices();
+            await fetchCashTransactions();
+            if (_voidInvoiceId) await openPaymentHistoryModal(_voidInvoiceId);
+        } else {
+            showToast('Gagal void: ' + (data.error || 'Terjadi kesalahan'), 'error');
+        }
+    } catch (err) {
+        console.error(err);
+        showToast('Gagal menghubungi server', 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="trash-2"></i> Konfirmasi Void'; }
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+}
 // ==========================================================================
-// USERS — CRUD
+// USERS â€” CRUD
 // ==========================================================================
 
 async function fetchUsers() {
@@ -3686,7 +3996,7 @@ async function populateMasterDropdowns() {
 }
 
 // ==========================================================================
-// MASTER DATA — CRUD
+// MASTER DATA â€” CRUD
 // ==========================================================================
 
 let currentMasterType = 'product_categories';
@@ -4086,6 +4396,7 @@ async function loadPrefixSettings() {
             const cashTxEl = document.getElementById('settings-prefix-cash-tx');
             const purchaseEl = document.getElementById('settings-prefix-purchase');
             const salesEl = document.getElementById('settings-prefix-sales');
+            const pricelistEl = document.getElementById('settings-prefix-pricelist');
 
             if (productEl) productEl.value = settings.prefix_product ?? 'P';
             if (customerEl) customerEl.value = settings.prefix_customer ?? 'C';
@@ -4093,6 +4404,7 @@ async function loadPrefixSettings() {
             if (cashTxEl) cashTxEl.value = settings.prefix_cash_transaction ?? 'CT';
             if (purchaseEl) purchaseEl.value = settings.prefix_purchase ?? 'PO/{YYYY}/{MM}/';
             if (salesEl) salesEl.value = settings.prefix_sales ?? 'INV/{YYYY}/{MM}/';
+            if (pricelistEl) pricelistEl.value = settings.prefix_pricelist ?? 'PL';
         }
     } catch (err) {
         console.error('Failed to load prefix settings', err);
@@ -4106,7 +4418,8 @@ async function savePrefixSettings() {
         prefix_vendor: document.getElementById('settings-prefix-vendor')?.value || 'V',
         prefix_cash_transaction: document.getElementById('settings-prefix-cash-tx')?.value || 'CT',
         prefix_purchase: document.getElementById('settings-prefix-purchase')?.value || 'PO/{YYYY}/{MM}/',
-        prefix_sales: document.getElementById('settings-prefix-sales')?.value || 'INV/{YYYY}/{MM}/'
+        prefix_sales: document.getElementById('settings-prefix-sales')?.value || 'INV/{YYYY}/{MM}/',
+        prefix_pricelist: document.getElementById('settings-prefix-pricelist')?.value || 'PL'
     };
 
     try {
@@ -4219,7 +4532,7 @@ function populateManualInvoiceCustomerSelect(filter = '') {
 
     dropdown.innerHTML = filtered.map(c => `
         <div class="manual-invoice-customer-dropdown-item" data-id="${c.id}" data-name="${c.name}" style="padding: 0.5rem 0.75rem; cursor: pointer; border-bottom: 1px solid var(--gray-100); display: flex; flex-direction: column; transition: background-color 0.2s;">
-            <span style="font-weight: 500; font-size: 0.875rem;">${c.name} — ${c.city || ''}</span>
+            <span style="font-weight: 500; font-size: 0.875rem;">${c.name} â€” ${c.city || ''}</span>
         </div>
     `).join('');
 
@@ -4362,8 +4675,8 @@ function setImportFile(file) {
         if (contentDiv) {
             contentDiv.innerHTML = `
                 <div style="display:flex;align-items:center;justify-content:center;gap:0.5rem;font-weight:600;color:var(--gray-800);">
-                    <span>📄 ${file.name}</span>
-                    <button onclick="event.stopPropagation(); setImportFile(null);" style="background:transparent;border:none;color:var(--rose-500);font-size:1.2rem;cursor:pointer;font-weight:bold;padding:0 0.25rem;">×</button>
+                    <span>ðŸ“„ ${file.name}</span>
+                    <button onclick="event.stopPropagation(); setImportFile(null);" style="background:transparent;border:none;color:var(--rose-500);font-size:1.2rem;cursor:pointer;font-weight:bold;padding:0 0.25rem;">Ã—</button>
                 </div>
             `;
         }
@@ -4975,9 +5288,9 @@ async function renderCustomerFeeReport() {
             summaryEl.innerHTML = `
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin-bottom:1.5rem;">
                     <div style="background:linear-gradient(135deg,#fffbeb,#fef3c7);border:1px solid #fcd34d;border-radius:0.75rem;padding:1.25rem;display:flex;flex-direction:column;gap:0.25rem;">
-                        <div style="font-size:0.75rem;color:#92400e;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;display:flex;align-items:center;gap:0.3rem;">🔒 Total Beban Fee Customer</div>
+                        <div style="font-size:0.75rem;color:#92400e;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;display:flex;align-items:center;gap:0.3rem;">ðŸ”’ Total Beban Fee Customer</div>
                         <div style="font-size:1.75rem;font-weight:800;color:#78350f;">${rp(d.total_fee)}</div>
-                        <div style="font-size:0.8rem;color:#a16207;">${startDate} — ${endDate}</div>
+                        <div style="font-size:0.8rem;color:#a16207;">${startDate} â€” ${endDate}</div>
                     </div>
                     <div style="background:white;border:1px solid var(--gray-200);border-radius:0.75rem;padding:1.25rem;display:flex;flex-direction:column;gap:0.25rem;">
                         <div style="font-size:0.75rem;color:var(--gray-500);font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Periode Aktif</div>
@@ -5018,7 +5331,7 @@ async function renderCustomerFeeReport() {
             } else {
                 bodyProduk.innerHTML = d.per_produk.map((r, i) => `
                     <tr>
-                        <td style="font-weight:600;">${i === 0 ? '🥇 ' : i === 1 ? '🥈 ' : i === 2 ? '🥉 ' : ''}${r.produk}</td>
+                        <td style="font-weight:600;">${i === 0 ? 'ðŸ¥‡ ' : i === 1 ? 'ðŸ¥ˆ ' : i === 2 ? 'ðŸ¥‰ ' : ''}${r.produk}</td>
                         <td style="text-align:right;color:#92400e;font-weight:700;">${rp(r.total_fee)}</td>
                         <td style="text-align:right;color:var(--gray-500);">${r.jumlah_item}</td>
                     </tr>
@@ -5068,4 +5381,1042 @@ async function renderCustomerFeeReport() {
     if (startEl && !startEl.value) startEl.value = `${year}-01-01`;
     if (endEl && !endEl.value) endEl.value = today.toISOString().split('T')[0];
 })();
+
+// ==========================================================================
+// PRICELIST MODULE — helpers, CRUD, POS integration
+// ==========================================================================
+
+let activePricelistId = null;
+let currentPricelistDetailId = null;
+let pricelistDetailData = null;
+let pendingDeactivatePlPayload = null;
+let plCsvParsedRows = [];
+let addPlAvailableProducts = [];
+
+// ── Helper: populate pricelist dropdown in customer modals ─────────────────
+function populateCustomerPricelistDropdown(selectId, selectedId) {
+    const el = document.getElementById(selectId);
+    if (!el) return;
+    const activeLists = (PRICELISTS || []).filter(pl => pl.is_active);
+    el.innerHTML = '<option value="">Harga Master (tanpa pricelist)</option>' +
+        activeLists.map(pl =>
+            `<option value="${pl.id}" ${String(pl.id) === String(selectedId) ? 'selected' : ''}>${pl.nama} (${pl.kode})</option>`
+        ).join('');
+}
+
+// ── handlePOSCustomerChange – fetch effective prices when customer changes ──
+async function handlePOSCustomerChange(customerId) {
+    const badgeEl = document.getElementById('pos-customer-pricelist-badge');
+    const badgeNameEl = document.getElementById('pos-customer-pricelist-name');
+
+    if (!customerId) {
+        currentPOSCustomerEffectivePrices = {};
+        if (badgeEl) badgeEl.style.display = 'none';
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/pricelists/effective-prices?customer_id=${encodeURIComponent(customerId)}`, { headers: getAuthHeaders() });
+        if (!res.ok) throw new Error('Failed to fetch effective prices');
+        const data = await res.json();
+        const priceList = Array.isArray(data) ? data : (Array.isArray(data.prices) ? data.prices : []);
+
+        currentPOSCustomerEffectivePrices = {};
+        priceList.forEach(row => {
+            currentPOSCustomerEffectivePrices[row.product_id] = row;
+        });
+
+        // Update badge UI
+        if (badgeEl && badgeNameEl) {
+            const plInfo = data.pricelist;
+            if (plInfo && plInfo.is_active) {
+                badgeNameEl.textContent = plInfo.nama;
+                badgeEl.style.display = 'inline-flex';
+            } else {
+                badgeEl.style.display = 'none';
+            }
+        }
+
+        // Recalculate cart prices for non-manual items (Spec 5.3 pt 4)
+        if (cart && cart.length > 0) {
+            let pricesAdjusted = false;
+            cart.forEach(item => {
+                if (!item.manual_override) {
+                    const eff = currentPOSCustomerEffectivePrices[item.id];
+                    const newPrice = eff ? parseFloat(eff.harga_efektif) : parseFloat(item.originalPrice || PRODUCTS.find(p => p.id === item.id)?.price || item.price);
+                    if (item.price !== newPrice) {
+                        pricesAdjusted = true;
+                        item.price = newPrice;
+                    }
+                    item.sumberHarga = eff ? eff.sumber_harga : 'master';
+                    item.pricelistNama = eff ? (eff.pricelist_nama || '') : '';
+                }
+            });
+            renderCart();
+            if (pricesAdjusted) {
+                showToast('Harga item keranjang disesuaikan dengan pricelist pelanggan.', 'info');
+            }
+        }
+    } catch (err) {
+        console.error('handlePOSCustomerChange error:', err);
+    }
+}
+
+// ── fetchPricelists ─────────────────────────────────────────────────────────
+async function fetchPricelists() {
+    try {
+        const res = await fetch('/api/pricelists', { headers: getAuthHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+        PRICELISTS = data.map(pl => ({
+            id: pl.id,
+            kode: pl.kode,
+            nama: pl.nama,
+            keterangan: pl.keterangan || '',
+            is_active: pl.is_active !== false && pl.is_active != 0,
+            total_items: parseInt(pl.total_items) || 0,
+            total_customers: parseInt(pl.total_customers) || 0,
+            created_at: pl.created_at,
+            updated_at: pl.updated_at
+        }));
+        if (document.getElementById('page-pricelists')?.classList.contains('active')) {
+            renderPricelistsTable();
+        }
+    } catch (err) {
+        console.error('fetchPricelists error:', err);
+    }
+}
+
+// ── renderPricelistsTable ──────────────────────────────────────────────────
+function renderPricelistsTable() {
+    const tbody = document.getElementById('pricelists-table-body');
+    if (!tbody) return;
+
+    const searchVal = (document.getElementById('pricelist-search')?.value || '').toLowerCase().trim();
+    const statusVal = document.getElementById('pricelist-status-filter')?.value || 'all';
+
+    let list = PRICELISTS || [];
+    if (searchVal) {
+        list = list.filter(pl =>
+            pl.nama.toLowerCase().includes(searchVal) ||
+            pl.kode.toLowerCase().includes(searchVal) ||
+            (pl.keterangan && pl.keterangan.toLowerCase().includes(searchVal))
+        );
+    }
+    if (statusVal !== 'all') {
+        const isAktif = statusVal === '1';
+        list = list.filter(pl => pl.is_active === isAktif);
+    }
+
+    if (list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2.5rem; color:var(--gray-400);">
+            <i data-lucide="inbox" style="width:28px;height:28px;margin-bottom:0.5rem;display:inline-block;opacity:0.6;"></i>
+            <div>Belum ada pricelist yang sesuai. Klik "Buat Pricelist Baru" untuk memulai.</div>
+        </td></tr>`;
+        if (window.lucide) lucide.createIcons();
+        return;
+    }
+
+    tbody.innerHTML = list.map(pl => `
+        <tr style="cursor:pointer;" onclick="openPricelistDetail(${pl.id})">
+            <td style="font-weight:600; color:var(--blue-600);">${pl.kode}</td>
+            <td style="font-weight:600; color:var(--gray-800);">${pl.nama}</td>
+            <td style="color:var(--gray-500); max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${pl.keterangan || '<span style="color:var(--gray-300);">—</span>'}</td>
+            <td style="text-align:center; font-weight:600;">${pl.total_items}</td>
+            <td style="text-align:center; font-weight:600; color:${pl.total_customers > 0 ? 'var(--blue-600)' : 'var(--gray-500)'};">${pl.total_customers}</td>
+            <td style="text-align:center;">
+                <span class="badge-status ${pl.is_active ? 'aman' : 'bad'}">${pl.is_active ? 'Aktif' : 'Nonaktif'}</span>
+            </td>
+            <td style="text-align:right; white-space:nowrap;" onclick="event.stopPropagation()">
+                <button class="btn-toolbar secondary" style="padding:0.25rem 0.5rem;" title="Edit" onclick="openEditPricelistModal(${pl.id})">
+                    <i data-lucide="edit-2" style="width:13px;height:13px;margin:0;"></i>
+                </button>
+                <button class="btn-toolbar secondary" style="padding:0.25rem 0.5rem;" title="Duplikat" onclick="openDuplicatePricelistModal(${pl.id})">
+                    <i data-lucide="copy" style="width:13px;height:13px;margin:0;"></i>
+                </button>
+                <button class="btn-toolbar secondary" style="padding:0.25rem 0.5rem; color:var(--rose-500);" title="Hapus" onclick="deletePricelist(${pl.id}, '${pl.nama.replace(/'/g, "\\'")}', ${pl.total_customers})">
+                    <i data-lucide="trash-2" style="width:13px;height:13px;margin:0;"></i>
+                </button>
+            </td>
+        </tr>
+    `).join('');
+    if (window.lucide) lucide.createIcons();
+}
+
+// ── showPricelistView – toggle list / detail ──────────────────────────────
+function showPricelistView(view) {
+    const listView = document.getElementById('pricelists-list-view');
+    const detailView = document.getElementById('pricelists-detail-view');
+    if (view === 'list') {
+        if (listView) listView.style.display = '';
+        if (detailView) detailView.style.display = 'none';
+        activePricelistId = null;
+        currentPricelistDetailId = null;
+        pricelistDetailData = null;
+    } else {
+        if (listView) listView.style.display = 'none';
+        if (detailView) detailView.style.display = '';
+    }
+}
+
+function closePricelistDetail() {
+    showPricelistView('list');
+    renderPricelistsTable();
+}
+
+// ── openCreatePricelistModal & submitCreatePricelist ────────────────────────
+function openCreatePricelistModal() {
+    const nameEl = document.getElementById('create-pl-nama');
+    const descEl = document.getElementById('create-pl-keterangan');
+    if (nameEl) nameEl.value = '';
+    if (descEl) descEl.value = '';
+    openModal('modal-create-pricelist');
+    setTimeout(() => nameEl?.focus(), 100);
+}
+
+async function submitCreatePricelist() {
+    const nama = document.getElementById('create-pl-nama')?.value.trim();
+    const keterangan = document.getElementById('create-pl-keterangan')?.value.trim() || '';
+    if (!nama) {
+        showToast('Nama pricelist wajib diisi!', 'warning');
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/pricelists', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ nama, keterangan })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            closeModal('modal-create-pricelist');
+            showToast(`Pricelist "${data.data.nama}" (${data.data.kode}) berhasil dibuat!`, 'success');
+            await fetchPricelists();
+            openPricelistDetail(data.data.id);
+        } else {
+            showToast(data.error || 'Gagal membuat pricelist', 'error');
+        }
+    } catch (err) {
+        showToast('Gagal menghubungi server', 'error');
+    }
+}
+
+// ── openEditPricelistModal & submitEditPricelist ────────────────────────────
+function openEditPricelistModal(id) {
+    const pl = PRICELISTS.find(p => p.id == id);
+    if (!pl) return;
+    document.getElementById('edit-pl-id').value = pl.id;
+    document.getElementById('edit-pl-kode-display').value = pl.kode;
+    document.getElementById('edit-pl-nama').value = pl.nama;
+    document.getElementById('edit-pl-keterangan').value = pl.keterangan || '';
+    document.getElementById('edit-pl-status').value = pl.is_active ? '1' : '0';
+    openModal('modal-edit-pricelist');
+}
+
+async function submitEditPricelist() {
+    const id = document.getElementById('edit-pl-id')?.value;
+    const nama = document.getElementById('edit-pl-nama')?.value.trim();
+    const keterangan = document.getElementById('edit-pl-keterangan')?.value.trim() || '';
+    const is_active = parseInt(document.getElementById('edit-pl-status')?.value || '1', 10);
+
+    if (!nama) {
+        showToast('Nama pricelist tidak boleh kosong!', 'warning');
+        return;
+    }
+
+    const pl = PRICELISTS.find(p => p.id == id);
+    // Spec 5.1: If turning inactive while used by customers, prompt confirmation modal
+    if (is_active === 0 && pl && pl.total_customers > 0) {
+        pendingDeactivatePlPayload = { id, nama, keterangan, is_active: 0 };
+        document.getElementById('deactivate-pl-id').value = id;
+        const msgEl = document.getElementById('deactivate-pl-message');
+        if (msgEl) {
+            msgEl.innerHTML = `Pricelist <strong>"${pl.nama}"</strong> sedang digunakan oleh <strong>${pl.total_customers} pelanggan</strong>.`;
+        }
+        closeModal('modal-edit-pricelist');
+        openModal('modal-confirm-deactivate-pricelist');
+        return;
+    }
+
+    await doUpdatePricelist({ id, nama, keterangan, is_active });
+}
+
+async function doUpdatePricelist(payload) {
+    try {
+        const res = await fetch(`/api/pricelists/${payload.id}`, {
+            method: 'PUT',
+            headers: getAuthHeaders(),
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok) {
+            closeModal('modal-edit-pricelist');
+            closeModal('modal-confirm-deactivate-pricelist');
+            showToast('Pricelist berhasil diperbarui!', 'success');
+            await fetchPricelists();
+            if (activePricelistId == payload.id) {
+                openPricelistDetail(payload.id);
+            }
+        } else {
+            showToast(data.error || 'Gagal memperbarui pricelist', 'error');
+        }
+    } catch (err) {
+        showToast('Gagal menghubungi server', 'error');
+    }
+}
+
+async function confirmDeactivatePricelist() {
+    if (!pendingDeactivatePlPayload) {
+        const id = document.getElementById('deactivate-pl-id')?.value;
+        if (!id) return;
+        pendingDeactivatePlPayload = { id, is_active: 0 };
+    }
+    await doUpdatePricelist(pendingDeactivatePlPayload);
+    pendingDeactivatePlPayload = null;
+}
+
+// ── openDuplicatePricelistModal & submitDuplicatePricelist ─────────────────
+function openDuplicatePricelistModal(id) {
+    const pl = PRICELISTS.find(p => p.id == id);
+    if (!pl) return;
+    document.getElementById('duplicate-pl-id').value = pl.id;
+    document.getElementById('duplicate-pl-nama').value = `${pl.nama} (Salinan)`;
+    openModal('modal-duplicate-pricelist');
+    setTimeout(() => document.getElementById('duplicate-pl-nama')?.focus(), 100);
+}
+
+async function submitDuplicatePricelist() {
+    const id = document.getElementById('duplicate-pl-id')?.value;
+    const nama = document.getElementById('duplicate-pl-nama')?.value.trim();
+    if (!id) return;
+    if (!nama) {
+        showToast('Nama pricelist baru wajib diisi!', 'warning');
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/pricelists/${id}/duplicate`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ nama })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            closeModal('modal-duplicate-pricelist');
+            showToast(`Duplikat berhasil: "${data.data.nama}" (${data.data.kode})`, 'success');
+            await fetchPricelists();
+            openPricelistDetail(data.data.id);
+        } else {
+            showToast(data.error || 'Gagal menduplikat pricelist', 'error');
+        }
+    } catch (err) {
+        showToast('Gagal menghubungi server', 'error');
+    }
+}
+
+// ── deletePricelist ────────────────────────────────────────────────────────
+async function deletePricelist(id, nama, totalCustomers) {
+    // Spec R7: Pricelist yang masih dipakai customer tidak boleh dihapus
+    if (totalCustomers > 0) {
+        showToast(`Tidak dapat dihapus: ${totalCustomers} pelanggan masih menggunakan pricelist ini. Pricelist hanya boleh dinonaktifkan.`, 'warning');
+        return;
+    }
+    if (!confirm(`Hapus permanen pricelist "${nama}"?`)) return;
+
+    try {
+        const res = await fetch(`/api/pricelists/${id}`, { method: 'DELETE', headers: getAuthHeaders() });
+        const data = await res.json();
+        if (res.status === 409) {
+            showToast(data.error || `Tidak bisa dihapus: masih digunakan oleh ${data.total_customers} pelanggan.`, 'error');
+            return;
+        }
+        if (res.ok) {
+            showToast('Pricelist berhasil dihapus!', 'success');
+            await fetchPricelists();
+            showPricelistView('list');
+        } else {
+            showToast(data.error || 'Gagal menghapus pricelist', 'error');
+        }
+    } catch (err) {
+        showToast('Gagal menghubungi server', 'error');
+    }
+}
+
+// ── openPricelistDetail ────────────────────────────────────────────────────
+async function openPricelistDetail(id) {
+    activePricelistId = id;
+    currentPricelistDetailId = id;
+    showPricelistView('detail');
+
+    const detailNama = document.getElementById('detail-pl-nama');
+    if (detailNama) detailNama.textContent = 'Memuat...';
+
+    try {
+        const res = await fetch(`/api/pricelists/${id}`, { headers: getAuthHeaders() });
+        if (!res.ok) throw new Error('Not found');
+        pricelistDetailData = await res.json();
+        const pl = pricelistDetailData;
+
+        if (detailNama) detailNama.textContent = pl.nama;
+        const kodeEl = document.getElementById('detail-pl-kode');
+        if (kodeEl) kodeEl.textContent = pl.kode;
+
+        const statusBadge = document.getElementById('detail-pl-badge-status');
+        if (statusBadge) {
+            statusBadge.textContent = pl.is_active ? 'Aktif' : 'Nonaktif';
+            statusBadge.className = `badge-status ${pl.is_active ? 'aman' : 'bad'}`;
+        }
+
+        const ketEl = document.getElementById('detail-pl-keterangan');
+        if (ketEl) ketEl.textContent = pl.keterangan || 'Tidak ada keterangan';
+
+        // Stats calculation
+        const items = pl.items || [];
+        const statItems = document.getElementById('stat-pl-total-items');
+        const statCusts = document.getElementById('stat-pl-total-customers');
+        const statDiff = document.getElementById('stat-pl-avg-diff');
+        if (statItems) statItems.textContent = items.length;
+        if (statCusts) statCusts.textContent = pl.total_customers || 0;
+
+        if (statDiff && items.length > 0) {
+            const diffs = items.filter(i => parseFloat(i.harga_master) > 0).map(i =>
+                ((parseFloat(i.harga) - parseFloat(i.harga_master)) / parseFloat(i.harga_master)) * 100
+            );
+            const avg = diffs.length > 0 ? (diffs.reduce((a, b) => a + b, 0) / diffs.length).toFixed(1) : 0;
+            statDiff.textContent = `${avg > 0 ? '+' : ''}${avg}%`;
+            statDiff.style.color = avg < 0 ? 'var(--emerald-600)' : (avg > 0 ? 'var(--rose-500)' : 'var(--gray-600)');
+        } else if (statDiff) {
+            statDiff.textContent = '0%';
+            statDiff.style.color = 'var(--gray-600)';
+        }
+
+        renderPricelistItemsTable(items);
+    } catch (err) {
+        showToast('Gagal memuat detail pricelist', 'error');
+        showPricelistView('list');
+    }
+}
+
+// ── renderPricelistItemsTable ──────────────────────────────────────────────
+function renderPricelistItemsTable(items) {
+    const tbody = document.getElementById('detail-pl-items-body');
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    const showHpp = role === 'admin' || role === 'owner';
+
+    const thHpp = document.getElementById('th-pl-hpp');
+    if (thHpp) thHpp.style.display = showHpp ? '' : 'none';
+
+    // Reset check all
+    const chkAll = document.getElementById('check-all-pl-items');
+    if (chkAll) chkAll.checked = false;
+    updatePricelistItemSelection();
+
+    if (!tbody) return;
+    if (!items || items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:2.5rem; color:var(--gray-400);">
+            <i data-lucide="package" style="width:28px;height:28px;margin-bottom:0.5rem;display:inline-block;opacity:0.6;"></i>
+            <div>Belum ada produk di pricelist ini. Klik <strong>Tambah Produk</strong> atau <strong>Import CSV</strong> untuk mulai.</div>
+        </td></tr>`;
+        if (window.lucide) lucide.createIcons();
+        return;
+    }
+
+    tbody.innerHTML = items.map(item => {
+        const hargaMaster = parseFloat(item.harga_master || 0);
+        const hargaKhusus = parseFloat(item.harga || 0);
+        const selisihRp = hargaKhusus - hargaMaster;
+        const selisihPct = hargaMaster > 0 ? (selisihRp / hargaMaster * 100).toFixed(1) : 0;
+        const diffColor = selisihPct < 0 ? 'var(--emerald-600)' : (selisihPct > 0 ? 'var(--rose-500)' : 'var(--gray-400)');
+        const hpp = parseFloat(item.hpp || 0);
+        const hppWarn = showHpp && hpp > 0 && hargaKhusus < hpp;
+
+        return `<tr data-product-id="${item.product_id}">
+            <td style="text-align:center;">
+                <input type="checkbox" class="pl-item-chk" value="${item.product_id}" onchange="updatePricelistItemSelection()">
+            </td>
+            <td style="font-weight:600; color:var(--blue-600); font-size:0.85rem;">${item.sku || '-'}</td>
+            <td style="font-weight:600; color:var(--gray-800);">${item.product_name || item.name || '-'}</td>
+            <td style="color:var(--gray-500); font-size:0.85rem;">${item.unit || '-'}</td>
+            <td style="text-align:right; font-weight:500;">${rp(hargaMaster)}</td>
+            <td style="text-align:right; font-weight:500; color:${hppWarn ? 'var(--rose-600)' : 'var(--gray-700)'}; display:${showHpp ? '' : 'none'};">
+                ${showHpp ? rp(hpp) : '—'}${hppWarn ? ' ⚠️' : ''}
+            </td>
+            <td style="text-align:right;">
+                <input type="number" class="inline-price-input"
+                    value="${hargaKhusus}"
+                    min="1" step="1"
+                    onchange="savePricelistItemPrice('${item.product_id}', this.value, this)"
+                    style="width:130px; text-align:right; font-weight:600;"
+                    title="Ubah harga khusus">
+            </td>
+            <td style="text-align:right; font-weight:600; color:${diffColor}; font-size:0.85rem;">
+                ${selisihRp >= 0 ? '+' : ''}${rp(selisihRp)}<br>
+                <span style="font-size:0.75rem;">${selisihPct > 0 ? '+' : ''}${selisihPct}%</span>
+            </td>
+            <td style="text-align:center;">
+                ${hppWarn ? '<span class="badge-hpp-warning" style="font-size:0.68rem; padding:0.15rem 0.4rem;">⚠️ Bawah HPP</span>' : '<span style="color:var(--gray-300); font-size:0.8rem;">—</span>'}
+            </td>
+            <td style="text-align:center;">
+                <button class="btn-toolbar secondary" style="padding:0.25rem 0.45rem; color:var(--rose-500);" title="Hapus dari pricelist" onclick="deletePricelistItem('${item.product_id}')">
+                    <i data-lucide="x" style="width:13px;height:13px;margin:0;"></i>
+                </button>
+            </td>
+        </tr>`;
+    }).join('');
+    if (window.lucide) lucide.createIcons();
+}
+
+// ── savePricelistItemPrice ─────────────────────────────────────────────────
+async function savePricelistItemPrice(productId, newPrice, inputEl) {
+    const id = activePricelistId;
+    if (!id) return;
+    const harga = parseFloat(newPrice);
+    if (isNaN(harga) || harga <= 0) {
+        showToast('Harga harus lebih besar dari 0!', 'warning');
+        if (inputEl && pricelistDetailData?.items) {
+            const orig = pricelistDetailData.items.find(i => i.product_id === productId);
+            if (orig) inputEl.value = orig.harga;
+        }
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/pricelists/${id}/items`, {
+            method: 'PUT',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ items: [{ product_id: productId, harga }] })
+        });
+        if (res.ok) {
+            if (pricelistDetailData?.items) {
+                const item = pricelistDetailData.items.find(i => i.product_id === productId);
+                if (item) item.harga = harga;
+            }
+            showToast('Harga berhasil disimpan', 'success');
+            openPricelistDetail(id);
+            fetchPricelists();
+        } else {
+            const data = await res.json();
+            showToast(data.error || 'Gagal menyimpan harga', 'error');
+        }
+    } catch (err) {
+        showToast('Gagal menyimpan harga', 'error');
+    }
+}
+
+// ── deletePricelistItem ────────────────────────────────────────────────────
+async function deletePricelistItem(productId) {
+    const id = activePricelistId;
+    if (!id) return;
+    if (!confirm('Hapus produk ini dari pricelist?')) return;
+    try {
+        const res = await fetch(`/api/pricelists/${id}/items/${productId}`, { method: 'DELETE', headers: getAuthHeaders() });
+        if (res.ok) {
+            showToast('Produk dihapus dari pricelist', 'success');
+            await openPricelistDetail(id);
+            await fetchPricelists();
+        } else {
+            const data = await res.json();
+            showToast(data.error || 'Gagal menghapus produk', 'error');
+        }
+    } catch (err) {
+        showToast('Gagal menghapus produk', 'error');
+    }
+}
+
+// ── Multi-selection in items table ─────────────────────────────────────────
+function toggleSelectAllPricelistItems(checked) {
+    document.querySelectorAll('.pl-item-chk').forEach(chk => { chk.checked = checked; });
+    updatePricelistItemSelection();
+}
+
+function updatePricelistItemSelection() {
+    const checked = document.querySelectorAll('.pl-item-chk:checked');
+    const countEl = document.getElementById('detail-pl-selected-count');
+    const btnEl = document.getElementById('btn-bulk-delete-items');
+    if (countEl) {
+        countEl.textContent = `${checked.length} dipilih`;
+        countEl.style.display = checked.length > 0 ? '' : 'none';
+    }
+    if (btnEl) btnEl.style.display = checked.length > 0 ? '' : 'none';
+}
+
+async function deleteSelectedPricelistItems() {
+    const id = activePricelistId;
+    const checked = Array.from(document.querySelectorAll('.pl-item-chk:checked')).map(c => c.value);
+    if (!checked.length || !id) return;
+    if (!confirm(`Hapus ${checked.length} produk terpilih dari pricelist ini?`)) return;
+
+    try {
+        for (const productId of checked) {
+            await fetch(`/api/pricelists/${id}/items/${productId}`, { method: 'DELETE', headers: getAuthHeaders() });
+        }
+        showToast(`${checked.length} produk berhasil dihapus`, 'success');
+        await openPricelistDetail(id);
+        await fetchPricelists();
+    } catch (err) {
+        showToast('Gagal menghapus beberapa produk', 'error');
+    }
+}
+
+function filterPricelistItems() {
+    const q = (document.getElementById('detail-pl-search')?.value || '').toLowerCase();
+    document.querySelectorAll('#detail-pl-items-body tr').forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = q ? (text.includes(q) ? '' : 'none') : '';
+    });
+}
+
+// ── Modal Add Products to Pricelist ───────────────────────────────────────
+function openAddPricelistProductsModal() {
+    const id = activePricelistId;
+    if (!id) return;
+    const existingIds = new Set((pricelistDetailData?.items || []).map(i => i.product_id));
+
+    // Populate category filter
+    const catSelect = document.getElementById('add-pl-prod-category');
+    if (catSelect) {
+        const uniqueCats = Array.from(new Set(PRODUCTS.map(p => p.category).filter(Boolean)));
+        catSelect.innerHTML = '<option value="all">Semua Kategori</option>' +
+            uniqueCats.map(c => `<option value="${c}">${c}</option>`).join('');
+    }
+
+    // Filter available products
+    addPlAvailableProducts = PRODUCTS.filter(p => !existingIds.has(p.id));
+
+    const searchInput = document.getElementById('add-pl-prod-search');
+    if (searchInput) searchInput.value = '';
+    const modeSelect = document.getElementById('add-pl-initial-price-mode');
+    if (modeSelect) modeSelect.value = 'master';
+    handleInitialPriceModeChange();
+
+    renderAddPricelistProductsList();
+    openModal('modal-add-pricelist-products');
+}
+
+function handleInitialPriceModeChange() {
+    const mode = document.getElementById('add-pl-initial-price-mode')?.value || 'master';
+    const percentInp = document.getElementById('add-pl-percent-input');
+    const percentLbl = document.getElementById('add-pl-percent-label');
+    const showPercent = mode === 'discount' || mode === 'markup';
+    if (percentInp) {
+        percentInp.style.display = showPercent ? 'inline-block' : 'none';
+        if (!percentInp.value) percentInp.value = '10';
+    }
+    if (percentLbl) percentLbl.style.display = showPercent ? 'inline' : 'none';
+    recalculateAddPricelistInitialPrices();
+}
+
+function recalculateAddPricelistInitialPrices() {
+    const mode = document.getElementById('add-pl-initial-price-mode')?.value || 'master';
+    const pct = parseFloat(document.getElementById('add-pl-percent-input')?.value || '10');
+
+    document.querySelectorAll('#add-pl-products-body tr').forEach(row => {
+        const pid = row.dataset.productId;
+        const prod = PRODUCTS.find(p => p.id === pid);
+        if (!prod) return;
+        const master = parseFloat(prod.price || 0);
+        let initPrice = master;
+        if (mode === 'discount') {
+            initPrice = Math.max(1, Math.round(master * (1 - pct / 100)));
+        } else if (mode === 'markup') {
+            initPrice = Math.round(master * (1 + pct / 100));
+        }
+        const inp = row.querySelector('.add-pl-price-input');
+        if (inp) inp.value = initPrice;
+    });
+}
+
+function renderAddPricelistProductsList() {
+    const tbody = document.getElementById('add-pl-products-body');
+    if (!tbody) return;
+
+    const q = (document.getElementById('add-pl-prod-search')?.value || '').toLowerCase().trim();
+    const cat = document.getElementById('add-pl-prod-category')?.value || 'all';
+
+    let filtered = addPlAvailableProducts;
+    if (cat !== 'all') {
+        filtered = filtered.filter(p => p.category === cat || p.category_id === cat);
+    }
+    if (q) {
+        filtered = filtered.filter(p =>
+            p.name.toLowerCase().includes(q) ||
+            (p.sku && p.sku.toLowerCase().includes(q)) ||
+            p.id.toLowerCase().includes(q)
+        );
+    }
+
+    const mode = document.getElementById('add-pl-initial-price-mode')?.value || 'master';
+    const pct = parseFloat(document.getElementById('add-pl-percent-input')?.value || '10');
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:2rem; color:var(--gray-400);">Tidak ada produk yang dapat ditambahkan</td></tr>`;
+        updateAddPricelistProductsSelection();
+        return;
+    }
+
+    tbody.innerHTML = filtered.map(p => {
+        const master = parseFloat(p.price || 0);
+        let initPrice = master;
+        if (mode === 'discount') initPrice = Math.max(1, Math.round(master * (1 - pct / 100)));
+        else if (mode === 'markup') initPrice = Math.round(master * (1 + pct / 100));
+
+        const catName = p.category || '-';
+
+        return `<tr data-product-id="${p.id}">
+            <td style="text-align:center;">
+                <input type="checkbox" class="add-pl-chk" value="${p.id}" onchange="updateAddPricelistProductsSelection()">
+            </td>
+            <td style="font-size:0.8rem; color:var(--blue-600); font-weight:600;">${p.sku || p.id}</td>
+            <td style="font-weight:600;">${p.name}</td>
+            <td style="color:var(--gray-500); font-size:0.85rem;">${catName}</td>
+            <td style="text-align:right; font-weight:500;">${rp(master)}</td>
+            <td style="text-align:right;">
+                <input type="number" class="inline-price-input add-pl-price-input"
+                    data-master="${master}"
+                    value="${initPrice}" min="1" step="1"
+                    style="width:120px; text-align:right;">
+            </td>
+        </tr>`;
+    }).join('');
+
+    const chkAll = document.getElementById('check-all-add-pl-prods');
+    if (chkAll) chkAll.checked = false;
+    updateAddPricelistProductsSelection();
+}
+
+function toggleSelectAllAddPricelistProducts(checked) {
+    document.querySelectorAll('.add-pl-chk').forEach(chk => { chk.checked = checked; });
+    updateAddPricelistProductsSelection();
+}
+
+function updateAddPricelistProductsSelection() {
+    const checked = document.querySelectorAll('.add-pl-chk:checked');
+    const countEl = document.getElementById('add-pl-selected-count');
+    if (countEl) countEl.textContent = `${checked.length} produk dipilih`;
+}
+
+async function submitAddPricelistProducts() {
+    const id = activePricelistId;
+    if (!id) return;
+    const checkedRows = Array.from(document.querySelectorAll('.add-pl-chk:checked')).map(chk => chk.closest('tr'));
+    if (checkedRows.length === 0) {
+        showToast('Pilih minimal 1 produk untuk ditambahkan', 'warning');
+        return;
+    }
+
+    const items = [];
+    for (const row of checkedRows) {
+        const prodId = row.dataset.productId;
+        const priceInp = row.querySelector('.add-pl-price-input');
+        const harga = parseFloat(priceInp?.value || '0');
+        if (isNaN(harga) || harga <= 0) {
+            showToast(`Harga untuk produk ${prodId} harus lebih besar dari 0`, 'warning');
+            return;
+        }
+        items.push({ product_id: prodId, harga });
+    }
+
+    try {
+        const res = await fetch(`/api/pricelists/${id}/items`, {
+            method: 'PUT',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ items })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            closeModal('modal-add-pricelist-products');
+            showToast(`${items.length} produk berhasil ditambahkan ke pricelist!`, 'success');
+            await openPricelistDetail(id);
+            await fetchPricelists();
+        } else {
+            showToast(data.error || 'Gagal menyimpan item ke pricelist', 'error');
+        }
+    } catch (err) {
+        showToast('Gagal menyimpan', 'error');
+    }
+}
+
+// ── Modal CSV Import ──────────────────────────────────────────────────────
+function openPricelistCsvModal() {
+    plCsvParsedRows = [];
+    const previewContainer = document.getElementById('pl-csv-preview-container');
+    const previewBody = document.getElementById('pl-csv-preview-body');
+    const fileInp = document.getElementById('pl-csv-file-input');
+    const txtArea = document.getElementById('pl-csv-textarea');
+    const submitBtn = document.getElementById('btn-submit-csv-items');
+
+    if (previewContainer) previewContainer.style.display = 'none';
+    if (previewBody) previewBody.innerHTML = '';
+    if (fileInp) fileInp.value = '';
+    if (txtArea) txtArea.value = '';
+    if (submitBtn) submitBtn.disabled = true;
+
+    openModal('modal-import-pricelist-csv');
+}
+
+function downloadPricelistCsvTemplate() {
+    const lines = ['kode_produk,harga'];
+    const sample = PRODUCTS.slice(0, 5);
+    sample.forEach(p => {
+        lines.push(`${p.sku || p.id},${Math.round(p.price || 50000)}`);
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'template_pricelist.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function handlePricelistCsvFile(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const text = e.target.result;
+        const txtArea = document.getElementById('pl-csv-textarea');
+        if (txtArea) txtArea.value = text;
+        parsePricelistCsvText(text);
+    };
+    reader.readAsText(file);
+}
+
+function parsePricelistCsvText(text) {
+    if (!text || !text.trim()) {
+        document.getElementById('pl-csv-preview-container').style.display = 'none';
+        document.getElementById('btn-submit-csv-items').disabled = true;
+        plCsvParsedRows = [];
+        return;
+    }
+
+    const lines = text.trim().split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) return;
+
+    // Detect delimiter: comma, semicolon, tab
+    const firstLine = lines[0];
+    let delimiter = ',';
+    if (firstLine.includes(';') && !firstLine.includes(',')) delimiter = ';';
+    else if (firstLine.includes('\t')) delimiter = '\t';
+
+    let startIndex = 0;
+    let codeCol = 0;
+    let priceCol = 1;
+
+    // Check if line 0 is a header
+    const headerCols = firstLine.split(delimiter).map(c => c.replace(/"/g, '').trim().toLowerCase());
+    const isHeader = headerCols.some(c => c.includes('kode') || c.includes('sku') || c.includes('product') || c.includes('harga') || c.includes('price'));
+    if (isHeader) {
+        startIndex = 1;
+        const foundCode = headerCols.findIndex(c => c.includes('kode') || c.includes('sku') || c.includes('product') || c === 'id');
+        const foundPrice = headerCols.findIndex(c => c.includes('harga') || c.includes('price'));
+        if (foundCode !== -1) codeCol = foundCode;
+        if (foundPrice !== -1) priceCol = foundPrice;
+    }
+
+    const previewBody = document.getElementById('pl-csv-preview-body');
+    const validBadge = document.getElementById('pl-csv-valid-badge');
+    const invalidBadge = document.getElementById('pl-csv-invalid-badge');
+    const submitBtn = document.getElementById('btn-submit-csv-items');
+
+    plCsvParsedRows = [];
+    let validCount = 0;
+    let invalidCount = 0;
+    const htmlRows = [];
+
+    // Map for deduplication (last write wins per Rule 7)
+    const dedupMap = new Map();
+
+    for (let i = startIndex; i < lines.length; i++) {
+        const rawLine = lines[i];
+        const cols = rawLine.split(delimiter).map(c => c.replace(/"/g, '').trim());
+        const codeInput = cols[codeCol] || '';
+        const priceInput = cols[priceCol] || '';
+
+        const lineNum = i + 1;
+        let isValid = true;
+        let errorReason = '';
+        let matchedProduct = null;
+
+        if (!codeInput) {
+            isValid = false;
+            errorReason = 'Kode produk kosong';
+        } else {
+            // Find in PRODUCTS by SKU or ID or Name
+            matchedProduct = PRODUCTS.find(p =>
+                (p.sku && p.sku.toLowerCase() === codeInput.toLowerCase()) ||
+                (p.id && p.id.toLowerCase() === codeInput.toLowerCase()) ||
+                p.name.toLowerCase() === codeInput.toLowerCase()
+            );
+            if (!matchedProduct) {
+                isValid = false;
+                errorReason = `Produk '${codeInput}' tidak ditemukan di master`;
+            }
+        }
+
+        const hargaNum = parseFloat(priceInput.replace(/[^\d.-]/g, ''));
+        if (isValid) {
+            if (isNaN(hargaNum) || hargaNum <= 0) {
+                isValid = false;
+                errorReason = 'Harga tidak valid (harus angka > 0)';
+            }
+        }
+
+        if (isValid && matchedProduct) {
+            validCount++;
+            dedupMap.set(matchedProduct.id, {
+                product_id: matchedProduct.id,
+                harga: hargaNum,
+                name: matchedProduct.name,
+                code: codeInput
+            });
+            htmlRows.push(`
+                <tr style="background:#f0fdf4;">
+                    <td style="font-size:0.8rem; color:var(--gray-500);">${lineNum}</td>
+                    <td style="font-weight:600; font-size:0.85rem;">${codeInput}</td>
+                    <td style="font-weight:500;">${matchedProduct.name}</td>
+                    <td style="text-align:right; font-weight:600; color:var(--emerald-600);">${rp(hargaNum)}</td>
+                    <td><span class="badge-status aman">Valid</span></td>
+                </tr>
+            `);
+        } else {
+            invalidCount++;
+            htmlRows.push(`
+                <tr style="background:#fef2f2;">
+                    <td style="font-size:0.8rem; color:var(--gray-500);">${lineNum}</td>
+                    <td style="font-weight:600; font-size:0.85rem;">${codeInput || '-'}</td>
+                    <td style="color:var(--gray-400);">${matchedProduct?.name || '—'}</td>
+                    <td style="text-align:right; color:var(--gray-400);">${priceInput || '—'}</td>
+                    <td><span class="badge-status bad" style="font-size:0.75rem;">${errorReason}</span></td>
+                </tr>
+            `);
+        }
+    }
+
+    plCsvParsedRows = Array.from(dedupMap.values());
+
+    if (previewBody) previewBody.innerHTML = htmlRows.join('');
+    if (validBadge) validBadge.textContent = `${validCount} baris valid (${plCsvParsedRows.length} produk unik)`;
+    if (invalidBadge) invalidBadge.textContent = `${invalidCount} baris error`;
+
+    const previewContainer = document.getElementById('pl-csv-preview-container');
+    if (previewContainer) previewContainer.style.display = 'block';
+
+    if (submitBtn) {
+        submitBtn.disabled = plCsvParsedRows.length === 0;
+        submitBtn.innerHTML = `<i data-lucide="check-circle"></i> Simpan ${plCsvParsedRows.length} Item Valid`;
+    }
+    if (window.lucide) lucide.createIcons();
+}
+
+async function submitPricelistCsvItems() {
+    const id = activePricelistId;
+    if (!id || plCsvParsedRows.length === 0) return;
+
+    const items = plCsvParsedRows.map(r => ({ product_id: r.product_id, harga: r.harga }));
+
+    try {
+        const res = await fetch(`/api/pricelists/${id}/items`, {
+            method: 'PUT',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ items })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            closeModal('modal-import-pricelist-csv');
+            showToast(`${items.length} produk berhasil diimpor ke pricelist!`, 'success');
+            plCsvParsedRows = [];
+            await openPricelistDetail(id);
+            await fetchPricelists();
+        } else {
+            showToast(data.error || 'Gagal menyimpan item import', 'error');
+        }
+    } catch (err) {
+        showToast('Gagal mengimpor CSV', 'error');
+    }
+}
+
+// ── Modal Bulk Percent ─────────────────────────────────────────────────────
+function openPricelistBulkPercentModal() {
+    const id = activePricelistId;
+    if (!id) return;
+    const checked = document.querySelectorAll('.pl-item-chk:checked');
+    const targetSelect = document.getElementById('bulk-percent-target');
+    if (targetSelect) {
+        targetSelect.value = checked.length > 0 ? 'selected' : 'all';
+    }
+    const valInp = document.getElementById('bulk-percent-value');
+    if (valInp && !valInp.value) valInp.value = '90';
+    openModal('modal-pricelist-bulk-percent');
+}
+
+async function applyPricelistBulkPercent() {
+    const id = activePricelistId;
+    if (!id || !pricelistDetailData?.items?.length) return;
+
+    const target = document.getElementById('bulk-percent-target')?.value || 'all';
+    const pct = parseFloat(document.getElementById('bulk-percent-value')?.value || '90');
+    const round = parseInt(document.getElementById('bulk-percent-round')?.value || '100', 10);
+
+    if (isNaN(pct) || pct <= 0) {
+        showToast('Masukkan persentase yang valid (> 0)', 'warning');
+        return;
+    }
+
+    const checkedIds = new Set(Array.from(document.querySelectorAll('.pl-item-chk:checked')).map(c => c.value));
+
+    let targetItems = pricelistDetailData.items;
+    if (target === 'selected') {
+        targetItems = targetItems.filter(i => checkedIds.has(i.product_id));
+        if (targetItems.length === 0) {
+            showToast('Tidak ada produk yang dicentang di tabel', 'warning');
+            return;
+        }
+    }
+
+    const items = targetItems.map(item => {
+        const master = parseFloat(item.harga_master || 0);
+        let calcPrice = master * (pct / 100);
+        if (round > 1) {
+            calcPrice = Math.round(calcPrice / round) * round;
+        } else {
+            calcPrice = Math.round(calcPrice);
+        }
+        calcPrice = Math.max(1, calcPrice);
+        return { product_id: item.product_id, harga: calcPrice };
+    });
+
+    try {
+        const res = await fetch(`/api/pricelists/${id}/items`, {
+            method: 'PUT',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ items })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            closeModal('modal-pricelist-bulk-percent');
+            showToast(`Harga massal berhasil diterapkan ke ${items.length} produk (${pct}% dari master)`, 'success');
+            await openPricelistDetail(id);
+        } else {
+            showToast(data.error || 'Gagal mengubah harga', 'error');
+        }
+    } catch (err) {
+        showToast('Gagal memperbarui harga', 'error');
+    }
+}
+
+// ── Search & Filter Bindings ───────────────────────────────────────────────
+document.getElementById('pricelist-search')?.addEventListener('input', () => renderPricelistsTable());
+document.getElementById('pricelist-status-filter')?.addEventListener('change', () => renderPricelistsTable());
+
+// ── Backward-compatibility aliases ─────────────────────────────────────────
+window.saveCreatePricelist = submitCreatePricelist;
+window.saveEditPricelist = submitEditPricelist;
+window.duplicatePricelist = openDuplicatePricelistModal;
+window.saveAddPricelistProducts = submitAddPricelistProducts;
+window.importPricelistCsv = submitPricelistCsvItems;
+
 

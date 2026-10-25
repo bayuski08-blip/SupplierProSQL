@@ -54,10 +54,34 @@ CREATE TABLE IF NOT EXISTS products (
   FOREIGN KEY (unit_id) REFERENCES product_units(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS pricelists (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  kode VARCHAR(20) NOT NULL UNIQUE,
+  nama VARCHAR(100) NOT NULL,
+  keterangan VARCHAR(255) NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS pricelist_items (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  pricelist_id INT NOT NULL,
+  product_id VARCHAR(255) NOT NULL,
+  harga DECIMAL(20,4) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_pricelist_product (pricelist_id, product_id),
+  KEY idx_pricelist_items_product (product_id),
+  CONSTRAINT fk_pli_pricelist FOREIGN KEY (pricelist_id) REFERENCES pricelists(id) ON DELETE CASCADE,
+  CONSTRAINT fk_pli_product   FOREIGN KEY (product_id)   REFERENCES products(id)   ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS customers (
   id VARCHAR(255) PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
   customer_category_id VARCHAR(255),
+  pricelist_id INT DEFAULT NULL,
   phone VARCHAR(255),
   city VARCHAR(255),
   address TEXT,
@@ -69,7 +93,8 @@ CREATE TABLE IF NOT EXISTS customers (
   nib VARCHAR(30) DEFAULT NULL,
   email VARCHAR(255) DEFAULT NULL,
   no_hp_2 VARCHAR(30) DEFAULT NULL,
-  FOREIGN KEY (customer_category_id) REFERENCES customer_categories(id) ON DELETE SET NULL
+  FOREIGN KEY (customer_category_id) REFERENCES customer_categories(id) ON DELETE SET NULL,
+  FOREIGN KEY (pricelist_id) REFERENCES pricelists(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS vendors (
@@ -197,3 +222,34 @@ CREATE TABLE IF NOT EXISTS cash_categories (
   is_system TINYINT(1) DEFAULT 0,
   CHECK (type IN ('IN', 'OUT', 'BOTH'))
 );
+
+CREATE TABLE IF NOT EXISTS payment_counters (
+  year INT NOT NULL PRIMARY KEY,
+  last_number INT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS sales_invoice_payments (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  payment_no VARCHAR(50) UNIQUE NOT NULL,
+  invoice_id VARCHAR(255) NOT NULL,
+  payment_date DATE NOT NULL,
+  amount DECIMAL(20,4) NOT NULL,
+  payment_method VARCHAR(50) NOT NULL,
+  notes TEXT DEFAULT NULL,
+  is_down_payment TINYINT(1) DEFAULT 0,
+  status VARCHAR(20) DEFAULT 'active',
+  void_reason TEXT DEFAULT NULL,
+  void_by INT DEFAULT NULL,
+  void_at DATETIME DEFAULT NULL,
+  cash_transaction_id VARCHAR(255) DEFAULT NULL,
+  created_by INT DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_invoice_id (invoice_id),
+  INDEX idx_payment_date (payment_date),
+  INDEX idx_status (status),
+  FOREIGN KEY (invoice_id) REFERENCES sales_invoices(id) ON DELETE RESTRICT,
+  FOREIGN KEY (void_by) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (cash_transaction_id) REFERENCES cash_transactions(id) ON DELETE SET NULL,
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+);
+

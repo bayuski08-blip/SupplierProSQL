@@ -54,6 +54,9 @@
                     <div class="nav-item" data-page="customers" id="nav-customers">
                         <i data-lucide="users"></i> Pelanggan
                     </div>
+                    <div class="nav-item" data-page="pricelists" id="nav-pricelists">
+                        <i data-lucide="tags"></i> Pricelist
+                    </div>
                     <div class="nav-item" data-page="vendors" id="nav-vendors">
                         <i data-lucide="truck"></i> Vendor
                     </div>
@@ -283,7 +286,13 @@
                                         class="cart-count" id="cart-count">0</span></h3>
                             </div>
                             <div class="pos-customer-select">
-                                <label>Pelanggan</label>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+                                    <label style="margin: 0; font-weight: 600;">Pelanggan</label>
+                                    <span id="pos-customer-pricelist-badge" style="display: none; font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 999px; background: #e0f2fe; color: #0369a1; font-weight: 600; align-items: center; gap: 4px;">
+                                        <i data-lucide="tag" style="width: 10px; height: 10px;"></i>
+                                        <span id="pos-customer-pricelist-name">Pricelist</span>
+                                    </span>
+                                </div>
                                 <div class="customer-search-wrapper" style="position: relative;">
                                     <div style="display: flex; align-items: center; background: white; border: 1px solid var(--gray-300); border-radius: 0.5rem; padding: 0.5rem; cursor: text;"
                                         onclick="document.getElementById('pos-customer-search').focus()">
@@ -333,6 +342,13 @@
                                     <select id="cart-payment-type" class="form-input" style="width: 100%;">
                                         <!-- Filled by JS -->
                                     </select>
+                                    <div id="cart-dp-wrapper" style="display: none; margin-top: 0.6rem;">
+                                        <label style="font-size: 0.75rem; color: var(--gray-600); font-weight: 600; display: block; margin-bottom: 4px;">Uang Muka / DP (Opsional)</label>
+                                        <div style="position: relative;">
+                                            <span style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--gray-500); font-size: 0.85rem; font-weight: 500;">Rp</span>
+                                            <input type="number" id="cart-dp-amount" class="form-input" style="padding-left: 32px; width: 100%;" placeholder="0" min="0">
+                                        </div>
+                                    </div>
                                 </div>
                                 <button class="btn-checkout" id="btn-checkout">
                                     Buat Invoice
@@ -629,11 +645,15 @@
                                 <input type="text" id="piutang-search" placeholder="Cari No Invoice / Pelanggan..."
                                     onkeyup="renderPiutang()">
                             </div>
+                            <select class="filter-select" id="piutang-customer-filter" onchange="renderPiutang()">
+                                <option value="all">Semua Pelanggan</option>
+                            </select>
                             <select class="filter-select" id="piutang-status-filter" onchange="renderPiutang()">
                                 <option value="all">Semua Status</option>
-                                <option value="belum bayar">Belum Bayar</option>
+                                <option value="belum bayar">Belum Lunas</option>
                                 <option value="sebagian">Sebagian</option>
                                 <option value="lunas">Lunas</option>
+                                <option value="overdue">Lewat Jatuh Tempo</option>
                             </select>
                         </div>
                     </div>
@@ -1088,6 +1108,13 @@
                                     <span class="help-text" style="font-size:0.75rem; color:var(--gray-400);">Dukung
                                         placeholder {YYYY}, {YY}, {MM}</span>
                                 </div>
+                                <div class="form-group">
+                                    <label>Prefix Daftar Harga (Pricelist)</label>
+                                    <input type="text" id="settings-prefix-pricelist" class="form-input"
+                                        placeholder="Contoh: PL">
+                                    <span class="help-text" style="font-size:0.75rem; color:var(--gray-400);">Dukung
+                                        placeholder {YYYY}, {YY}, {MM}</span>
+                                </div>
                                 <button class="btn-toolbar primary" onclick="savePrefixSettings()">
                                     <i data-lucide="save"></i> Simpan Prefix
                                 </button>
@@ -1353,6 +1380,151 @@
                                         <td colspan="7" style="text-align:center;padding:2rem;color:var(--gray-400);">
                                             Pilih rentang tanggal lalu klik Tampilkan</td>
                                     </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============================================================
+                 PAGE: PRICELIST (Admin / Owner Only)
+                 ============================================================ -->
+                <section class="page-section" id="page-pricelists">
+                    <!-- VIEW 1: DAFTAR PRICELIST -->
+                    <div id="pricelists-list-view">
+                        <div class="page-toolbar">
+                            <div class="page-toolbar-left">
+                                <div class="toolbar-search">
+                                    <i data-lucide="search"></i>
+                                    <input type="text" placeholder="Cari pricelist..." id="pricelist-search">
+                                </div>
+                                <select class="filter-select" id="pricelist-status-filter">
+                                    <option value="all">Semua Status</option>
+                                    <option value="1">Aktif</option>
+                                    <option value="0">Nonaktif</option>
+                                </select>
+                            </div>
+                            <div class="page-toolbar-right">
+                                <button class="btn-toolbar primary" onclick="openCreatePricelistModal()">
+                                    <i data-lucide="plus-circle"></i> Buat Pricelist Baru
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="data-table-wrapper" style="margin-top: 1rem;">
+                            <table class="data-table" id="pricelists-table">
+                                <thead>
+                                    <tr>
+                                        <th>Kode</th>
+                                        <th>Nama Pricelist</th>
+                                        <th>Keterangan</th>
+                                        <th style="text-align: center;">Jumlah Produk</th>
+                                        <th style="text-align: center;">Pelanggan Pemakai</th>
+                                        <th style="text-align: center;">Status</th>
+                                        <th style="text-align: right;">Aksi</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pricelists-table-body">
+                                    <tr>
+                                        <td colspan="7" style="text-align: center; padding: 2.5rem; color: var(--gray-400);">
+                                            <i data-lucide="loader" class="spin" style="width: 24px; height: 24px; margin-bottom: 0.5rem; display: inline-block;"></i>
+                                            <div>Memuat daftar pricelist...</div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- VIEW 2: DETAIL & KELOLA ITEM PRICELIST -->
+                    <div id="pricelists-detail-view" style="display: none;">
+                        <!-- Detail Header -->
+                        <div style="background: white; border-radius: 0.75rem; border: 1px solid var(--gray-200); padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                            <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
+                                <div>
+                                    <button class="btn-toolbar secondary" onclick="closePricelistDetail()" style="padding: 0.35rem 0.75rem; font-size: 0.8rem; margin-bottom: 0.75rem;">
+                                        <i data-lucide="arrow-left" style="width: 14px; height: 14px;"></i> Kembali ke Daftar
+                                    </button>
+                                    <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                                        <h2 style="margin: 0; font-size: 1.5rem; font-weight: 700; color: var(--gray-800);" id="detail-pl-nama">-</h2>
+                                        <span id="detail-pl-badge-status" class="badge-status aman">Aktif</span>
+                                        <span id="detail-pl-kode" style="font-size: 0.85rem; font-weight: 600; color: var(--blue-600); background: var(--blue-50); padding: 0.2rem 0.5rem; border-radius: 0.25rem;">PL000000</span>
+                                    </div>
+                                    <p id="detail-pl-keterangan" style="margin: 0.35rem 0 0; color: var(--gray-500); font-size: 0.875rem;">-</p>
+                                </div>
+                                <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                                    <button class="btn-toolbar secondary" onclick="openEditPricelistModal(activePricelistId)">
+                                        <i data-lucide="edit-2"></i> Edit Info
+                                    </button>
+                                    <button class="btn-toolbar secondary" onclick="openDuplicatePricelistModal(activePricelistId)">
+                                        <i data-lucide="copy"></i> Duplikat
+                                    </button>
+                                    <button class="btn-toolbar primary" onclick="openAddPricelistProductsModal()">
+                                        <i data-lucide="plus"></i> Tambah Produk
+                                    </button>
+                                    <button class="btn-toolbar secondary" onclick="openPricelistCsvModal()">
+                                        <i data-lucide="upload"></i> Import CSV
+                                    </button>
+                                    <button class="btn-toolbar secondary" onclick="openPricelistBulkPercentModal()">
+                                        <i data-lucide="percent"></i> Set Diskon/Markup
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Stat Summary Cards -->
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-top: 1.25rem; border-top: 1px solid var(--gray-100); padding-top: 1.25rem;">
+                                <div style="background: var(--gray-50); padding: 0.85rem 1rem; border-radius: 0.5rem;">
+                                    <div style="font-size: 0.75rem; color: var(--gray-500); font-weight: 500;">TOTAL PRODUK KHUSUS</div>
+                                    <div style="font-size: 1.35rem; font-weight: 700; color: var(--gray-800); margin-top: 2px;" id="stat-pl-total-items">0</div>
+                                </div>
+                                <div style="background: var(--gray-50); padding: 0.85rem 1rem; border-radius: 0.5rem;">
+                                    <div style="font-size: 0.75rem; color: var(--gray-500); font-weight: 500;">PELANGGAN MENGGUNAKAN</div>
+                                    <div style="font-size: 1.35rem; font-weight: 700; color: var(--blue-600); margin-top: 2px;" id="stat-pl-total-customers">0</div>
+                                </div>
+                                <div style="background: var(--gray-50); padding: 0.85rem 1rem; border-radius: 0.5rem;">
+                                    <div style="font-size: 0.75rem; color: var(--gray-500); font-weight: 500;">RATA-RATA SELISIH DARI MASTER</div>
+                                    <div style="font-size: 1.35rem; font-weight: 700; margin-top: 2px;" id="stat-pl-avg-diff">0%</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Items Table Controls -->
+                        <div class="page-toolbar" style="margin-bottom: 0.75rem;">
+                            <div class="page-toolbar-left">
+                                <div class="toolbar-search">
+                                    <i data-lucide="search"></i>
+                                    <input type="text" placeholder="Cari item di pricelist..." id="detail-pl-search" oninput="filterPricelistItems()">
+                                </div>
+                            </div>
+                            <div class="page-toolbar-right" style="display: flex; gap: 0.5rem; align-items: center;">
+                                <span id="detail-pl-selected-count" style="font-size: 0.8rem; color: var(--gray-500); display: none;">0 dipilih</span>
+                                <button id="btn-bulk-delete-items" class="btn-toolbar secondary" style="display: none; color: var(--rose-600);" onclick="deleteSelectedPricelistItems()">
+                                    <i data-lucide="trash-2"></i> Hapus Terpilih
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Items Table -->
+                        <div class="data-table-wrapper">
+                            <table class="data-table" id="detail-pl-items-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 40px; text-align: center;">
+                                            <input type="checkbox" id="check-all-pl-items" onchange="toggleSelectAllPricelistItems(this.checked)">
+                                        </th>
+                                        <th>Kode / SKU</th>
+                                        <th>Nama Produk</th>
+                                        <th>Satuan</th>
+                                        <th style="text-align: right;">Harga Master</th>
+                                        <th style="text-align: right;" id="th-pl-hpp">HPP</th>
+                                        <th style="text-align: right; width: 170px;">Harga Pricelist (Rp)</th>
+                                        <th style="text-align: right;">Selisih (Rp & %)</th>
+                                        <th style="text-align: center;">Status HPP</th>
+                                        <th style="text-align: center; width: 60px;">Aksi</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="detail-pl-items-body">
+                                    <!-- Rendered by JS -->
                                 </tbody>
                             </table>
                         </div>
@@ -1632,6 +1804,15 @@
                         </select>
                     </div>
                     <div class="form-group">
+                        <label>Pricelist Khusus <span style="color:var(--gray-400);font-size:0.75rem;">(opsional)</span></label>
+                        <select id="add-customer-pricelist" class="form-input">
+                            <option value="">Harga Master (tanpa pricelist)</option>
+                            <!-- Populated by JS -->
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
                         <label>Kota</label>
                         <input type="text" id="add-customer-city" class="form-input" placeholder="Surabaya">
                     </div>
@@ -1722,6 +1903,15 @@
                         </select>
                     </div>
                     <div class="form-group">
+                        <label>Pricelist Khusus <span style="color:var(--gray-400);font-size:0.75rem;">(opsional)</span></label>
+                        <select id="edit-customer-pricelist" class="form-input">
+                            <option value="">Harga Master (tanpa pricelist)</option>
+                            <!-- Populated by JS -->
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
                         <label>Kota</label>
                         <input type="text" id="edit-customer-city" class="form-input">
                     </div>
@@ -1810,6 +2000,11 @@
                         style="display: flex; justify-content: space-between; font-size: 0.875rem;">
                         <span class="entity-detail-label" style="color: var(--gray-500);">ID Pelanggan</span>
                         <span class="entity-detail-value" id="detail-customer-id" style="font-weight: 600;"></span>
+                    </div>
+                    <div class="entity-detail"
+                        style="display: flex; justify-content: space-between; font-size: 0.875rem;">
+                        <span class="entity-detail-label" style="color: var(--gray-500);">Pricelist Khusus</span>
+                        <span class="entity-detail-value" id="detail-customer-pricelist" style="font-weight: 600;"></span>
                     </div>
                     <div class="entity-detail"
                         style="display: flex; justify-content: space-between; font-size: 0.875rem;">
@@ -2524,7 +2719,7 @@
 
     <!-- Payment Modal (for Piutang & Hutang) -->
     <div class="modal-overlay" id="modal-payment">
-        <div class="modal" style="max-width: 420px;">
+        <div class="modal" style="max-width: 450px;">
             <div class="modal-header">
                 <h3>Input Pembayaran</h3>
                 <button class="modal-close" onclick="closeModal('modal-payment')"><i data-lucide="x"></i></button>
@@ -2532,25 +2727,156 @@
             <div class="modal-body">
                 <input type="hidden" id="payment-type">
                 <input type="hidden" id="payment-ref-id">
-                <div class="form-group">
-                    <label>Jumlah Pembayaran (Rp)</label>
-                    <input type="number" class="form-input" placeholder="0" id="payment-amount">
+
+                <!-- Dynamic invoice summary box -->
+                <div id="payment-invoice-info-box" style="display: none; background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 6px; padding: 12px; margin-bottom: 1rem; font-size: 0.85rem;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span style="color: var(--gray-600);">No. Invoice:</span> <b id="payment-info-id">-</b>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span style="color: var(--gray-600);">Pelanggan:</span> <span id="payment-info-customer">-</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span style="color: var(--gray-600);">Total Tagihan:</span> <span id="payment-info-total">-</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span style="color: var(--gray-600); font-weight: 600;">Sisa Tagihan:</span> <b id="payment-info-sisa" style="color: var(--rose-600);">-</b>
+                    </div>
                 </div>
+
                 <div class="form-group">
-                    <label>Metode</label>
+                    <label>Tanggal Pembayaran</label>
+                    <input type="date" class="form-input" id="payment-date">
+                </div>
+
+                <div class="form-group">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        <label style="margin: 0;">Jumlah Pembayaran (Rp) <span style="color: var(--rose-600);">*</span></label>
+                        <button type="button" id="btn-pay-full" style="background: none; border: none; color: var(--blue-600); font-size: 0.75rem; font-weight: 600; cursor: pointer; padding: 0;" onclick="fillFullPayment()">Bayar Lunas</button>
+                    </div>
+                    <input type="number" class="form-input" placeholder="0" id="payment-amount" min="1">
+                    <div id="payment-max-hint" style="font-size: 0.75rem; color: var(--gray-500); margin-top: 3px;"></div>
+                </div>
+
+                <div class="form-group">
+                    <label>Metode Pembayaran</label>
                     <select id="payment-method" class="form-input">
                         <!-- Filled by JS -->
                     </select>
                 </div>
+
                 <div class="form-group">
-                    <label>Catatan</label>
-                    <input type="text" id="payment-notes" class="form-input" placeholder="Opsional">
+                    <label>Catatan Pembayaran</label>
+                    <input type="text" id="payment-notes" class="form-input" placeholder="Opsional (mis. Cicilan 1 / Transfer BCA)">
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn-toolbar secondary" onclick="closeModal('modal-payment')">Batal</button>
                 <button class="btn-toolbar primary" onclick="submitPayment()"><i data-lucide="check"></i>
-                    Konfirmasi</button>
+                    Konfirmasi Pembayaran</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Payment History Modal (Rincian Cicilan) -->
+    <div class="modal-overlay" id="modal-payment-history">
+        <div class="modal" style="max-width: 840px; width: 95%;">
+            <div class="modal-header">
+                <div>
+                    <h3 style="margin: 0;">Riwayat Pembayaran Cicilan</h3>
+                    <small style="color: var(--gray-500);" id="hist-invoice-subtitle">Invoice: -</small>
+                </div>
+                <button class="modal-close" onclick="closeModal('modal-payment-history')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body" style="padding: 1.25rem;">
+                <!-- Summary Card Row -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 1.25rem;">
+                    <div style="background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 8px; padding: 10px 14px;">
+                        <div style="font-size: 0.72rem; color: var(--gray-500); text-transform: uppercase; font-weight: 600;">Total Invoice</div>
+                        <div style="font-size: 1.1rem; font-weight: 700; color: var(--gray-900);" id="hist-total-display">Rp 0</div>
+                    </div>
+                    <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 10px 14px;">
+                        <div style="font-size: 0.72rem; color: #166534; text-transform: uppercase; font-weight: 600;">Sudah Dibayar</div>
+                        <div style="font-size: 1.1rem; font-weight: 700; color: #15803d;" id="hist-paid-display">Rp 0</div>
+                    </div>
+                    <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 10px 14px;">
+                        <div style="font-size: 0.72rem; color: #991b1b; text-transform: uppercase; font-weight: 600;">Sisa Tagihan</div>
+                        <div style="font-size: 1.1rem; font-weight: 700; color: #b91c1c;" id="hist-sisa-display">Rp 0</div>
+                    </div>
+                    <div style="background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 8px; padding: 10px 14px;">
+                        <div style="font-size: 0.72rem; color: var(--gray-500); text-transform: uppercase; font-weight: 600;">Jatuh Tempo</div>
+                        <div style="font-size: 0.95rem; font-weight: 600; color: var(--gray-800);" id="hist-due-display">-</div>
+                        <div id="hist-overdue-badge-wrap" style="margin-top: 4px;"></div>
+                    </div>
+                </div>
+
+                <!-- Payments Table -->
+                <div class="data-table-wrapper" style="max-height: 320px; overflow-y: auto;">
+                    <table class="data-table" style="width: 100%;">
+                        <thead>
+                            <tr>
+                                <th>No. Bukti</th>
+                                <th>Tanggal</th>
+                                <th>Nominal</th>
+                                <th>Metode</th>
+                                <th>Tipe</th>
+                                <th>Catatan</th>
+                                <th>Status</th>
+                                <th>Pencatat</th>
+                                <th style="text-align: right;">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody id="hist-payments-body">
+                            <!-- Filled by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+                <div id="hist-footer-left">
+                    <button class="btn-toolbar primary" id="btn-hist-pay-now" style="font-size: 0.82rem;" onclick="triggerPayFromHistory()"><i data-lucide="plus"></i> Input Pembayaran Baru</button>
+                </div>
+                <button class="btn-toolbar secondary" onclick="closeModal('modal-payment-history')">Tutup</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Void Payment Confirmation Modal -->
+    <div class="modal-overlay" id="modal-void-payment">
+        <div class="modal" style="max-width: 440px;">
+            <div class="modal-header">
+                <h3>Batalkan Pembayaran (Void)</h3>
+                <button class="modal-close" onclick="closeModal('modal-void-payment')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body" style="padding: 1.25rem;">
+                <div id="void-payment-info-box" style="background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 6px; padding: 12px; margin-bottom: 1rem; font-size: 0.875rem;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span style="color: var(--gray-600);">No. Bukti:</span> <b id="void-info-no">-</b>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span style="color: var(--gray-600);">Nominal:</span> <b id="void-info-amount" style="color: var(--rose-600);">-</b>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span style="color: var(--gray-600);">Tanggal:</span> <span id="void-info-date">-</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label style="font-weight: 600; color: var(--gray-800);">Alasan Pembatalan <span style="color: var(--rose-600);">*</span></label>
+                    <textarea id="void-payment-reason" class="form-input" rows="3" placeholder="Contoh: Kesalahan transfer/salah input nominal..."></textarea>
+                    <small style="color: var(--gray-500); font-size: 0.75rem;">Alasan wajib diisi untuk jejak audit pembukuan.</small>
+                </div>
+
+                <p style="font-size: 0.8rem; color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; padding: 0.6rem; border-radius: 4px; margin: 0;">
+                    <i data-lucide="alert-triangle" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle;"></i>
+                    Void akan membalikkan catatan kas dan mengembalikan nilai ini ke sisa tagihan invoice.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-toolbar secondary" onclick="closeModal('modal-void-payment')">Batal</button>
+                <button class="btn-toolbar primary" id="btn-submit-void" style="background: #e11d48; border-color: #e11d48;" onclick="submitVoidPayment()">
+                    <i data-lucide="trash-2"></i> Konfirmasi Void
+                </button>
             </div>
         </div>
     </div>
@@ -2682,16 +3008,20 @@
 
     <!-- Cancel Invoice Modal -->
     <div class="modal-overlay" id="modal-cancel-invoice">
-        <div class="modal" style="max-width: 400px;">
+        <div class="modal" style="max-width: 450px;">
             <div class="modal-header">
                 <h3>Batalkan Invoice</h3>
                 <button class="modal-close" onclick="closeModal('modal-cancel-invoice')"><i
                         data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
-                <p style="color: var(--gray-700); margin-bottom: 1rem;">
+                <p id="cancel-invoice-main-text" style="color: var(--gray-700); margin-bottom: 1rem;">
                     Apakah Anda yakin ingin membatalkan Invoice ini?
                 </p>
+                <div id="cancel-invoice-payments-alert" style="display: none; margin-bottom: 1rem; font-size: 0.875rem; color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; padding: 0.75rem; border-radius: 0.5rem; line-height: 1.4;">
+                    <i data-lucide="alert-triangle" style="width: 16px; height: 16px; display: inline-block; vertical-align: middle; margin-right: 0.25rem;"></i>
+                    <span id="cancel-invoice-payments-text">Invoice ini memiliki pembayaran aktif. Membatalkan invoice akan otomatis membatalkan (void) semua pembayaran dan membalikkan posting kas.</span>
+                </div>
                 <p
                     style="font-size: 0.875rem; color: var(--rose-600); background: var(--rose-50); padding: 0.75rem; border-radius: 0.5rem;">
                     <i data-lucide="alert-triangle"
@@ -2702,8 +3032,27 @@
             </div>
             <div class="modal-footer">
                 <button class="btn-toolbar secondary" onclick="closeModal('modal-cancel-invoice')">Kembali</button>
-                <button class="btn-toolbar primary" style="background: #e11d48; color: white; border-color: #e11d48;"
+                <button class="btn-toolbar primary" id="btn-confirm-cancel-invoice" style="background: #e11d48; color: white; border-color: #e11d48;"
                     onclick="confirmCancelInvoice()"><i data-lucide="x-circle"></i> Ya, Batalkan</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Soft-lock: Confirm Edit Invoice with Active Payments -->
+    <div class="modal-overlay" id="modal-confirm-edit-invoice">
+        <div class="modal" style="max-width: 450px;">
+            <div class="modal-header">
+                <h3>Konfirmasi Perubahan Invoice</h3>
+                <button class="modal-close" onclick="closeModal('modal-confirm-edit-invoice')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body" style="padding: 20px; line-height: 1.5; color: var(--gray-700);">
+                <p id="confirm-edit-invoice-desc">Invoice ini sudah memiliki pembayaran aktif. Perubahan total invoice akan mempengaruhi sisa tagihan.</p>
+                <div id="confirm-edit-invoice-stats" style="margin-top: 12px; padding: 12px; background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 6px; font-size: 0.875rem;">
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 16px 20px; border-top: 1px solid var(--gray-200); display: flex; justify-content: flex-end; gap: 12px;">
+                <button class="btn-toolbar secondary" onclick="closeModal('modal-confirm-edit-invoice')">Batalkan</button>
+                <button class="btn-toolbar primary" onclick="executeSaveInvoiceEdits()"><i data-lucide="check"></i> Lanjutkan Simpan</button>
             </div>
         </div>
     </div>
@@ -3083,8 +3432,291 @@
         </div>
     </div>
 
+    <!-- ============================================================
+     PRICELIST MODALS
+     ============================================================ -->
+
+    <!-- Modal Create Pricelist -->
+    <div class="modal-overlay" id="modal-create-pricelist">
+        <div class="modal" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3>Buat Pricelist Baru</h3>
+                <button class="modal-close" onclick="closeModal('modal-create-pricelist')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Nama Pricelist <span style="color: var(--rose-500);">*</span></label>
+                    <input type="text" id="create-pl-nama" class="form-input" placeholder="Contoh: VIP Gold, Grosir Jawa Timur, Reseller A">
+                </div>
+                <div class="form-group">
+                    <label>Keterangan <span style="color: var(--gray-400); font-size: 0.75rem;">(opsional)</span></label>
+                    <textarea id="create-pl-keterangan" class="form-input" rows="3" placeholder="Catatan atau ketentuan khusus pricelist ini"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-toolbar secondary" onclick="closeModal('modal-create-pricelist')">Batal</button>
+                <button class="btn-toolbar primary" onclick="submitCreatePricelist()"><i data-lucide="save"></i> Buat Pricelist</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Edit Pricelist Info -->
+    <div class="modal-overlay" id="modal-edit-pricelist">
+        <div class="modal" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3>Edit Informasi Pricelist</h3>
+                <button class="modal-close" onclick="closeModal('modal-edit-pricelist')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-pl-id">
+                <div class="form-group">
+                    <label>Kode Pricelist</label>
+                    <input type="text" id="edit-pl-kode-display" class="form-input" disabled style="background: var(--gray-100);">
+                </div>
+                <div class="form-group">
+                    <label>Nama Pricelist <span style="color: var(--rose-500);">*</span></label>
+                    <input type="text" id="edit-pl-nama" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label>Keterangan</label>
+                    <textarea id="edit-pl-keterangan" class="form-input" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Status</label>
+                    <select id="edit-pl-status" class="form-input">
+                        <option value="1">Aktif</option>
+                        <option value="0">Nonaktif</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-toolbar secondary" onclick="closeModal('modal-edit-pricelist')">Batal</button>
+                <button class="btn-toolbar primary" onclick="submitEditPricelist()"><i data-lucide="save"></i> Simpan Perubahan</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Duplicate Pricelist -->
+    <div class="modal-overlay" id="modal-duplicate-pricelist">
+        <div class="modal" style="max-width: 480px;">
+            <div class="modal-header">
+                <h3>Duplikat Pricelist</h3>
+                <button class="modal-close" onclick="closeModal('modal-duplicate-pricelist')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="duplicate-pl-id">
+                <p style="font-size: 0.875rem; color: var(--gray-600); margin-bottom: 1rem;">
+                    Seluruh item dan harga dari pricelist ini akan disalin ke pricelist baru.
+                </p>
+                <div class="form-group">
+                    <label>Nama Pricelist Baru <span style="color: var(--rose-500);">*</span></label>
+                    <input type="text" id="duplicate-pl-nama" class="form-input">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-toolbar secondary" onclick="closeModal('modal-duplicate-pricelist')">Batal</button>
+                <button class="btn-toolbar primary" onclick="submitDuplicatePricelist()"><i data-lucide="copy"></i> Duplikat Sekarang</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Konfirmasi Nonaktifkan Pricelist -->
+    <div class="modal-overlay" id="modal-confirm-deactivate-pricelist">
+        <div class="modal" style="max-width: 480px;">
+            <div class="modal-header">
+                <h3 style="color: var(--amber-600);"><i data-lucide="alert-triangle" style="width: 20px; height: 20px; vertical-align: middle;"></i> Konfirmasi Nonaktifkan</h3>
+                <button class="modal-close" onclick="closeModal('modal-confirm-deactivate-pricelist')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="deactivate-pl-id">
+                <div style="background: #fffbeb; border: 1px solid #fef3c7; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem;">
+                    <p id="deactivate-pl-message" style="margin: 0; color: #92400e; font-size: 0.875rem; line-height: 1.5;">
+                        Pricelist ini sedang digunakan oleh pelanggan.
+                    </p>
+                </div>
+                <p style="font-size: 0.85rem; color: var(--gray-600); margin: 0;">
+                    Setelah dinonaktifkan, semua transaksi berikutnya untuk pelanggan-pelanggan tersebut akan otomatis kembali menggunakan harga master produk. Invoice lama tidak berubah.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-toolbar secondary" onclick="closeModal('modal-confirm-deactivate-pricelist')">Batal</button>
+                <button class="btn-toolbar primary" style="background: var(--amber-600); border-color: var(--amber-600);" onclick="confirmDeactivatePricelist()">Tetap Nonaktifkan</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Tambah Produk ke Pricelist -->
+    <div class="modal-overlay" id="modal-add-pricelist-products">
+        <div class="modal" style="max-width: 780px;">
+            <div class="modal-header">
+                <h3>Tambah Produk ke Pricelist</h3>
+                <button class="modal-close" onclick="closeModal('modal-add-pricelist-products')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <div style="display: flex; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                    <div class="toolbar-search" style="flex: 1; min-width: 220px;">
+                        <i data-lucide="search"></i>
+                        <input type="text" placeholder="Cari nama atau SKU produk..." id="add-pl-prod-search" oninput="renderAddPricelistProductsList()">
+                    </div>
+                    <select class="filter-select" id="add-pl-prod-category" onchange="renderAddPricelistProductsList()">
+                        <option value="all">Semua Kategori</option>
+                    </select>
+                </div>
+
+                <div style="background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 0.5rem; padding: 0.75rem 1rem; margin-bottom: 1rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
+                    <div style="font-size: 0.85rem; color: var(--gray-700);">
+                        Set harga awal untuk produk terpilih:
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                        <select id="add-pl-initial-price-mode" class="form-input" style="width: auto; padding: 0.3rem 0.6rem; font-size: 0.85rem;" onchange="handleInitialPriceModeChange()">
+                            <option value="master">Sama dengan Harga Master</option>
+                            <option value="discount">Diskon X% dari Master</option>
+                            <option value="markup">Markup X% dari Master</option>
+                        </select>
+                        <input type="number" id="add-pl-percent-input" class="form-input" style="width: 70px; padding: 0.3rem 0.5rem; font-size: 0.85rem; display: none;" placeholder="10" min="1" max="100">
+                        <span id="add-pl-percent-label" style="font-size: 0.85rem; color: var(--gray-500); display: none;">%</span>
+                    </div>
+                </div>
+
+                <div class="data-table-wrapper" style="max-height: 380px; overflow-y: auto;">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 40px; text-align: center;">
+                                    <input type="checkbox" id="check-all-add-pl-prods" onchange="toggleSelectAllAddPricelistProducts(this.checked)">
+                                </th>
+                                <th>Kode / SKU</th>
+                                <th>Nama Produk</th>
+                                <th>Kategori</th>
+                                <th style="text-align: right;">Harga Master</th>
+                                <th style="text-align: right; width: 140px;">Harga Khusus (Rp)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="add-pl-products-body">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+                <span id="add-pl-selected-count" style="font-size: 0.85rem; color: var(--gray-600); font-weight: 500;">0 produk dipilih</span>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn-toolbar secondary" onclick="closeModal('modal-add-pricelist-products')">Batal</button>
+                    <button class="btn-toolbar primary" onclick="submitAddPricelistProducts()"><i data-lucide="check"></i> Tambahkan ke Pricelist</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Import CSV -->
+    <div class="modal-overlay" id="modal-import-pricelist-csv">
+        <div class="modal" style="max-width: 750px;">
+            <div class="modal-header">
+                <h3>Import Harga Pricelist dari CSV</h3>
+                <button class="modal-close" onclick="closeModal('modal-import-pricelist-csv')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+                    <span style="font-size: 0.85rem; color: var(--gray-600);">
+                        Format kolom CSV: <strong>kode_produk,harga</strong> (atau SKU,harga)
+                    </span>
+                    <button class="btn-toolbar secondary" onclick="downloadPricelistCsvTemplate()" style="padding: 0.3rem 0.6rem; font-size: 0.75rem;">
+                        <i data-lucide="download"></i> Unduh Template CSV
+                    </button>
+                </div>
+
+                <!-- Dropzone -->
+                <div class="csv-dropzone" id="pl-csv-dropzone" onclick="document.getElementById('pl-csv-file-input').click()">
+                    <input type="file" id="pl-csv-file-input" accept=".csv,text/csv" style="display: none;" onchange="handlePricelistCsvFile(event)">
+                    <i data-lucide="upload-cloud" style="width: 36px; height: 36px; color: var(--blue-500); margin-bottom: 0.5rem; display: inline-block;"></i>
+                    <div style="font-weight: 600; font-size: 0.95rem; color: var(--gray-800);">Pilih file CSV atau seret ke sini</div>
+                    <div style="font-size: 0.75rem; color: var(--gray-500); margin-top: 0.25rem;">File teks .csv dengan pemisah koma atau titik koma</div>
+                </div>
+
+                <div style="margin: 1rem 0; text-align: center; color: var(--gray-400); font-size: 0.8rem; position: relative;">
+                    <span style="background: white; padding: 0 0.5rem; position: relative; z-index: 1;">ATAU TEMPELKAN TEKS CSV</span>
+                    <div style="position: absolute; top: 50%; left: 0; right: 0; border-top: 1px solid var(--gray-200); z-index: 0;"></div>
+                </div>
+
+                <textarea id="pl-csv-textarea" class="form-input" rows="3" placeholder="P000001,65000&#10;P000002,110000" style="font-family: monospace; font-size: 0.85rem;" oninput="parsePricelistCsvText(this.value)"></textarea>
+
+                <!-- CSV Preview Section -->
+                <div id="pl-csv-preview-container" style="display: none; margin-top: 1.25rem;">
+                    <div style="display: flex; gap: 1rem; margin-bottom: 0.75rem; font-size: 0.85rem;">
+                        <span id="pl-csv-valid-badge" class="badge-status aman" style="padding: 0.25rem 0.6rem;">0 baris valid</span>
+                        <span id="pl-csv-invalid-badge" class="badge-status batal" style="padding: 0.25rem 0.6rem;">0 baris error</span>
+                    </div>
+
+                    <div class="data-table-wrapper" style="max-height: 250px; overflow-y: auto;">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 60px;">Baris</th>
+                                    <th>Kode / Input</th>
+                                    <th>Produk Ditemukan</th>
+                                    <th style="text-align: right;">Harga Baru (Rp)</th>
+                                    <th>Status / Alasan Error</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pl-csv-preview-body">
+                                <!-- Populated by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-toolbar secondary" onclick="closeModal('modal-import-pricelist-csv')">Batal</button>
+                <button id="btn-submit-csv-items" class="btn-toolbar primary" disabled onclick="submitPricelistCsvItems()">
+                    <i data-lucide="check-circle"></i> Simpan Item Valid
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Set Harga Massal (Persentase Master) -->
+    <div class="modal-overlay" id="modal-pricelist-bulk-percent">
+        <div class="modal" style="max-width: 480px;">
+            <div class="modal-header">
+                <h3>Set Harga Massal (% dari Master)</h3>
+                <button class="modal-close" onclick="closeModal('modal-pricelist-bulk-percent')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Terapkan untuk:</label>
+                    <select id="bulk-percent-target" class="form-input">
+                        <option value="selected">Hanya produk yang dicentang di tabel</option>
+                        <option value="all">Semua produk dalam pricelist ini</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Persentase terhadap Harga Master</label>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <input type="number" id="bulk-percent-value" class="form-input" placeholder="Contoh: 90" min="1" max="500" value="90">
+                        <span style="font-weight: 600; color: var(--gray-600);">%</span>
+                    </div>
+                    <small style="color: var(--gray-500); font-size: 0.75rem; margin-top: 0.25rem; display: block;">
+                        Contoh: 90% = diskon 10% dari master; 100% = sama dengan master; 110% = markup 10%.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label>Pembulatan Hasil (Rp)</label>
+                    <select id="bulk-percent-round" class="form-input">
+                        <option value="1">Tanpa pembulatan (persis)</option>
+                        <option value="100" selected>Bulatkan ke ratusan terdekat (Rp 100)</option>
+                        <option value="1000">Bulatkan ke ribuan terdekat (Rp 1.000)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-toolbar secondary" onclick="closeModal('modal-pricelist-bulk-percent')">Batal</button>
+                <button class="btn-toolbar primary" onclick="applyPricelistBulkPercent()"><i data-lucide="check"></i> Terapkan</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Application Script -->
-    <script src="dashboard.js?v=3"></script>
+    <script src="dashboard.js?v=5"></script>
 </body>
 
 </html>

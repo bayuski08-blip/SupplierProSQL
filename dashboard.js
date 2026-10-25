@@ -1,5 +1,5 @@
 // ==========================================================================
-// SupplierPro Dashboard â€” JavaScript
+// SupplierPro Dashboard — JavaScript
 // ==========================================================================
 
 // Auth check
@@ -20,7 +20,7 @@ function showToast(message, type = 'success') {
     }
     const toast = document.createElement('div');
     const colors = { success: '#10b981', error: '#ef4444', warning: '#f59e0b', info: '#3b82f6' };
-    const icons = { success: 'âœ“', error: 'âœ•', warning: 'âš ', info: 'â„¹' };
+    const icons = { success: '✓', error: '✕', warning: '⚠️', info: 'ℹ️' };
     toast.style.cssText = `background:${colors[type] || colors.success};color:white;padding:0.75rem 1.25rem;border-radius:0.75rem;font-size:0.875rem;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,0.15);display:flex;align-items:center;gap:0.5rem;min-width:200px;max-width:360px;transform:translateX(120%);transition:transform 0.3s ease;`;
     toast.innerHTML = `<span style="font-size:1rem;">${icons[type]}</span><span>${message}</span>`;
     container.appendChild(toast);
@@ -99,7 +99,7 @@ let DONUT_DATA = [];
 
 // Page title mapping
 const PAGE_TITLES = {
-    dashboard: { title: 'Dashboard', subtitle: 'Selamat pagi, Ahmad ðŸ‘‹' },
+    dashboard: { title: 'Dashboard', subtitle: 'Selamat pagi, Ahmad 👋' },
     pos: { title: 'Order / Kasir', subtitle: 'Buat transaksi penjualan baru' },
     products: { title: 'Produk & Stok', subtitle: 'Kelola inventaris produk Anda' },
     customers: { title: 'Pelanggan', subtitle: 'Daftar pelanggan dan reseller' },
@@ -377,7 +377,7 @@ async function checkReconciliationStatus() {
             const alertText = document.getElementById('reconciliation-alert-text');
             if (data.success && data.status && !data.status.balanced) {
                 alertText.innerHTML = `Ditemukan ketidaksesuaian data keuangan pada pencatatan otomatis harian. Masalah:<br/>` + 
-                    data.status.issues.map(issue => `â€¢ ${issue}`).join('<br/>') +
+                    data.status.issues.map(issue => `&bull; ${issue}`).join('<br/>') +
                     `<br/><span style="font-weight: 600; margin-top: 0.5rem; display: inline-block;">Silakan periksa laporan keuangan dan log transaksi cash flow.</span>`;
                 alertEl.style.display = 'block';
                 if (window.lucide) window.lucide.createIcons();
@@ -429,7 +429,7 @@ function renderSummaryCards() {
         <div class="summary-card ${c.color}">
             <div class="summary-card-header">
                 <div class="summary-card-icon ${c.color}"><i data-lucide="${c.icon}"></i></div>
-                <span class="summary-card-trend ${c.trendDir}">${c.trendDir === 'up' ? 'â†‘' : 'â†“'} ${c.trend}</span>
+                <span class="summary-card-trend ${c.trendDir}">${c.trendDir === 'up' ? '↑' : '↓'} ${c.trend}</span>
             </div>
             <div class="summary-card-value">${c.value}</div>
             <div class="summary-card-label">${c.label}</div>
@@ -562,7 +562,7 @@ function renderLowStock() {
     `).join('');
 
     if (lowStock.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--gray-400); padding:2rem;">Semua stok aman âœ“</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--gray-400); padding:2rem;">Semua stok aman</td></tr>';
     }
 }
 
@@ -660,7 +660,7 @@ function renderCustomers(filter = '', type = '') {
                 <div>
                     <div class="entity-name">${c.name}</div>
                     <div class="entity-type">${c.type} &bull; ${c.city}</div>
-                    ${c.pricelistName ? `<div style="margin-top:0.25rem;"><span class="badge-pricelist-source" style="font-size:0.7rem; padding:0.15rem 0.4rem;">ðŸ·ï¸ ${c.pricelistName}</span></div>` : ''}
+                    ${c.pricelistName ? `<div style="margin-top:0.25rem;"><span class="badge-pricelist-source" style="font-size:0.7rem; padding:0.15rem 0.4rem;">${c.pricelistName}</span></div>` : ''}
                 </div>
             </div>
             <div class="entity-details">
@@ -702,7 +702,7 @@ function renderCustomers(filter = '', type = '') {
                 <td style="font-weight:600; color: var(--blue-600);">${c.id}</td>
                 <td style="font-weight:600;">
                     ${c.name}
-                    ${c.pricelistName ? `<div style="margin-top:0.2rem;"><span class="badge-pricelist-source" style="font-size:0.65rem; padding:0.1rem 0.35rem;">ðŸ·ï¸ ${c.pricelistName}</span></div>` : ''}
+                    ${c.pricelistName ? `<div style="margin-top:0.2rem;"><span class="badge-pricelist-source" style="font-size:0.65rem; padding:0.1rem 0.35rem;">${c.pricelistName}</span></div>` : ''}
                 </td>
                 <td><span class="badge-status aman">${c.type}</span></td>
                 <td>${c.city}</td>
@@ -783,7 +783,7 @@ function renderVendors(filter = '') {
                 <div class="entity-avatar ${v.color}">${v.name.charAt(0)}</div>
                 <div>
                     <div class="entity-name">${v.name}</div>
-                    <div class="entity-type">${v.category} â€¢ ${v.city}</div>
+                    <div class="entity-type">${v.category} &middot; ${v.city}</div>
                 </div>
             </div>
             <div class="entity-details">
@@ -801,7 +801,7 @@ function renderVendors(filter = '') {
                 </div>
                 <div class="entity-detail">
                     <span class="entity-detail-label">Hutang</span>
-                    <span class="entity-detail-value" style="color: ${v.debt > 0 ? 'var(--rose-500)' : 'var(--emerald-500)'}; font-weight:700;">${v.debt > 0 ? rp(v.debt) : 'Lunas âœ“'}</span>
+                    <span class="entity-detail-value" style="color: ${v.debt > 0 ? 'var(--rose-500)' : 'var(--emerald-500)'}; font-weight:700;">${v.debt > 0 ? rp(v.debt) : 'Lunas'}</span>
                 </div>
             </div>
         </div>
@@ -815,7 +815,7 @@ function renderVendors(filter = '') {
                 <td><span class="badge-status aman">${v.category}</span></td>
                 <td>${v.city}</td>
                 <td>${v.phone}</td>
-                <td style="font-weight:700; color: ${v.debt > 0 ? 'var(--rose-500)' : 'var(--emerald-500)'};">${v.debt > 0 ? rp(v.debt) : 'Lunas âœ“'}</td>
+                <td style="font-weight:700; color: ${v.debt > 0 ? 'var(--rose-500)' : 'var(--emerald-500)'};">${v.debt > 0 ? rp(v.debt) : 'Lunas'}</td>
                 <td style="text-align: right; white-space: nowrap;">
                     <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" title="Edit Vendor" onclick="openEditVendorModal('${v.id}')">
                         <i data-lucide="edit-2" style="width: 14px; height: 14px; margin: 0;"></i>
@@ -930,7 +930,7 @@ function renderInvoices(filter = '') {
 
     tbody.innerHTML = filtered.map(inv => {
         const statusLower = (inv.status || '').toLowerCase();
-        // Normalize status to single-word CSS class (e.g. 'Belum Bayar' â†’ 'belum')
+        // Normalize status to single-word CSS class (e.g. 'Belum Bayar' → 'belum')
         const statusClass = statusLower.includes('belum') ? 'belum' : statusLower.replace(/\s+/g, '-');
         return `
         <tr>
@@ -1101,9 +1101,15 @@ function renderHutang(filter = '') {
         );
     }
 
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    const canPay = role === 'admin' || role === 'finance';
+    const canEditPO = role === 'admin' || role === 'finance' || role === 'gudang';
+
     tbody.innerHTML = purchaseData.map(p => {
         const sisa = p.total - p.paid;
         const st = sisa > 0 ? 'belum' : 'lunas';
+        const payBtn = (canPay && sisa > 0) ? `<button class="btn-toolbar primary" style="padding:0.3rem 0.65rem; font-size:0.75rem; margin-right:0.25rem;" onclick="openHutangPaymentModal('${p.id}', ${sisa})">Bayar</button>` : '';
+        const editBtn = canEditPO ? `<button class="btn-toolbar secondary" style="padding:0.25rem 0.5rem; font-size:0.75rem;" title="Edit PO" onclick="openEditPurchaseModal('${p.id}')"><i data-lucide="edit-2" style="width:13px;height:13px;margin:0;"></i></button>` : '';
         return `
             <tr>
                 <td style="font-weight:600; color: var(--blue-600);">${p.id}</td>
@@ -1115,10 +1121,12 @@ function renderHutang(filter = '') {
                 <td>${sisa > 0 && parseFloat(p.paid) === 0 ? '-' : (p.paidDate || '-')}</td>
                 <td>${sisa > 0 && parseFloat(p.paid) === 0 ? '-' : (p.type || '-')}</td>
                 <td><span class="badge-status ${st}">${sisa > 0 ? 'Belum Lunas' : 'Lunas'}</span></td>
-                <td>${sisa > 0 ? `<button class="btn-toolbar primary" style="padding:0.3rem 0.65rem; font-size:0.75rem;" onclick="openHutangPaymentModal('${p.id}', ${sisa})">Bayar</button>` : 'â€”'}</td>
+                <td style="text-align:right; white-space:nowrap;">${payBtn}${editBtn}</td>
             </tr>
         `;
     }).join('');
+
+    if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
 // ---------- Cash Flow Page ----------
@@ -1166,7 +1174,7 @@ function renderCashFlow(filter = '') {
             <td>${t.date}</td>
             <td style="font-weight:600;">${t.desc}</td>
             <td><span class="badge-status ${t.category === 'Penjualan' || t.category === 'Piutang' ? 'lunas' : 'tempo'}">${t.category}</span></td>
-            <td><span class="badge-status ${t.type.toLowerCase()}">${t.type === 'IN' ? 'â†‘ Masuk' : 'â†“ Keluar'}</span></td>
+            <td><span class="badge-status ${t.type.toLowerCase()}">${t.type === 'IN' ? 'Masuk' : 'Keluar'}</span></td>
             <td style="font-weight:700; color: ${t.type === 'IN' ? 'var(--emerald-500)' : 'var(--rose-500)'};">${t.type === 'IN' ? '+' : '-'}${rp(t.amount)}</td>
             <td><span class="badge-status ${t.status === 'cancelled' ? 'batal' : 'lunas'}">${t.status === 'cancelled' ? 'Dibatalkan' : 'Aktif'}</span></td>
             <td>${t.method}</td>
@@ -1407,12 +1415,12 @@ async function renderBalance() {
                 statusEl.style.background = 'var(--emerald-50)';
                 statusEl.style.color = 'var(--emerald-700)';
                 statusEl.style.border = '1px solid var(--emerald-200)';
-                statusEl.innerHTML = `<i data-lucide="check-circle"></i> Neraca Seimbang â€” Total Aset = Total Liabilitas &amp; Ekuitas`;
+                statusEl.innerHTML = `<i data-lucide="check-circle"></i> Neraca Seimbang — Total Aset = Total Liabilitas &amp; Ekuitas`;
             } else {
                 statusEl.style.background = 'var(--rose-50)';
                 statusEl.style.color = 'var(--rose-700)';
                 statusEl.style.border = '1px solid var(--rose-200)';
-                statusEl.innerHTML = `<i data-lucide="alert-triangle"></i> Neraca Tidak Seimbang â€” Periksa kembali data transaksi`;
+                statusEl.innerHTML = `<i data-lucide="alert-triangle"></i> Neraca Tidak Seimbang — Periksa kembali data transaksi`;
             }
             if (typeof lucide !== 'undefined') lucide.createIcons();
         }
@@ -1541,6 +1549,9 @@ let selectedCartPaymentTypeId = 'PT-1';
 
 function renderPOSProducts(searchTerm = '', category = '') {
     const grid = document.getElementById('pos-product-grid');
+    const customerId = document.getElementById('pos-customer-id')?.value;
+    const noCustomer = !customerId;
+
     let filtered = PRODUCTS;
     if (searchTerm) {
         const q = searchTerm.toLowerCase();
@@ -1549,6 +1560,46 @@ function renderPOSProducts(searchTerm = '', category = '') {
     if (category && category !== 'all') {
         filtered = filtered.filter(p => p.category === category);
     }
+
+    if (noCustomer) {
+        // Tampilkan pesan + produk dinonaktifkan
+        const placeholder = `<div style="position:relative; display:contents;">
+            ${filtered.map(p => `
+            <div class="pos-product-card" style="opacity:0.45; cursor:not-allowed; pointer-events:none;" title="Pilih pelanggan terlebih dahulu">
+                <div class="pos-product-emoji">${p.emoji}</div>
+                <div class="pos-product-name">${p.name}</div>
+                <div class="pos-product-price">${rp(p.price)}</div>
+                <div class="pos-product-stock">Stok: ${p.stock} ${p.unit}</div>
+            </div>
+            `).join('')}
+        </div>`;
+        grid.innerHTML = placeholder;
+        // Overlay pesan di atas grid
+        let overlayEl = document.getElementById('pos-product-lock-overlay');
+        if (!overlayEl) {
+            overlayEl = document.createElement('div');
+            overlayEl.id = 'pos-product-lock-overlay';
+            overlayEl.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;z-index:10;pointer-events:none;';
+            overlayEl.innerHTML = '<div style="background:rgba(255,255,255,0.92);border:1.5px solid var(--blue-200);border-radius:0.75rem;padding:1rem 1.5rem;text-align:center;box-shadow:0 4px 16px rgba(59,130,246,0.12);">' +
+                '<i data-lucide="user" style="width:20px;height:20px;color:var(--blue-500);display:block;margin:0 auto 0.5rem;"></i>' +
+                '<div style="font-weight:600;color:var(--blue-700);font-size:0.875rem;">Pilih pelanggan terlebih dahulu</div>' +
+                '<div style="font-size:0.75rem;color:var(--gray-500);margin-top:0.2rem;">Harga produk ditentukan berdasarkan pricelist pelanggan</div>' +
+                '</div>';
+            const posProducts = document.querySelector('.pos-products');
+            if (posProducts) {
+                if (getComputedStyle(posProducts).position === 'static') posProducts.style.position = 'relative';
+                posProducts.appendChild(overlayEl);
+                if (typeof lucide !== 'undefined') lucide.createIcons();
+            }
+        } else {
+            overlayEl.style.display = 'flex';
+        }
+        return;
+    }
+
+    // Sembunyikan overlay jika ada
+    const overlayEl = document.getElementById('pos-product-lock-overlay');
+    if (overlayEl) overlayEl.style.display = 'none';
 
     grid.innerHTML = filtered.map(p => `
         <div class="pos-product-card" onclick="addToCart('${p.id}')">
@@ -1563,6 +1614,12 @@ function renderPOSProducts(searchTerm = '', category = '') {
 function addToCart(productId) {
     const product = PRODUCTS.find(p => p.id === productId);
     if (!product) return;
+    // Guard: wajib pilih pelanggan dulu
+    const customerId = document.getElementById('pos-customer-id')?.value;
+    if (!customerId) {
+        showToast('Pilih pelanggan terlebih dahulu sebelum memilih produk.', 'warning');
+        return;
+    }
 
     const existing = cart.find(c => c.id === productId);
     if (existing) {
@@ -1635,8 +1692,8 @@ function renderCart() {
             <div class="cart-item-row">
                 <div class="cart-item-info">
                     <div class="cart-item-name">
-                        ${item.emoji} ${item.name}
-                        ${item.manual_override ? '<span class="badge-manual-source" style="font-size:0.65rem; margin-left:4px;">✏️ Manual</span>' : (item.sumberHarga === 'pricelist' ? `<span class="badge-pricelist-source" style="font-size:0.65rem; margin-left:4px;">🏷️ ${item.pricelistNama || 'Pricelist'}</span>` : '')}
+                        ${item.emoji ? item.emoji + ' ' : ''}${item.name}
+                        ${item.manual_override ? '<span class="badge-manual-source" style="font-size:0.65rem; margin-left:4px;">✏️ Manual</span>' : (item.sumberHarga === 'pricelist' ? `<span class="badge-pricelist-source" style="font-size:0.65rem; margin-left:4px;">${item.pricelistNama || 'Pricelist'}</span>` : '')}
                         ${(item.cost > 0 && item.price < item.cost) ? '<span class="badge-hpp-warning" style="font-size:0.65rem; margin-left:4px;">⚠️ Bawah HPP</span>' : ''}
                     </div>
                     <div class="cart-item-price-edit" style="display:flex; align-items:center; gap:0.25rem;">
@@ -1646,7 +1703,7 @@ function renderCart() {
                     </div>
                 </div>
                 <div class="cart-item-qty">
-                    <button class="cart-qty-btn" onclick="updateCartQty('${item.id}', -1)">âˆ’</button>
+                    <button class="cart-qty-btn" onclick="updateCartQty('${item.id}', -1)">-</button>
                     <span class="cart-qty-val">${item.qty}</span>
                     <button class="cart-qty-btn" onclick="updateCartQty('${item.id}', 1)">+</button>
                 </div>
@@ -1655,7 +1712,7 @@ function renderCart() {
             </div>
             ${isAdmin ? `
             <div class="cart-item-fee-row">
-                <span class="cart-item-fee-label">ðŸ”’ Fee (Rp)</span>
+                <span class="cart-item-fee-label">Fee (Rp)</span>
                 <input type="number" min="0" value="${item.fee || 0}" placeholder="0"
                     class="cart-item-fee-input"
                     onchange="updateCartFee('${item.id}', this.value)"
@@ -1787,7 +1844,7 @@ document.getElementById('btn-checkout')?.addEventListener('click', async () => {
     // Tunai = full immediate payment
 
     const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
-    const ppnAmount = subtotal * (currentPpnRate / 100);
+    const ppnAmount = (typeof currentPpnEnabled !== 'undefined' && currentPpnEnabled) ? Math.round(subtotal * (currentPpnRate / 100)) : 0;
     const total = subtotal + ppnAmount;
 
     // Tempo/credit: if DP entered use it, otherwise 0; Tunai/Transfer = full paid
@@ -1883,7 +1940,7 @@ function populateCustomerSelect(filter = '') {
     dropdown.innerHTML = filtered.map(c => `
         <div class="customer-dropdown-item" data-id="${c.id}" data-name="${c.name}" style="padding: 0.5rem 0.75rem; cursor: pointer; border-bottom: 1px solid var(--gray-100); display: flex; flex-direction: column; transition: background-color 0.2s;">
             <span style="font-weight: 500; font-size: 0.875rem;">${c.name}</span>
-            <span style="font-size: 0.75rem; color: var(--gray-500);">${c.type} â€¢ ${c.phone}</span>
+            <span style="font-size: 0.75rem; color: var(--gray-500);">${c.type} &middot; ${c.phone}</span>
         </div>
     `).join('');
 
@@ -1892,10 +1949,24 @@ function populateCustomerSelect(filter = '') {
         item.addEventListener('click', (e) => {
             const id = e.currentTarget.dataset.id;
             const name = e.currentTarget.dataset.name;
+            const currentCustomerId = document.getElementById('pos-customer-id').value;
+            // Jika pelanggan sudah dipilih dan berbeda, dan keranjang tidak kosong: minta konfirmasi
+            if (currentCustomerId && currentCustomerId !== id && cart.length > 0) {
+                if (!confirm('Mengganti pelanggan akan mengosongkan keranjang karena pricelist mungkin berbeda. Lanjutkan?')) {
+                    dropdown.style.display = 'none';
+                    return;
+                }
+                // Kosongkan keranjang
+                cart = [];
+                renderCart();
+            }
             document.getElementById('pos-customer-search').value = name;
             document.getElementById('pos-customer-id').value = id;
             dropdown.style.display = 'none';
             handlePOSCustomerChange(id);
+            // Update product grid (unlock)
+            const activeCat = document.querySelector('.pos-category-tab.active')?.dataset.cat || 'all';
+            renderPOSProducts(document.getElementById('pos-search')?.value || '', activeCat);
         });
 
         // Add hover effect
@@ -2029,7 +2100,7 @@ async function init() {
     const userRole = localStorage.getItem('role') || 'Staff';
     const capitalizedRole = userRole.charAt(0).toUpperCase() + userRole.slice(1).toLowerCase();
 
-    PAGE_TITLES.dashboard.subtitle = `Selamat Datang, ${userDisplayName} ðŸ‘‹`;
+    PAGE_TITLES.dashboard.subtitle = `Selamat Datang, ${userDisplayName} 👋`;
     const subtitleEl = document.getElementById('topbar-subtitle');
     if (subtitleEl && currentPage === 'dashboard') {
         subtitleEl.textContent = PAGE_TITLES.dashboard.subtitle;
@@ -2177,7 +2248,7 @@ async function fetchProducts() {
             minStock: parseFloat(p.min_stock),
             unit: p.unit || 'pcs',
             unit_id: p.unit_id,
-            emoji: 'ðŸ“¦'
+            emoji: ''
         }));
         renderProducts(document.getElementById('product-search')?.value, document.getElementById('product-category-filter')?.value);
     } catch (err) {
@@ -2241,7 +2312,7 @@ function openEditProductModal(id) {
     if (brandEl) brandEl.value = p.brand || '';
     document.getElementById('edit-product-name').value = p.name;
     document.getElementById('edit-product-sku').value = p.sku;
-    // FIX: set category select â€” try both category_id and category name
+    // FIX: set category select — try both category_id and category name
     const catEl = document.getElementById('edit-product-category');
     if (catEl) {
         // Try setting by value (which is the name from master)
@@ -2575,7 +2646,7 @@ async function deleteCustomer(id) {
 }
 
 // ==========================================================================
-// VENDORS â€” CRUD
+// VENDORS — CRUD
 // ==========================================================================
 
 async function fetchVendors() {
@@ -2695,7 +2766,7 @@ async function deleteVendor(id) {
 }
 
 // ==========================================================================
-// PURCHASE ORDERS â€” CRUD
+// PURCHASE ORDERS — CRUD
 // ==========================================================================
 
 async function fetchPurchases() {
@@ -2972,7 +3043,7 @@ async function openEditPurchaseModal(id) {
     } catch (err) {
         console.error('Failed to load PO items', err);
     }
-    // Always render â€” will show 'Belum ada item' if array empty
+    // Always render — will show 'Belum ada item' if array empty
     renderEditPurchaseItems();
 
     openModal('modal-edit-purchase');
@@ -3053,7 +3124,7 @@ async function savePurchase(isEdit) {
 }
 
 // ==========================================================================
-// INVOICES â€” CRUD
+// INVOICES — CRUD
 // ==========================================================================
 
 async function fetchInvoices() {
@@ -3138,8 +3209,16 @@ function renderEditInvoiceItems() {
         container.innerHTML = `<tr><td colspan="${colspan}" style="text-align: center; padding: 1rem; color: var(--gray-500);">Belum ada item.</td></tr>`;
     }
 
-    const ppn = subtotal * 0.11;
+    const ppnActive = (typeof currentPpnEnabled !== 'undefined') ? currentPpnEnabled : true;
+    const ppnRateEff = (typeof currentPpnRate !== 'undefined') ? currentPpnRate : 11;
+    const ppn = ppnActive ? Math.round(subtotal * (ppnRateEff / 100)) : 0;
     const grandTotal = subtotal + ppn;
+
+    // Show/hide PPN row in edit invoice modal based on settings
+    const ppnRowEl = document.getElementById('edit-invoice-ppn-row');
+    if (ppnRowEl) ppnRowEl.style.display = ppnActive ? '' : 'none';
+    const ppnLabelEl = document.getElementById('edit-invoice-ppn-label');
+    if (ppnLabelEl) ppnLabelEl.textContent = `(${ppnRateEff}%)`;
 
     document.getElementById('edit-invoice-subtotal').textContent = rp(subtotal);
     document.getElementById('edit-invoice-ppn').textContent = rp(ppn);
@@ -3237,7 +3316,7 @@ async function openEditInvoiceModal(id) {
     } catch (err) {
         console.error('Failed to load invoice items', err);
     }
-    // Always render â€” will show 'Belum ada item' if array empty
+    // Always render — will show 'Belum ada item' if array empty
     renderEditInvoiceItems();
 
     openModal('modal-edit-invoice');
@@ -3430,7 +3509,7 @@ window.cancelPurchaseFromEdit = () => {
         window.cancelPurchase(id);
     }
 };// ==========================================================================
-// CASH FLOW â€” CRUD
+// CASH FLOW — CRUD
 // ==========================================================================
 
 async function fetchCashTransactions() {
@@ -3573,7 +3652,7 @@ function openHutangPaymentModal(poId, sisa) {
     openModal('modal-payment');
 }
 
-// Open piutang payment modal â€” fills invoice info box, date, and max hint
+// Open piutang payment modal — fills invoice info box, date, and max hint
 function openPiutangPaymentModal(invoiceId, sisa) {
     const typeEl = document.getElementById('payment-type');
     const refEl = document.getElementById('payment-ref-id');
@@ -3715,7 +3794,7 @@ async function openPaymentHistoryModal(invoiceId) {
         const data = await res.json();
         const inv = data.invoice;
         const payments = data.payments || [];
-        if (subtitleEl) subtitleEl.textContent = 'Invoice: ' + inv.id + ' â€” ' + inv.customer;
+        if (subtitleEl) subtitleEl.textContent = 'Invoice: ' + inv.id + ' — ' + inv.customer;
         if (totalEl) totalEl.textContent = rp(inv.total);
         if (paidEl) paidEl.textContent = rp(inv.paid);
         if (sisaEl) sisaEl.textContent = rp(inv.sisa);
@@ -3818,7 +3897,7 @@ async function submitVoidPayment() {
     }
 }
 // ==========================================================================
-// USERS â€” CRUD
+// USERS — CRUD
 // ==========================================================================
 
 async function fetchUsers() {
@@ -3996,7 +4075,7 @@ async function populateMasterDropdowns() {
 }
 
 // ==========================================================================
-// MASTER DATA â€” CRUD
+// MASTER DATA — CRUD
 // ==========================================================================
 
 let currentMasterType = 'product_categories';
@@ -4532,7 +4611,7 @@ function populateManualInvoiceCustomerSelect(filter = '') {
 
     dropdown.innerHTML = filtered.map(c => `
         <div class="manual-invoice-customer-dropdown-item" data-id="${c.id}" data-name="${c.name}" style="padding: 0.5rem 0.75rem; cursor: pointer; border-bottom: 1px solid var(--gray-100); display: flex; flex-direction: column; transition: background-color 0.2s;">
-            <span style="font-weight: 500; font-size: 0.875rem;">${c.name} â€” ${c.city || ''}</span>
+            <span style="font-weight: 500; font-size: 0.875rem;">${c.name} — ${c.city || ''}</span>
         </div>
     `).join('');
 
@@ -4675,8 +4754,8 @@ function setImportFile(file) {
         if (contentDiv) {
             contentDiv.innerHTML = `
                 <div style="display:flex;align-items:center;justify-content:center;gap:0.5rem;font-weight:600;color:var(--gray-800);">
-                    <span>ðŸ“„ ${file.name}</span>
-                    <button onclick="event.stopPropagation(); setImportFile(null);" style="background:transparent;border:none;color:var(--rose-500);font-size:1.2rem;cursor:pointer;font-weight:bold;padding:0 0.25rem;">Ã—</button>
+                    <span>📄 ${file.name}</span>
+                    <button onclick="event.stopPropagation(); setImportFile(null);" style="background:transparent;border:none;color:var(--rose-500);font-size:1.2rem;cursor:pointer;font-weight:bold;padding:0 0.25rem;">&times;</button>
                 </div>
             `;
         }
@@ -5288,9 +5367,9 @@ async function renderCustomerFeeReport() {
             summaryEl.innerHTML = `
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin-bottom:1.5rem;">
                     <div style="background:linear-gradient(135deg,#fffbeb,#fef3c7);border:1px solid #fcd34d;border-radius:0.75rem;padding:1.25rem;display:flex;flex-direction:column;gap:0.25rem;">
-                        <div style="font-size:0.75rem;color:#92400e;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;display:flex;align-items:center;gap:0.3rem;">ðŸ”’ Total Beban Fee Customer</div>
+                        <div style="font-size:0.75rem;color:#92400e;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;display:flex;align-items:center;gap:0.3rem;">🔒 Total Beban Fee Customer</div>
                         <div style="font-size:1.75rem;font-weight:800;color:#78350f;">${rp(d.total_fee)}</div>
-                        <div style="font-size:0.8rem;color:#a16207;">${startDate} â€” ${endDate}</div>
+                        <div style="font-size:0.8rem;color:#a16207;">${startDate} — ${endDate}</div>
                     </div>
                     <div style="background:white;border:1px solid var(--gray-200);border-radius:0.75rem;padding:1.25rem;display:flex;flex-direction:column;gap:0.25rem;">
                         <div style="font-size:0.75rem;color:var(--gray-500);font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Periode Aktif</div>
@@ -5331,7 +5410,7 @@ async function renderCustomerFeeReport() {
             } else {
                 bodyProduk.innerHTML = d.per_produk.map((r, i) => `
                     <tr>
-                        <td style="font-weight:600;">${i === 0 ? 'ðŸ¥‡ ' : i === 1 ? 'ðŸ¥ˆ ' : i === 2 ? 'ðŸ¥‰ ' : ''}${r.produk}</td>
+                        <td style="font-weight:600;">${i === 0 ? '🥇 ' : i === 1 ? '🥈 ' : i === 2 ? '🥉 ' : ''}${r.produk}</td>
                         <td style="text-align:right;color:#92400e;font-weight:700;">${rp(r.total_fee)}</td>
                         <td style="text-align:right;color:var(--gray-500);">${r.jumlah_item}</td>
                     </tr>

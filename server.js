@@ -3223,7 +3223,7 @@ app.post('/api/purchases', authenticateToken, authorizeRoles('admin', 'gudang'),
   }
 });
 
-app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang'), async (req, res) => {
+app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang', 'finance'), async (req, res) => {
   const poId = req.params.id;
   const { vendor_id, vendorId, date, paid, paid_amount, payment_type_id, due_date, items, discount, diskon } = req.body;
   const vId = vendor_id || vendorId;

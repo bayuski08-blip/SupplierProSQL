@@ -54,7 +54,7 @@ patch(
                     </div>`,
 `                    <div class="cart-item-name">
                         \${item.emoji} \${item.name}
-                        \${item.manual_override ? '<span class="badge-manual-source" style="font-size:0.65rem; margin-left:4px;">✏️ Manual</span>' : (item.sumberHarga === 'pricelist' ? \`<span class="badge-pricelist-source" style="font-size:0.65rem; margin-left:4px;">🏷️ \${item.pricelistNama || 'Pricelist'}</span>\` : '')}
+                        \${item.manual_override ? '<span class="badge-manual-source" style="font-size:0.65rem; margin-left:4px;">✏️ Manual</span>' : (item.sumberHarga === 'pricelist' ? \`<span class="badge-pricelist-source" style="font-size:0.65rem; margin-left:4px;">\${item.pricelistNama || 'Pricelist'}</span>\` : '')}
                         \${(item.cost > 0 && item.price < item.cost) ? '<span class="badge-hpp-warning" style="font-size:0.65rem; margin-left:4px;">⚠️ Bawah HPP</span>' : ''}
                     </div>
                     <div class="cart-item-price-edit" style="display:flex; align-items:center; gap:0.25rem;">

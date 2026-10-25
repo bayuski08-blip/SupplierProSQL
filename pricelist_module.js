@@ -32,7 +32,7 @@ async function handlePOSCustomerChange(customerId) {
         const cust = CUSTOMERS.find(c => c.id === customerId);
         if (badgeEl) {
             if (cust && cust.pricelistName) {
-                badgeEl.innerHTML = `<span class="badge-pricelist-source" style="font-size:0.75rem; padding:0.2rem 0.5rem;">🏷️ ${cust.pricelistName}</span>`;
+                badgeEl.innerHTML = `<span class="badge-pricelist-source" style="font-size:0.75rem; padding:0.2rem 0.5rem;">${cust.pricelistName}</span>`;
             } else {
                 badgeEl.innerHTML = '<span style="font-size:0.75rem; color:var(--gray-400);">Harga Standar</span>';
             }

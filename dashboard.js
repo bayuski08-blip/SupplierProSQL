@@ -121,7 +121,7 @@ const PAGE_TITLES = {
 // ---------- Role Based Access Control (RBAC) ----------
 const ROLE_PERMISSIONS = {
     admin: ['dashboard', 'pos', 'products', 'customers', 'vendors', 'purchases', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'reports', 'settings', 'roles', 'master-data', 'customerfee', 'pricelists'],
-    finance: ['dashboard', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'reports'],
+    finance: ['dashboard', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'reports'],
     gudang: ['dashboard', 'products', 'purchases', 'vendors'],
     kasir: ['dashboard', 'pos', 'customers', 'invoices', 'piutang']
 };
@@ -140,6 +140,13 @@ function applyRoleRestrictions() {
             item.style.display = 'none';
         }
     });
+
+    // Control visibility of invoice import buttons: only Admin & Finance
+    const canImportInvoice = role === 'admin' || role === 'finance';
+    const btnImportInv = document.getElementById('btn-import-invoice');
+    if (btnImportInv) btnImportInv.style.display = canImportInvoice ? '' : 'none';
+    const btnImportPiutang = document.getElementById('btn-import-piutang');
+    if (btnImportPiutang) btnImportPiutang.style.display = canImportInvoice ? '' : 'none';
 
     // Also hide nav groups if all their items are hidden
     document.querySelectorAll('.nav-group').forEach(group => {
@@ -4675,12 +4682,22 @@ const sectionTitles = {
 };
 
 function openImportModal(section) {
+    if (section === 'invoice') {
+        const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+        if (role !== 'admin' && role !== 'finance') {
+            showToast('Akses ditolak: Hanya role Administrator dan Finance yang dapat mengimpor invoice outstanding.', 'error');
+            return;
+        }
+    }
     currentImportSection = section;
     selectedImportFile = null;
+    parsedInvoiceImportData = null;
 
     // Set Title
     const titleEl = document.getElementById('import-modal-title');
-    if (titleEl) titleEl.innerText = `Import Data ${sectionTitles[section] || section}`;
+    if (titleEl) {
+        titleEl.innerText = section === 'invoice' ? 'Import Invoice Outstanding' : `Import Data ${sectionTitles[section] || section}`;
+    }
 
     // Reset Dropzone & Input
     const fileInput = document.getElementById('import-file-input');
@@ -4688,6 +4705,8 @@ function openImportModal(section) {
 
     // Reset Modal States
     document.getElementById('import-state-initial').style.display = 'block';
+    const previewEl = document.getElementById('import-state-preview');
+    if (previewEl) previewEl.style.display = 'none';
     document.getElementById('import-state-progress').style.display = 'none';
     document.getElementById('import-state-result').style.display = 'none';
 
@@ -4698,7 +4717,7 @@ function openImportModal(section) {
         <button class="btn-toolbar secondary" id="import-btn-cancel" onclick="closeImportModal()">Batal</button>
         <button class="btn-toolbar primary" id="import-btn-submit" onclick="startImportProcess()"
             style="opacity:0.5;cursor:not-allowed;pointer-events:none;">
-            <i data-lucide="upload"></i> Proses Import
+            <i data-lucide="upload"></i> ${section === 'invoice' ? 'Periksa & Preview Data' : 'Proses Import'}
         </button>
     `;
 
@@ -4749,6 +4768,7 @@ function setImportFile(file) {
             btnSubmit.style.opacity = '0.5';
             btnSubmit.style.cursor = 'not-allowed';
             btnSubmit.style.pointerEvents = 'none';
+            btnSubmit.innerHTML = `<i data-lucide="upload"></i> ${currentImportSection === 'invoice' ? 'Periksa & Preview Data' : 'Proses Import'}`;
         }
     } else {
         if (contentDiv) {
@@ -4763,6 +4783,7 @@ function setImportFile(file) {
             btnSubmit.style.opacity = '1';
             btnSubmit.style.cursor = 'pointer';
             btnSubmit.style.pointerEvents = 'auto';
+            btnSubmit.innerHTML = `<i data-lucide="upload"></i> ${currentImportSection === 'invoice' ? 'Periksa & Preview Data' : 'Proses Import'}`;
         }
     }
     if (typeof lucide !== 'undefined') lucide.createIcons();
@@ -4802,12 +4823,46 @@ function downloadImportTemplate() {
         ];
         filename = "sample_pembelian.xlsx";
     } else if (currentImportSection === 'invoice') {
-        headers = ["Tanggal", "Nama Customer", "Total", "Terbayar", "Tipe Pembayaran", "Jatuh Tempo"];
-        rows = [
-            ["2026-06-12", "Toko Berkah Jaya", 1154400, 1154400, "Tunai", "2026-06-12"],
-            ["2026-06-12", "Warung Sari Rasa", 406260, 406260, "Transfer", "2026-06-12"]
+        const headers = [
+            "No. Invoice",
+            "Tanggal",
+            "Nama Customer",
+            "Total",
+            "Total Dibayar",
+            "Tanggal Pembayaran Terakhir",
+            "Sisa Tagihan",
+            "Tipe Pembayaran",
+            "Jatuh Tempo"
         ];
-        filename = "sample_invoice.xlsx";
+        const rows = [
+            ["INV-2026-05-00101", "2026-05-10", "Toko Berkah Jaya", 5000000, 2000000, "2026-05-15", 3000000, "Kredit 30 Hari", "2026-06-09"],
+            ["INV-2026-05-00102", "2026-05-12", "Warung Sari Rasa", 1500000, 0, "", 1500000, "Kredit 14 Hari", "2026-05-26"]
+        ];
+        filename = "Template_Import_Invoice_Outstanding.xlsx";
+
+        const wb = XLSX.utils.book_new();
+        const wsTemplate = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+        XLSX.utils.book_append_sheet(wb, wsTemplate, "Template");
+
+        const guideData = [
+            ["PANDUAN PENGISIAN TEMPLATE IMPORT INVOICE OUTSTANDING"],
+            [""],
+            ["Kolom", "Status", "Keterangan & Aturan Format"],
+            ["No. Invoice", "Opsional", "Nomor invoice dari sistem lama (contoh: INV-2026-05-00101). Kosongkan jika ingin nomor di-generate otomatis oleh sistem."],
+            ["Tanggal", "Wajib", "Tanggal pembuatan invoice. Format: YYYY-MM-DD (contoh: 2026-05-10)."],
+            ["Nama Customer", "Wajib", "Nama pelanggan yang sudah terdaftar di Master Data Pelanggan."],
+            ["Total", "Wajib", "Total tagihan invoice. Format angka murni tanpa titik/koma ribuan (contoh: 5000000)."],
+            ["Total Dibayar", "Opsional", "Jumlah yang sudah dicicil/dibayar sebelum migrasi. Boleh 0 atau kosong. Tidak boleh sama atau lebih besar dari Total."],
+            ["Tanggal Pembayaran Terakhir", "Opsional", "Tanggal pembayaran saldo awal. Kosongkan jika sama dengan tanggal invoice. Format: YYYY-MM-DD."],
+            ["Sisa Tagihan", "Informasi", "Hanya sebagai referensi/pembanding visual di template. Sistem selalu menghitung ulang: Total - Total Dibayar."],
+            ["Tipe Pembayaran", "Opsional", "Pilihan tipe kredit: Kredit 1 Hari, Kredit 7 Hari, Kredit 14 Hari, Kredit 30 Hari. Default: Kredit 30 Hari."],
+            ["Jatuh Tempo", "Opsional", "Tanggal jatuh tempo tagihan. Format: YYYY-MM-DD. Kosongkan jika ingin dihitung otomatis dari tipe kredit."]
+        ];
+        const wsGuide = XLSX.utils.aoa_to_sheet(guideData);
+        XLSX.utils.book_append_sheet(wb, wsGuide, "Petunjuk Pengisian");
+
+        XLSX.writeFile(wb, filename);
+        return;
     }
 
     const data = [headers, ...rows];
@@ -4815,6 +4870,297 @@ function downloadImportTemplate() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Template");
     XLSX.writeFile(wb, filename);
+}
+
+function parseExcelDate(val) {
+    if (!val) return '';
+    if (val instanceof Date) {
+        const y = val.getFullYear();
+        const m = String(val.getMonth() + 1).padStart(2, '0');
+        const d = String(val.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+    if (typeof val === 'number') {
+        const jsDate = new Date(Math.round((val - 25569) * 86400 * 1000));
+        const y = jsDate.getUTCFullYear();
+        const m = String(jsDate.getUTCMonth() + 1).padStart(2, '0');
+        const d = String(jsDate.getUTCDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+    const str = String(val).trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+        return str.substring(0, 10);
+    }
+    const dmy = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+    if (dmy) {
+        return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+    }
+    return str;
+}
+
+let parsedInvoiceImportData = null;
+
+function resetImportToInitial() {
+    parsedInvoiceImportData = null;
+    const initialEl = document.getElementById('import-state-initial');
+    const previewEl = document.getElementById('import-state-preview');
+    const progressEl = document.getElementById('import-state-progress');
+    const resultEl = document.getElementById('import-state-result');
+    if (initialEl) initialEl.style.display = 'block';
+    if (previewEl) previewEl.style.display = 'none';
+    if (progressEl) progressEl.style.display = 'none';
+    if (resultEl) resultEl.style.display = 'none';
+
+    const footer = document.getElementById('import-modal-footer');
+    if (footer) {
+        footer.style.display = 'flex';
+        footer.innerHTML = `
+            <button class="btn-toolbar secondary" id="import-btn-cancel" onclick="closeImportModal()">Batal</button>
+            <button class="btn-toolbar primary" id="import-btn-submit" onclick="startImportProcess()"
+                style="opacity:0.5;cursor:not-allowed;pointer-events:none;">
+                <i data-lucide="upload"></i> ${currentImportSection === 'invoice' ? 'Periksa & Preview Data' : 'Proses Import'}
+            </button>
+        `;
+    }
+    setImportFile(null);
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+async function previewInvoiceImport(rows, fileName) {
+    if (!rows || rows.length === 0) {
+        showToast('File Excel tidak berisi data.', 'warning');
+        return;
+    }
+
+    // Fetch master customers and existing invoices to check uniqueness
+    let customersList = [];
+    let existingInvoicesList = [];
+    try {
+        const [custRes, invRes] = await Promise.all([
+            fetch('/api/customers', { headers: getAuthHeaders() }),
+            fetch('/api/invoices', { headers: getAuthHeaders() })
+        ]);
+        customersList = await custRes.json();
+        existingInvoicesList = await invRes.json();
+    } catch (err) {
+        console.error('Failed fetching master data for preview:', err);
+    }
+
+    const custMap = {};
+    customersList.forEach(c => {
+        custMap[c.name.toLowerCase().trim()] = c;
+        custMap[c.id.toLowerCase().trim()] = c;
+    });
+
+    const existingInvIds = new Set(existingInvoicesList.map(i => String(i.id).toLowerCase().trim()));
+
+    const validRows = [];
+    const errorRows = [];
+    const seenBatchIds = new Set();
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    rows.forEach((row, idx) => {
+        const rowNum = idx + 2; // header is row 1
+        const noInvoice = String(row['No. Invoice'] || row['No Invoice'] || row['Nomor Invoice'] || row['no_invoice'] || row['id'] || '').trim();
+        const rawDate = row['Tanggal'] || row['date'] || row['tanggal'] || '';
+        const date = parseExcelDate(rawDate) || todayStr;
+        const custName = String(row['Nama Customer'] || row['Customer'] || row['Pelanggan'] || row['Nama Pelanggan'] || row['customer'] || '').trim();
+        const rawTotal = row['Total'] || row['total'] || row['Total Invoice'] || row['Nilai'] || 0;
+        const total = parseFloat(rawTotal) || 0;
+        const rawPaid = row['Total Dibayar'] ?? row['total_dibayar'] ?? row['Terbayar'] ?? row['terbayar'] ?? row['Dibayar'] ?? 0;
+        const totalDibayar = parseFloat(rawPaid) || 0;
+        const rawLastPay = row['Tanggal Pembayaran Terakhir'] || row['tanggal_pembayaran_terakhir'] || row['Tgl Bayar'] || '';
+        const lastPaymentDate = parseExcelDate(rawLastPay) || date;
+        const ptName = String(row['Tipe Pembayaran'] || row['tipe_pembayaran'] || 'Kredit 30 Hari').trim();
+        const rawDue = row['Jatuh Tempo'] || row['jatuh_tempo'] || row['Due Date'] || row['due_date'] || '';
+        const dueDate = parseExcelDate(rawDue);
+
+        // Validation 1: Customer
+        if (!custName) {
+            errorRows.push(`Baris ${rowNum}: Nama customer kosong.`);
+            return;
+        }
+        const matchedCust = custMap[custName.toLowerCase()];
+        if (!matchedCust) {
+            errorRows.push(`Baris ${rowNum}: Customer "${custName}" tidak terdaftar di sistem.`);
+            return;
+        }
+
+        // Validation 2: Total
+        if (total <= 0) {
+            errorRows.push(`Baris ${rowNum}: Total tagihan (${rp(total)}) harus lebih besar dari 0.`);
+            return;
+        }
+
+        // Validation 3: Total Dibayar < 0
+        if (totalDibayar < 0) {
+            errorRows.push(`Baris ${rowNum}: Total dibayar tidak boleh negatif.`);
+            return;
+        }
+
+        // Validation 4: Total Dibayar == Total (Bukan outstanding)
+        if (totalDibayar === total) {
+            errorRows.push(`Baris ${rowNum}: Total dibayar sama dengan total tagihan (${rp(total)}). Ini bukan outstanding karena sudah lunas.`);
+            return;
+        }
+
+        // Validation 5: Overpayment (Total Dibayar > Total)
+        if (totalDibayar > total) {
+            errorRows.push(`Baris ${rowNum}: Total dibayar (${rp(totalDibayar)}) melebihi total tagihan (${rp(total)}). Aturan cicilan: overpayment tidak diizinkan.`);
+            return;
+        }
+
+        // Validation 6: Future payment date
+        if (totalDibayar > 0 && lastPaymentDate > todayStr) {
+            errorRows.push(`Baris ${rowNum}: Tanggal pembayaran terakhir (${lastPaymentDate}) tidak boleh di masa depan.`);
+            return;
+        }
+
+        // Validation 7: Duplicate Invoice No
+        if (noInvoice) {
+            if (seenBatchIds.has(noInvoice.toLowerCase())) {
+                errorRows.push(`Baris ${rowNum}: Nomor invoice "${noInvoice}" duplikat di dalam file ini.`);
+                return;
+            }
+            if (existingInvIds.has(noInvoice.toLowerCase())) {
+                errorRows.push(`Baris ${rowNum}: Nomor invoice "${noInvoice}" sudah ada di database.`);
+                return;
+            }
+            seenBatchIds.add(noInvoice.toLowerCase());
+        }
+
+        const sisa = Math.max(0, total - totalDibayar);
+
+        validRows.push({
+            row_number: rowNum,
+            id: noInvoice || null,
+            date: date,
+            customer_id: matchedCust.id,
+            customer_name: matchedCust.name,
+            total: total,
+            total_dibayar: totalDibayar,
+            sisa: sisa,
+            last_payment_date: lastPaymentDate,
+            payment_type: ptName,
+            due_date: dueDate || null
+        });
+    });
+
+    parsedInvoiceImportData = {
+        validRows,
+        errorRows,
+        fileName
+    };
+
+    const totalTagihan = validRows.reduce((sum, r) => sum + r.total, 0);
+    const totalTerbayar = validRows.reduce((sum, r) => sum + r.total_dibayar, 0);
+    const totalSisa = validRows.reduce((sum, r) => sum + r.sisa, 0);
+
+    // Switch to preview state
+    document.getElementById('import-state-initial').style.display = 'none';
+    document.getElementById('import-state-preview').style.display = 'block';
+    document.getElementById('import-state-progress').style.display = 'none';
+    document.getElementById('import-state-result').style.display = 'none';
+
+    document.getElementById('import-preview-filename').textContent = `📄 ${fileName} (${rows.length} total baris)`;
+    document.getElementById('import-summary-count').textContent = `${validRows.length} Invoice`;
+    document.getElementById('import-summary-total').textContent = rp(totalTagihan);
+    document.getElementById('import-summary-paid').textContent = rp(totalTerbayar);
+    document.getElementById('import-summary-sisa').textContent = rp(totalSisa);
+
+    // Error box
+    const errBox = document.getElementById('import-preview-errors-box');
+    const errList = document.getElementById('import-preview-errors-list');
+    const errCount = document.getElementById('import-preview-errors-count');
+    if (errorRows.length > 0) {
+        errBox.style.display = 'block';
+        errCount.textContent = `${errorRows.length} Baris Bermasalah (Ditolak):`;
+        errList.innerHTML = errorRows.map(e => `<div>• ${e}</div>`).join('');
+    } else {
+        errBox.style.display = 'none';
+    }
+
+    // Preview Table
+    const tbody = document.getElementById('import-preview-table-body');
+    if (validRows.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:1.5rem;color:var(--rose-500);font-weight:600;">Tidak ada baris data yang valid untuk diimpor. Silakan perbaiki file Excel Anda.</td></tr>`;
+    } else {
+        tbody.innerHTML = validRows.map(r => `
+            <tr style="border-bottom:1px solid var(--gray-100);">
+                <td style="padding:0.35rem 0.5rem;font-weight:600;color:var(--gray-700);">${r.id || '<em style="color:var(--gray-400);">(Auto)</em>'}</td>
+                <td style="padding:0.35rem 0.5rem;">${r.customer_name}</td>
+                <td style="padding:0.35rem 0.5rem;color:var(--gray-600);">${r.date}</td>
+                <td style="padding:0.35rem 0.5rem;text-align:right;font-weight:600;">${rp(r.total)}</td>
+                <td style="padding:0.35rem 0.5rem;text-align:right;color:var(--emerald-600);">${rp(r.total_dibayar)}</td>
+                <td style="padding:0.35rem 0.5rem;text-align:right;color:var(--amber-600);font-weight:600;">${rp(r.sisa)}</td>
+                <td style="padding:0.35rem 0.5rem;color:var(--gray-600);">${r.due_date || '-'}</td>
+            </tr>
+        `).join('');
+    }
+
+    // Update Footer
+    const footer = document.getElementById('import-modal-footer');
+    footer.style.display = 'flex';
+    footer.innerHTML = `
+        <button class="btn-toolbar secondary" onclick="resetImportToInitial()">Ganti File</button>
+        <button class="btn-toolbar primary" id="import-btn-confirm" onclick="commitInvoiceImport()"
+            ${validRows.length === 0 ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : ''}>
+            <i data-lucide="check"></i> Konfirmasi & Simpan (${validRows.length} Invoice)
+        </button>
+    `;
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+async function commitInvoiceImport() {
+    if (!parsedInvoiceImportData || !parsedInvoiceImportData.validRows || parsedInvoiceImportData.validRows.length === 0) {
+        showToast('Tidak ada data valid untuk diimpor', 'warning');
+        return;
+    }
+
+    const validRows = parsedInvoiceImportData.validRows;
+
+    // Switch to progress
+    document.getElementById('import-state-initial').style.display = 'none';
+    document.getElementById('import-state-preview').style.display = 'none';
+    document.getElementById('import-state-progress').style.display = 'block';
+    document.getElementById('import-state-result').style.display = 'none';
+    document.getElementById('import-modal-footer').style.display = 'none';
+    document.getElementById('import-progress-text').innerText = `Menyimpan ${validRows.length} invoice outstanding secara transaksional...`;
+
+    try {
+        const res = await fetch('/api/invoices/import-outstanding', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ invoices: validRows })
+        });
+
+        const result = await res.json();
+        if (!res.ok) {
+            throw new Error(result.error || 'Gagal menyimpan import invoice');
+        }
+
+        // Show Result
+        document.getElementById('import-state-progress').style.display = 'none';
+        document.getElementById('import-state-result').style.display = 'block';
+        document.getElementById('import-result-success').innerText = `Berhasil mengimpor: ${result.count} invoice outstanding.`;
+        document.getElementById('import-result-failed').innerText = parsedInvoiceImportData.errorRows.length > 0 ? `Dilewati (Error): ${parsedInvoiceImportData.errorRows.length} baris.` : '';
+
+        const errList = document.getElementById('import-error-list');
+        if (errList) {
+            errList.innerHTML = parsedInvoiceImportData.errorRows.map(f => `<div style="margin-bottom:0.25rem;">${f}</div>`).join('');
+        }
+
+        const footer = document.getElementById('import-modal-footer');
+        footer.style.display = 'flex';
+        footer.innerHTML = `
+            <button class="btn-toolbar primary" onclick="closeImportAndRefresh()">Tutup & Perbarui Tampilan</button>
+        `;
+
+        showToast(`${result.count} invoice outstanding berhasil diimpor!`, 'success');
+    } catch (err) {
+        console.error('Import commit error:', err);
+        showImportError(`Gagal memproses import (Transaksi dibatalkan/Rollback): ${err.message}`);
+    }
 }
 
 function startImportProcess() {
@@ -4827,7 +5173,12 @@ function startImportProcess() {
             const wb = XLSX.read(data, { type: 'array' });
             const sheet = wb.Sheets[wb.SheetNames[0]];
             const rows = XLSX.utils.sheet_to_json(sheet);
-            await executeImport(rows);
+
+            if (currentImportSection === 'invoice') {
+                await previewInvoiceImport(rows, selectedImportFile.name);
+            } else {
+                await executeImport(rows);
+            }
         } catch (err) {
             showImportError("Gagal membaca file Excel: " + err.message);
         }
@@ -5151,7 +5502,9 @@ function closeImportAndRefresh() {
     } else if (currentImportSection === 'pembelian') {
         fetchPurchases();
     } else if (currentImportSection === 'invoice') {
-        fetchInvoices();
+        if (typeof fetchInvoices === 'function') fetchInvoices();
+        if (typeof fetchPiutang === 'function') fetchPiutang();
+        if (typeof fetchDashboardData === 'function') fetchDashboardData();
     }
 }
 
@@ -5239,6 +5592,8 @@ window.setImportFile = setImportFile;
 window.downloadImportTemplate = downloadImportTemplate;
 window.startImportProcess = startImportProcess;
 window.closeImportAndRefresh = closeImportAndRefresh;
+window.resetImportToInitial = resetImportToInitial;
+window.commitInvoiceImport = commitInvoiceImport;
 window.exportSection = exportSection;
 
 // ---------- Company Settings & Print Invoice ----------

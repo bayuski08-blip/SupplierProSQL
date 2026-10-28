@@ -598,7 +598,7 @@
                             </select>
                         </div>
                         <div class="page-toolbar-right">
-                            <button class="btn-toolbar secondary" onclick="openImportModal('invoice')">
+                            <button class="btn-toolbar secondary" id="btn-import-invoice" onclick="openImportModal('invoice')">
                                 <i data-lucide="upload"></i> Import
                             </button>
                             <button class="btn-toolbar secondary" onclick="exportSection('invoice')">
@@ -655,6 +655,11 @@
                                 <option value="lunas">Lunas</option>
                                 <option value="overdue">Lewat Jatuh Tempo</option>
                             </select>
+                        </div>
+                        <div class="page-toolbar-right">
+                            <button class="btn-toolbar secondary" id="btn-import-piutang" onclick="openImportModal('invoice')">
+                                <i data-lucide="upload"></i> Import Outstanding
+                            </button>
                         </div>
                     </div>
 
@@ -1703,7 +1708,7 @@
 
     <!-- ===== UNIFIED IMPORT MODAL ===== -->
     <div class="modal-overlay" id="modal-import-unified">
-        <div class="modal" style="max-width: 520px;">
+        <div class="modal" id="modal-import-unified-container" style="max-width: 680px; width: 95%;">
             <div class="modal-header">
                 <h3 id="import-modal-title">Import Data</h3>
                 <button class="modal-close" onclick="closeImportModal()"><i data-lucide="x"></i></button>
@@ -1737,6 +1742,69 @@
                             onchange="handleImportFileSelect(this)">
                     </div>
                 </div>
+
+                <!-- State: preview (Khusus Validasi & Preview Invoice Outstanding) -->
+                <div id="import-state-preview" style="display:none;">
+                    <div style="margin-bottom:1rem;display:flex;justify-content:space-between;align-items:center;">
+                        <span id="import-preview-filename" style="font-size:0.85rem;font-weight:600;color:var(--gray-700);"></span>
+                        <button class="btn-toolbar secondary" style="font-size:0.75rem;padding:0.25rem 0.5rem;" onclick="resetImportToInitial()">
+                            <i data-lucide="refresh-cw" style="width:13px;height:13px;"></i> Ganti File
+                        </button>
+                    </div>
+
+                    <!-- Summary Cards -->
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:0.6rem;margin-bottom:1rem;">
+                        <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:0.5rem;padding:0.6rem 0.75rem;">
+                            <div style="font-size:0.72rem;color:var(--gray-500);margin-bottom:0.2rem;">Invoice Valid</div>
+                            <div id="import-summary-count" style="font-size:1.1rem;font-weight:700;color:var(--gray-900);">0</div>
+                        </div>
+                        <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:0.5rem;padding:0.6rem 0.75rem;">
+                            <div style="font-size:0.72rem;color:var(--gray-500);margin-bottom:0.2rem;">Total Tagihan</div>
+                            <div id="import-summary-total" style="font-size:1.1rem;font-weight:700;color:var(--blue-600);">Rp 0</div>
+                        </div>
+                        <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:0.5rem;padding:0.6rem 0.75rem;">
+                            <div style="font-size:0.72rem;color:var(--gray-500);margin-bottom:0.2rem;">Total Terbayar</div>
+                            <div id="import-summary-paid" style="font-size:1.1rem;font-weight:700;color:var(--emerald-600);">Rp 0</div>
+                        </div>
+                        <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:0.5rem;padding:0.6rem 0.75rem;">
+                            <div style="font-size:0.72rem;color:var(--gray-500);margin-bottom:0.2rem;">Sisa Outstanding</div>
+                            <div id="import-summary-sisa" style="font-size:1.1rem;font-weight:700;color:var(--amber-600);">Rp 0</div>
+                        </div>
+                    </div>
+
+                    <!-- Error Alert Box -->
+                    <div id="import-preview-errors-box" style="display:none;background:#FEF2F2;border:1px solid #FECACA;border-radius:0.5rem;padding:0.75rem;margin-bottom:1rem;">
+                        <div style="display:flex;align-items:center;gap:0.4rem;color:#B91C1C;font-weight:600;font-size:0.82rem;margin-bottom:0.35rem;">
+                            <i data-lucide="alert-circle" style="width:16px;height:16px;"></i>
+                            <span id="import-preview-errors-count">Baris Bermasalah (Ditolak):</span>
+                        </div>
+                        <div id="import-preview-errors-list" style="max-height:100px;overflow-y:auto;font-size:0.78rem;color:#DC2626;line-height:1.45;">
+                            <!-- Error items -->
+                        </div>
+                    </div>
+
+                    <!-- Valid Rows Preview Table -->
+                    <div style="margin-bottom:0.4rem;font-size:0.8rem;font-weight:600;color:var(--gray-700);">Daftar Invoice Siap Diimpor:</div>
+                    <div style="max-height:220px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:0.5rem;background:#fff;">
+                        <table class="data-table" style="font-size:0.78rem;width:100%;border-collapse:collapse;margin:0;">
+                            <thead style="position:sticky;top:0;background:var(--gray-100);z-index:1;">
+                                <tr>
+                                    <th style="padding:0.4rem 0.5rem;text-align:left;">No. Inv</th>
+                                    <th style="padding:0.4rem 0.5rem;text-align:left;">Pelanggan</th>
+                                    <th style="padding:0.4rem 0.5rem;text-align:left;">Tanggal</th>
+                                    <th style="padding:0.4rem 0.5rem;text-align:right;">Total</th>
+                                    <th style="padding:0.4rem 0.5rem;text-align:right;">Dibayar</th>
+                                    <th style="padding:0.4rem 0.5rem;text-align:right;">Sisa</th>
+                                    <th style="padding:0.4rem 0.5rem;text-align:left;">Jatuh Tempo</th>
+                                </tr>
+                            </thead>
+                            <tbody id="import-preview-table-body">
+                                <!-- Filled by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <!-- State: progress -->
                 <div id="import-state-progress" style="display:none;text-align:center;padding:2rem 0;">
                     <div

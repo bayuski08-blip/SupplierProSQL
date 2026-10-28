@@ -1,0 +1,4 @@
+No. Invoice,Tanggal,Nama Customer,Total,Total Dibayar,Tanggal Pembayaran Terakhir,Sisa Tagihan,Tipe Pembayaran,Jatuh Tempo
+INV-2026-05-00101,2026-05-10,Toko Berkah Jaya,5000000,2000000,2026-05-15,3000000,Kredit 30 Hari,2026-06-09
+INV-2026-05-00102,2026-05-12,Warung Sari Rasa,1500000,0,,1500000,Kredit 14 Hari,2026-05-26
+

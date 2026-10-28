@@ -1968,6 +1968,192 @@ app.post('/api/invoices/manual', authenticateToken, authorizeRoles('admin', 'kas
     res.status(400).json({ error: err.message });
   }
 });
+
+/**
+ * POST /api/invoices/import-outstanding
+ * Import batch invoice outstanding (migrasi saldo piutang sistem lama).
+ * Hak akses: Administrator dan Finance
+ * Fitur:
+ * - Transaksional (BEGIN ... COMMIT / ROLLBACK)
+ * - Mencegah invoice lunas (total_dibayar == total) dan overpayment (total_dibayar > total)
+ * - Tipe pembayaran otomatis Kredit (jatuh tempo aktif, tanpa denda)
+ * - Jika total_dibayar > 0: otomatis buat 1 record di sales_invoice_payments bertanda 'Saldo awal hasil import'
+ * - Nomor invoice eksisting divalidasi keunikan di database dan di dalam batch
+ */
+app.post('/api/invoices/import-outstanding', authenticateToken, authorizeRoles('admin', 'finance'), async (req, res) => {
+  const { invoices } = req.body;
+  if (!Array.isArray(invoices) || invoices.length === 0) {
+    return res.status(400).json({ error: 'Data invoice untuk diimpor tidak boleh kosong' });
+  }
+
+  const userId = req.user.id;
+  const todayStr = formatDateStr(new Date());
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Ambil seluruh payment types untuk mapping tipe kredit
+    const ptRes = await client.query('SELECT id, name FROM payment_types');
+    const paymentTypes = ptRes.rows;
+    const ptMap = {};
+    paymentTypes.forEach(p => {
+      ptMap[p.name.toLowerCase().trim()] = p.id;
+      ptMap[p.id.toLowerCase().trim()] = p.id;
+    });
+
+    // Default credit type: prioritas Kredit 30 Hari (PT-7) atau tipe Kredit lainnya
+    const defaultCreditType = paymentTypes.find(p => p.name.toLowerCase().includes('kredit 30'))?.id
+      || paymentTypes.find(p => p.name.toLowerCase().startsWith('kredit'))?.id
+      || 'PT-7';
+
+    // 2. Ambil seluruh customer untuk validasi
+    const custRes = await client.query('SELECT id, name FROM customers');
+    const custMapByName = {};
+    const custMapById = {};
+    custRes.rows.forEach(c => {
+      custMapByName[c.name.toLowerCase().trim()] = c.id;
+      custMapById[c.id.toLowerCase().trim()] = c.id;
+    });
+
+    const seenIds = new Set();
+    const createdInvoices = [];
+
+    for (let i = 0; i < invoices.length; i++) {
+      const inv = invoices[i];
+      const rowNum = inv.row_number || (i + 1);
+
+      // A. Validasi Customer
+      const rawCust = String(inv.customer_id || inv.customer_name || inv.customer || '').trim();
+      if (!rawCust) {
+        throw new Error(`Baris ${rowNum}: Nama customer wajib diisi`);
+      }
+      const customerId = custMapById[rawCust.toLowerCase()] || custMapByName[rawCust.toLowerCase()];
+      if (!customerId) {
+        throw new Error(`Baris ${rowNum}: Customer "${rawCust}" tidak ditemukan di database`);
+      }
+
+      // B. Tanggal Invoice
+      let invoiceDate = inv.date ? formatDateStr(inv.date) : todayStr;
+      if (!invoiceDate || isNaN(new Date(invoiceDate).getTime())) {
+        invoiceDate = todayStr;
+      }
+
+      // C. Validasi Total & Total Dibayar
+      const total = parseFloat(inv.total);
+      if (isNaN(total) || total <= 0) {
+        throw new Error(`Baris ${rowNum}: Total tagihan harus berupa angka lebih besar dari 0`);
+      }
+
+      const totalDibayar = parseFloat(inv.total_dibayar ?? inv.paid ?? 0);
+      if (isNaN(totalDibayar) || totalDibayar < 0) {
+        throw new Error(`Baris ${rowNum}: Total dibayar tidak boleh bernilai negatif`);
+      }
+
+      if (totalDibayar >= total) {
+        if (totalDibayar === total) {
+          throw new Error(`Baris ${rowNum}: Total dibayar sama dengan total tagihan (Rp ${Math.round(total).toLocaleString('id-ID')}). Invoice ini bukan outstanding karena sudah lunas.`);
+        } else {
+          throw new Error(`Baris ${rowNum}: Total dibayar (Rp ${Math.round(totalDibayar).toLocaleString('id-ID')}) melebihi total tagihan (Rp ${Math.round(total).toLocaleString('id-ID')}). Pembayaran tidak boleh melebihi nilai tagihan.`);
+        }
+      }
+
+      // D. Tipe Pembayaran (wajib tipe kredit)
+      let pTypeId = defaultCreditType;
+      const rawPt = String(inv.payment_type || inv.payment_type_id || '').toLowerCase().trim();
+      if (rawPt && ptMap[rawPt]) {
+        const candidatePt = paymentTypes.find(p => p.id === ptMap[rawPt]);
+        if (candidatePt && candidatePt.name.toLowerCase().startsWith('kredit')) {
+          pTypeId = candidatePt.id;
+        }
+      }
+
+      // E. Tanggal Jatuh Tempo
+      let dueDate = inv.due_date ? formatDateStr(inv.due_date) : null;
+      if (!dueDate) {
+        let tenorDays = 30;
+        if (pTypeId === 'PT-3') tenorDays = 1;
+        else if (pTypeId === 'PT-5') tenorDays = 7;
+        else if (pTypeId === 'PT-6') tenorDays = 14;
+        const dObj = new Date(invoiceDate);
+        dObj.setDate(dObj.getDate() + tenorDays);
+        dueDate = formatDateStr(dObj);
+      }
+
+      // F. Nomor Invoice (manual jika diisi, atomic counter jika kosong)
+      let invoiceId = inv.id ? String(inv.id).trim() : '';
+      if (invoiceId) {
+        if (seenIds.has(invoiceId.toLowerCase())) {
+          throw new Error(`Baris ${rowNum}: Nomor invoice "${invoiceId}" duplikat di dalam file import ini`);
+        }
+        const existingInv = await client.query('SELECT id FROM sales_invoices WHERE id = ?', [invoiceId]);
+        if (existingInv.rows.length > 0) {
+          throw new Error(`Baris ${rowNum}: Nomor invoice "${invoiceId}" sudah ada di database`);
+        }
+        seenIds.add(invoiceId.toLowerCase());
+      } else {
+        invoiceId = await generateInvoiceId(client, invoiceDate);
+        seenIds.add(invoiceId.toLowerCase());
+      }
+
+      // G. Hitung sisa tagihan & status
+      const sisa = Math.max(0, total - totalDibayar);
+      const status = totalDibayar > 0 ? 'Sebagian' : 'Belum Lunas';
+
+      // H. Simpan sales_invoices
+      await client.query(
+        `INSERT INTO sales_invoices 
+         (id, date, customer_id, subtotal, discount, tax, total, paid_amount, payment_type_id, due_date, paid_date, status, user_id) 
+         VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?, NULL, ?, ?)`,
+        [invoiceId, invoiceDate, customerId, total, total, totalDibayar, pTypeId, dueDate, status, userId]
+      );
+
+      // I. Jika total_dibayar > 0, buat 1 record di sales_invoice_payments sebagai saldo awal
+      if (totalDibayar > 0) {
+        let lastPaymentDate = inv.last_payment_date || inv.tanggal_pembayaran_terakhir;
+        lastPaymentDate = lastPaymentDate ? formatDateStr(lastPaymentDate) : invoiceDate;
+        if (!lastPaymentDate || isNaN(new Date(lastPaymentDate).getTime())) {
+          lastPaymentDate = invoiceDate;
+        }
+        if (lastPaymentDate > todayStr) {
+          throw new Error(`Baris ${rowNum}: Tanggal pembayaran terakhir tidak boleh di masa depan`);
+        }
+
+        const paymentNo = await generatePaymentNo(client, lastPaymentDate);
+        await client.query(
+          `INSERT INTO sales_invoice_payments
+           (payment_no, invoice_id, payment_date, amount, payment_method, notes, is_down_payment, status, cash_transaction_id, created_by)
+           VALUES (?, ?, ?, ?, 'Saldo Awal', 'Saldo awal hasil import', 0, 'active', NULL, ?)`,
+          [paymentNo, invoiceId, lastPaymentDate, totalDibayar, userId]
+        );
+      }
+
+      createdInvoices.push({
+        id: invoiceId,
+        customer_id: customerId,
+        total,
+        total_dibayar: totalDibayar,
+        sisa,
+        status,
+        due_date: dueDate
+      });
+    }
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      message: `${createdInvoices.length} invoice outstanding berhasil diimpor`,
+      count: createdInvoices.length,
+      invoices: createdInvoices
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[Import Outstanding API] Error rollback:', err.message);
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
 /**
  * Helper to record a payment for an invoice with strict validations:
  * - Role: admin / finance

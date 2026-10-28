@@ -7,7 +7,15 @@ INSERT IGNORE INTO product_categories (id, name) VALUES
   ('PC-1', 'Minuman'), 
   ('PC-2', 'Makanan'), 
   ('PC-3', 'Sembako'), 
-  ('PC-4', 'Lainnya');
+  ('PC-4', 'Lainnya'),
+  ('PC-5', 'Dairy'),
+  ('PC-6', 'Frozen'),
+  ('PC-7', 'Fruits'),
+  ('PC-8', 'Groceries'),
+  ('PC-9', 'Herbs'),
+  ('PC-10', 'Nuts'),
+  ('PC-11', 'Pasta'),
+  ('PC-12', 'Non Food');
 
 INSERT IGNORE INTO product_units (id, name) VALUES 
   ('PU-1', 'pcs'), 

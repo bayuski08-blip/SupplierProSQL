@@ -136,12 +136,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         const tbody = document.getElementById('print-invoice-items');
         tbody.innerHTML = data.items.map((it, idx) => `
             <tr>
-                <td style="border: 1px solid #000; padding: 0.5rem; text-align: center;">${idx + 1}</td>
-                <td style="border: 1px solid #000; padding: 0.5rem;">${it.product_name}</td>
-                <td style="border: 1px solid #000; padding: 0.5rem; text-align: center;">${it.unit_name}</td>
-                <td style="border: 1px solid #000; padding: 0.5rem; text-align: center;">${it.quantity}</td>
-                <td style="border: 1px solid #000; padding: 0.5rem; text-align: right;">${rp(it.price).replace('Rp', '').trim()}</td>
-                <td style="border: 1px solid #000; padding: 0.5rem; text-align: right;">${rp(it.total).replace('Rp', '').trim()}</td>
+                <td style="text-align: center;">${idx + 1}</td>
+                <td style="text-align: left;">${it.product_name}</td>
+                <td style="text-align: center;">${it.unit_name}</td>
+                <td style="text-align: center;">${it.quantity}</td>
+                <td style="text-align: right;">${rp(it.price).replace('Rp', '').trim()}</td>
+                <td style="text-align: right;">${rp(it.total).replace('Rp', '').trim()}</td>
             </tr>
         `).join('');
 

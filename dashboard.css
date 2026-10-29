@@ -2007,6 +2007,61 @@ textarea.form-input {
     }
 }
 
+/* ---------- Invoice Print & Preview Shared Styles ---------- */
+.invoice-header-info {
+    font-size: var(--invoice-header-font-size, 9pt);
+    line-height: var(--invoice-header-line-height, 1.2);
+    color: #000;
+}
+.invoice-header-info table {
+    font-size: var(--invoice-header-font-size, 9pt);
+    line-height: var(--invoice-header-line-height, 1.2);
+}
+
+.invoice-items-table {
+    table-layout: fixed;
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 0.5rem;
+    font-size: var(--invoice-table-font-size, 9pt);
+    line-height: var(--invoice-table-line-height, 1.25);
+    color: #000;
+}
+.invoice-items-table thead {
+    display: table-header-group;
+}
+.invoice-items-table tbody tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    height: auto;
+    min-height: 0;
+}
+.invoice-items-table th,
+.invoice-items-table td {
+    border: 1px solid #000;
+    padding: var(--invoice-table-pad-y, 3px) var(--invoice-table-pad-x, 6px);
+    height: auto;
+    min-height: 0;
+    box-sizing: border-box;
+    vertical-align: middle;
+}
+.invoice-items-table th {
+    font-weight: bold;
+}
+.invoice-items-table td {
+    font-weight: normal;
+}
+
+.invoice-bottom {
+    break-inside: avoid;
+    page-break-inside: avoid;
+}
+.invoice-signatures,
+.invoice-totals {
+    break-inside: avoid;
+    page-break-inside: avoid;
+}
+
 /* ---------- Fitur Pricelist Styles ---------- */
 .spin {
     animation: spinPricelist 1s linear infinite;

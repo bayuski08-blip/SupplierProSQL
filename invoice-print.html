@@ -12,6 +12,16 @@
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="dashboard.css">
     <style>
+        :root {
+            /* Shared font-size between header info & product table */
+            --invoice-header-font-size: 9pt;
+            --invoice-header-line-height: 1.2;
+            --invoice-table-font-size: var(--invoice-header-font-size);
+            --invoice-table-line-height: 1.25;
+            --invoice-table-pad-y: 3px;
+            --invoice-table-pad-x: 6px;
+        }
+
         /* Screen: center the invoice card */
         body {
             background: #f3f4f6;
@@ -33,6 +43,63 @@
             box-sizing: border-box;
             box-shadow: 0 4px 24px rgba(0,0,0,0.12);
             align-self: flex-start;
+        }
+
+        /* Header info text styles */
+        .invoice-header-info {
+            font-size: var(--invoice-header-font-size);
+            line-height: var(--invoice-header-line-height);
+            color: #000;
+        }
+        .invoice-header-info table {
+            font-size: var(--invoice-header-font-size);
+            line-height: var(--invoice-header-line-height);
+        }
+
+        /* Product items table */
+        .invoice-items-table {
+            table-layout: fixed;
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 0.5rem;
+            font-size: var(--invoice-table-font-size);
+            line-height: var(--invoice-table-line-height);
+            color: #000;
+        }
+        .invoice-items-table thead {
+            display: table-header-group;
+        }
+        .invoice-items-table tbody tr {
+            break-inside: avoid;
+            page-break-inside: avoid;
+            height: auto;
+            min-height: 0;
+        }
+        .invoice-items-table th,
+        .invoice-items-table td {
+            border: 1px solid #000;
+            padding: var(--invoice-table-pad-y) var(--invoice-table-pad-x);
+            height: auto;
+            min-height: 0;
+            box-sizing: border-box;
+            vertical-align: middle;
+        }
+        .invoice-items-table th {
+            font-weight: bold;
+        }
+        .invoice-items-table td {
+            font-weight: normal;
+        }
+
+        /* Footer (signatures + totals) */
+        .invoice-bottom {
+            break-inside: avoid;
+            page-break-inside: avoid;
+        }
+        .invoice-signatures,
+        .invoice-totals {
+            break-inside: avoid;
+            page-break-inside: avoid;
         }
 
         /* Print: clean page, no chrome from dashboard.css @media print */
@@ -61,7 +128,7 @@
                 display: block !important;
                 position: static !important;
                 inset: auto !important;
-                width: var(--print-content-width) !important;
+                width: 100% !important;
                 max-width: var(--print-content-width) !important;
                 margin-left: var(--print-offset-left) !important;
                 margin-right: 0 !important;
@@ -76,6 +143,7 @@
             #print-invoice-view > div {
                 max-width: 100% !important;
                 width: 100% !important;
+                height: auto !important;
             }
             /* Items table: fixed layout with % widths, repeat thead, no row splitting */
             .invoice-items-table {
@@ -83,16 +151,21 @@
                 width: 100% !important;
             }
             .invoice-items-table thead {
-                display: table-header-group;
+                display: table-header-group !important;
             }
             .invoice-items-table tbody tr {
-                break-inside: avoid;
-                page-break-inside: avoid;
+                break-inside: avoid !important;
+                page-break-inside: avoid !important;
             }
             /* Footer (signatures + totals): stay together, never split */
             .invoice-bottom {
-                break-inside: avoid;
-                page-break-inside: avoid;
+                break-inside: avoid !important;
+                page-break-inside: avoid !important;
+            }
+            .invoice-signatures,
+            .invoice-totals {
+                break-inside: avoid !important;
+                page-break-inside: avoid !important;
             }
             .no-print {
                 display: none !important;
@@ -116,9 +189,9 @@
                     <img id="print-company-logo" src="" style="max-height: 100px; max-width: 100%; display: none; margin: 0 auto;">
                 </div>
                 <!-- Tengah: Vinz Media & Alamat -->
-                <div style="flex: 0 0 45%; color: #000; font-size: 9pt; line-height: 1.2;">
+                <div class="invoice-header-info" style="flex: 0 0 45%;">
                     <h2 id="print-company-name" style="margin: 0 0 0.5rem 0; font-size: 3.25rem; color: #000; font-weight: bold;"></h2>
-                    <table style="font-size: 9pt; border: none; border-collapse: collapse; margin-bottom: 0;">
+                    <table style="border: none; border-collapse: collapse; margin-bottom: 0;">
                         <tr>
                             <td style="font-weight: bold; padding: 0.1rem 0.5rem 0.1rem 0; white-space: nowrap; vertical-align: top;">Alamat</td>
                             <td style="vertical-align: top; padding: 0.1rem 0;">: <span id="print-company-address"></span></td>
@@ -134,8 +207,8 @@
                     </table>
                 </div>
                 <!-- Kanan: Customer -->
-                <div style="flex: 0 0 40%; color: #000; font-size: 9pt; line-height: 1.2; padding-top: 0.5rem;">
-                    <table style="font-size: 9pt; border: none; width: 100%; border-collapse: collapse;">
+                <div class="invoice-header-info" style="flex: 0 0 40%; padding-top: 0.5rem;">
+                    <table style="border: none; width: 100%; border-collapse: collapse;">
                         <tr>
                             <td style="font-weight: bold; padding: 0.15rem 0; width: 110px;">Nama Customer</td>
                             <td style="padding: 0.15rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;" id="print-customer-name"></span></td>
@@ -167,15 +240,15 @@
             <!-- Items Table -->
             <!-- table-layout: fixed + % widths set in <style> @media print for LQ-590 compatibility -->
             <!-- No. 5% | Produk 36% | Satuan 12% | Qty 8% | Harga 19% | Total 20% -->
-            <table class="invoice-items-table" style="width: 100%; border-collapse: collapse; margin-bottom: 0.5rem; font-size: 0.875rem; color: #000;">
+            <table class="invoice-items-table">
                 <thead>
                     <tr>
-                        <th style="border: 1px solid #000; padding: 0.4rem 0.3rem; text-align: center; width: 5%;">No.</th>
-                        <th style="border: 1px solid #000; padding: 0.4rem 0.3rem; text-align: left; width: 36%;">Produk</th>
-                        <th style="border: 1px solid #000; padding: 0.4rem 0.3rem; text-align: center; width: 12%;">Satuan</th>
-                        <th style="border: 1px solid #000; padding: 0.4rem 0.3rem; text-align: center; width: 8%;">Qty</th>
-                        <th style="border: 1px solid #000; padding: 0.4rem 0.3rem; text-align: right; width: 19%;">Harga</th>
-                        <th style="border: 1px solid #000; padding: 0.4rem 0.3rem; text-align: right; width: 20%;">Total</th>
+                        <th style="text-align: center; width: 5%;">No.</th>
+                        <th style="text-align: left; width: 36%;">Produk</th>
+                        <th style="text-align: center; width: 12%;">Satuan</th>
+                        <th style="text-align: center; width: 8%;">Qty</th>
+                        <th style="text-align: right; width: 19%;">Harga</th>
+                        <th style="text-align: right; width: 20%;">Total</th>
                     </tr>
                 </thead>
                 <tbody id="print-invoice-items">
@@ -186,7 +259,7 @@
             <!-- Footer area -->
             <div class="invoice-bottom" style="display: flex; justify-content: space-between; align-items: flex-start; color: #000;">
                 <!-- Signatures -->
-                <div style="display: flex; gap: 2rem; margin-top: 0.5rem; font-size: 0.875rem;">
+                <div class="invoice-signatures" style="display: flex; gap: 2rem; margin-top: 0.5rem; font-size: 0.875rem;">
                     <div style="text-align: center;">
                         <div style="margin-bottom: 3rem;">Regards,</div>
                         <div>(__________________)</div>
@@ -202,7 +275,7 @@
                 </div>
 
                 <!-- Totals: min-width to accommodate large numbers; flex-shrink:0 to not get squeezed -->
-                <div style="min-width: 210px; max-width: 230px; flex-shrink: 0; font-size: 0.875rem;">
+                <div class="invoice-totals" style="min-width: 210px; max-width: 230px; flex-shrink: 0; font-size: 0.875rem;">
                     <table style="width: 100%; border-collapse: collapse; border: none;">
                         <tr>
                             <td style="padding: 0.25rem 0; font-weight: bold;">SUB TOTAL</td>

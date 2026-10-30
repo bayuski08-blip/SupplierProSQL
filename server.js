@@ -1804,6 +1804,7 @@ app.get('/api/invoices/:id/print-data', authenticateToken, async (req, res) => {
         total: recalculatedTotal,
         subtotal: subtotal,
         tax: recalculatedTax,
+        ppn_enabled: ppnEnabled,
         payment_type_name: invoiceRow.payment_type_name || 'Tunai'
       },
       customer: {

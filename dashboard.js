@@ -78,6 +78,118 @@ function rpShort(n) {
     return rp(n);
 }
 
+// ---------- Pagination & State ----------
+const PAGE_SIZE = 80;
+
+const paginationState = {
+    products: { page: 1, total: 0, totalPages: 1 },
+    customers: { page: 1, total: 0, totalPages: 1 },
+    vendors: { page: 1, total: 0, totalPages: 1 },
+    purchases: { page: 1, total: 0, totalPages: 1 },
+    invoices: { page: 1, total: 0, totalPages: 1 },
+    piutang: { page: 1, total: 0, totalPages: 1 },
+    hutang: { page: 1, total: 0, totalPages: 1 },
+    cashflow: { page: 1, total: 0, totalPages: 1 }
+};
+
+let ALL_PRODUCTS = [];
+let ALL_CUSTOMERS = [];
+let ALL_VENDORS = [];
+let PIUTANG_LIST = [];
+let HUTANG_LIST = [];
+let currentCashFlowFilter = 'all';
+
+/**
+ * Reusable Pagination Renderer (Vanilla JS)
+ */
+function renderPagination({ containerId, currentPage, totalItems, pageSize = PAGE_SIZE, onPageChange }) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    if (!totalItems || totalItems <= pageSize) {
+        container.innerHTML = '';
+        container.style.display = 'none';
+        return;
+    }
+
+    container.style.display = 'flex';
+    const totalPages = Math.ceil(totalItems / pageSize) || 1;
+    const startItem = (currentPage - 1) * pageSize + 1;
+    const endItem = Math.min(currentPage * pageSize, totalItems);
+
+    const pages = [];
+    if (totalPages <= 7) {
+        for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+        pages.push(1);
+        if (currentPage > 3) pages.push('...');
+        const start = Math.max(2, currentPage - 1);
+        const end = Math.min(totalPages - 1, currentPage + 1);
+        for (let i = start; i <= end; i++) {
+            if (!pages.includes(i)) pages.push(i);
+        }
+        if (currentPage < totalPages - 2) pages.push('...');
+        if (!pages.includes(totalPages)) pages.push(totalPages);
+    }
+
+    const pageButtonsHtml = pages.map(p => {
+        if (p === '...') {
+            return '<span class="pagination-ellipsis">&hellip;</span>';
+        }
+        const isActive = p === currentPage;
+        return '<button type="button" class="pagination-btn ' + (isActive ? 'active' : '') + '" data-page="' + p + '">' + p + '</button>';
+    }).join('');
+
+    container.innerHTML = 
+        '<div class="pagination-wrapper">' +
+            '<div class="pagination-info">' +
+                'Menampilkan <b>' + startItem + '–' + endItem + '</b> dari <b>' + totalItems + '</b> data' +
+            '</div>' +
+            '<div class="pagination-controls">' +
+                '<button type="button" class="pagination-btn pagination-prev" ' + (currentPage <= 1 ? 'disabled' : '') + '>' +
+                    '&laquo; Sebelumnya' +
+                '</button>' +
+                '<div class="pagination-pages desktop-only">' +
+                    pageButtonsHtml +
+                '</div>' +
+                '<div class="pagination-mobile-info mobile-only">' +
+                    'Hal. ' + currentPage + ' dari ' + totalPages +
+                '</div>' +
+                '<button type="button" class="pagination-btn pagination-next" ' + (currentPage >= totalPages ? 'disabled' : '') + '>' +
+                    'Berikutnya &raquo;' +
+                '</button>' +
+            '</div>' +
+        '</div>';
+
+    const prevBtn = container.querySelector('.pagination-prev');
+    if (prevBtn && currentPage > 1) {
+        prevBtn.addEventListener('click', () => onPageChange(currentPage - 1));
+    }
+
+    const nextBtn = container.querySelector('.pagination-next');
+    if (nextBtn && currentPage < totalPages) {
+        nextBtn.addEventListener('click', () => onPageChange(currentPage + 1));
+    }
+
+    container.querySelectorAll('.pagination-pages .pagination-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const targetPage = parseInt(e.currentTarget.dataset.page);
+            if (targetPage && targetPage !== currentPage) {
+                onPageChange(targetPage);
+            }
+        });
+    });
+}
+
+// Debounce helper for server-side search input
+function debounce(fn, delay = 250) {
+    let timer = null;
+    return function(...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), delay);
+    };
+}
+
 // ---------- Dynamic Data ----------
 let PRODUCTS = [];
 let CUSTOMERS = [];
@@ -575,15 +687,12 @@ function renderLowStock() {
 
 // ---------- Products Page ----------
 function renderProducts(filter = '', category = '') {
-    const tbody = document.getElementById('products-body');
-    let filtered = PRODUCTS;
-    if (filter) {
-        const q = filter.toLowerCase();
-        filtered = filtered.filter(p => p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q));
-    }
-    if (category && category !== 'all') {
-        filtered = filtered.filter(p => p.category === category);
-    }
+    // Server-side pagination: reset to page 1 and fetch
+    paginationState.products.page = 1;
+    fetchProducts(1);
+}
+
+function _renderProductsTable(filtered) {
 
     tbody.innerHTML = filtered.map(p => {
         const stockStatus = p.stock <= p.minStock ? 'rendah' : 'aman';
@@ -617,18 +726,26 @@ function renderProducts(filter = '', category = '') {
     if (window.lucide) lucide.createIcons();
 }
 
-// Search & filter bindings for products
-document.getElementById('product-search')?.addEventListener('input', (e) => {
-    renderProducts(e.target.value, document.getElementById('product-category-filter').value);
-});
-document.getElementById('product-category-filter')?.addEventListener('change', (e) => {
-    renderProducts(document.getElementById('product-search').value, e.target.value);
+// Search & filter bindings for products (server-side, debounced)
+document.getElementById('product-search')?.addEventListener('input', debounce(() => {
+    paginationState.products.page = 1;
+    fetchProducts(1);
+}, 300));
+document.getElementById('product-category-filter')?.addEventListener('change', () => {
+    paginationState.products.page = 1;
+    fetchProducts(1);
 });
 
 // ---------- Customers Page ----------
 let customerViewMode = 'kanban';
 
 function renderCustomers(filter = '', type = '') {
+    // Server-side pagination: reset to page 1 and fetch
+    paginationState.customers.page = 1;
+    fetchCustomers(1);
+}
+
+function _renderCustomersLocal_UNUSED(filter = '', type = '') {
     const grid = document.getElementById('customers-grid');
     const listBody = document.getElementById('customers-list-body');
     if (!grid) return;
@@ -732,11 +849,13 @@ function renderCustomers(filter = '', type = '') {
     if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
-document.getElementById('customer-search')?.addEventListener('input', (e) => {
-    renderCustomers(e.target.value, document.getElementById('customer-type-filter').value);
-});
-document.getElementById('customer-type-filter')?.addEventListener('change', (e) => {
-    renderCustomers(document.getElementById('customer-search').value, e.target.value);
+document.getElementById('customer-search')?.addEventListener('input', debounce(() => {
+    paginationState.customers.page = 1;
+    fetchCustomers(1);
+}, 300));
+document.getElementById('customer-type-filter')?.addEventListener('change', () => {
+    paginationState.customers.page = 1;
+    fetchCustomers(1);
 });
 
 // Customer view toggle bindings
@@ -771,6 +890,11 @@ document.addEventListener('DOMContentLoaded', () => {
 let vendorViewMode = 'kanban';
 
 function renderVendors(filter = '') {
+    paginationState.vendors.page = 1;
+    fetchVendors(1);
+}
+
+function _renderVendorsLocal_UNUSED(filter = '') {
     const grid = document.getElementById('vendors-grid');
     const listBody = document.getElementById('vendors-list-body');
     if (!grid) return;
@@ -835,9 +959,10 @@ function renderVendors(filter = '') {
     if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
-document.getElementById('vendor-search')?.addEventListener('input', (e) => {
-    renderVendors(e.target.value);
-});
+document.getElementById('vendor-search')?.addEventListener('input', debounce(() => {
+    paginationState.vendors.page = 1;
+    fetchVendors(1);
+}, 300));
 
 // Vendor view toggle bindings
 document.addEventListener('DOMContentLoaded', () => {
@@ -869,6 +994,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ---------- Purchases Page ----------
 function renderPurchases(filter = '') {
+    paginationState.purchases.page = 1;
+    fetchPurchases(1);
+}
+
+function _renderPurchasesLocal_UNUSED(filter = '') {
     if (!filter || typeof filter !== 'string') {
         const sel = document.getElementById('purchase-status-filter');
         filter = sel ? sel.value : 'all';
@@ -915,6 +1045,11 @@ function renderPurchases(filter = '') {
 
 // ---------- Invoices Page ----------
 function renderInvoices(filter = '') {
+    paginationState.invoices.page = 1;
+    fetchInvoices(1);
+}
+
+function _renderInvoicesLocal_UNUSED(filter = '') {
     if (!filter || typeof filter !== 'string') {
         const sel = document.getElementById('invoice-status-filter');
         filter = sel ? sel.value : 'all';
@@ -968,6 +1103,11 @@ function renderInvoices(filter = '') {
 
 // ---------- Piutang Page ----------
 function renderPiutang(filter) {
+    paginationState.piutang.page = 1;
+    fetchPiutang(1);
+}
+
+function _renderPiutangLocal_UNUSED(filter) {
     if (!filter || typeof filter !== 'string') {
         const sel = document.getElementById('piutang-status-filter');
         filter = sel ? sel.value : 'all';
@@ -1066,6 +1206,11 @@ function renderPiutang(filter) {
 
 // ---------- Hutang Page ----------
 function renderHutang(filter = '') {
+    paginationState.hutang.page = 1;
+    fetchHutang(1);
+}
+
+function _renderHutangLocal_UNUSED(filter = '') {
     if (!filter || typeof filter !== 'string') {
         const sel = document.getElementById('hutang-status-filter');
         filter = sel ? sel.value : 'all';
@@ -1136,9 +1281,93 @@ function renderHutang(filter = '') {
     if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
+async function fetchHutang(page) {
+    try {
+        if (page !== undefined) paginationState.hutang.page = page;
+        const q = document.getElementById('hutang-search')?.value || '';
+        const status = document.getElementById('hutang-status-filter')?.value || 'all';
+        const pg = paginationState.hutang.page;
+        let url = '/api/finance/payables?page=' + pg + '&limit=' + PAGE_SIZE;
+        if (q) url += '&q=' + encodeURIComponent(q);
+        if (status && status !== 'all') url += '&status=' + encodeURIComponent(status);
+
+        const res = await fetch(url, { headers: getAuthHeaders() });
+        const json = await res.json();
+        const rows = json.data || [];
+        const pag = json.pagination || {};
+        const summary = json.summary || {};
+        paginationState.hutang.total = pag.total || 0;
+        paginationState.hutang.totalPages = pag.totalPages || 1;
+
+        // Summary cards
+        const summEl = document.getElementById('hutang-summary');
+        if (summEl) {
+            const totalDebt = parseFloat(summary.total_debt || 0);
+            const vendorsWithDebt = parseInt(summary.vendors_with_debt || 0);
+            const vendorsLunas = parseInt(summary.vendors_lunas || 0);
+            summEl.innerHTML = `
+            <div class="finance-summary-card highlight">
+                <div class="fs-value">${rp(totalDebt)}</div>
+                <div class="fs-label">Total Hutang</div>
+            </div>
+            <div class="finance-summary-card">
+                <div class="fs-value">${vendorsWithDebt}</div>
+                <div class="fs-label">Vendor Belum Lunas</div>
+            </div>
+            <div class="finance-summary-card">
+                <div class="fs-value">${vendorsLunas}</div>
+                <div class="fs-label">Vendor Lunas</div>
+            </div>`;
+        }
+
+        const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+        const canPay = role === 'admin' || role === 'finance';
+        const canEditPO = role === 'admin' || role === 'finance' || role === 'gudang';
+
+        const tbody = document.getElementById('hutang-body');
+        if (!tbody) return;
+        tbody.innerHTML = rows.map(p => {
+            const sisa = p.total - p.paid;
+            const st = sisa > 0 ? 'belum' : 'lunas';
+            const payBtn = (canPay && sisa > 0) ? `<button class="btn-toolbar primary" style="padding:0.3rem 0.65rem; font-size:0.75rem; margin-right:0.25rem;" onclick="openHutangPaymentModal('${p.id}', ${sisa})">Bayar</button>` : '';
+            const editBtn = canEditPO ? `<button class="btn-toolbar secondary" style="padding:0.25rem 0.5rem; font-size:0.75rem;" title="Edit PO" onclick="openEditPurchaseModal('${p.id}')"><i data-lucide="edit-2" style="width:13px;height:13px;margin:0;"></i></button>` : '';
+            return `
+            <tr>
+                <td style="font-weight:600; color: var(--blue-600);">${p.id}</td>
+                <td>${p.vendor}</td>
+                <td style="font-weight:700;">${rp(p.total)}</td>
+                <td>${rp(p.paid)}</td>
+                <td style="font-weight:700; color: ${sisa > 0 ? 'var(--rose-500)' : 'var(--emerald-500)'};">${rp(sisa)}</td>
+                <td>${p.dueDate || p.date || '-'}</td>
+                <td>${sisa > 0 && parseFloat(p.paid) === 0 ? '-' : (p.paidDate || '-')}</td>
+                <td>${sisa > 0 && parseFloat(p.paid) === 0 ? '-' : (p.type || '-')}</td>
+                <td><span class="badge-status ${st}">${sisa > 0 ? 'Belum Lunas' : 'Lunas'}</span></td>
+                <td style="text-align:right; white-space:nowrap;">${payBtn}${editBtn}</td>
+            </tr>`;
+        }).join('');
+
+        renderPagination({
+            containerId: 'pagination-hutang',
+            currentPage: pg,
+            totalItems: paginationState.hutang.total,
+            pageSize: PAGE_SIZE,
+            onPageChange: (p) => fetchHutang(p)
+        });
+
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    } catch (err) {
+        console.error('Failed to fetch hutang', err);
+    }
+}
+
 // ---------- Cash Flow Page ----------
 function renderCashFlow(filter = '') {
-    // Untuk summary, hanya hitung transaksi aktif
+    if (filter && filter !== '') currentCashFlowFilter = filter;
+    paginationState.cashflow.page = 1;
+    fetchCashTransactions(1);
+}
+
+function _renderCashFlowLocal_UNUSED(filter = '') {
     const activeTx = CASH_TRANSACTIONS.filter(t => (t.status || 'active') === 'active');
     const totalIn = activeTx.filter(t => t.type === 'IN').reduce((s, t) => s + t.amount, 0);
     const totalOut = activeTx.filter(t => t.type === 'OUT').reduce((s, t) => s + t.amount, 0);
@@ -2042,7 +2271,7 @@ document.querySelectorAll('.tab-filters').forEach(filterGroup => {
                 case 'invoices': renderInvoices(filter); break;
                 case 'piutang': renderPiutang(filter); break;
                 case 'hutang': renderHutang(filter); break;
-                case 'cashflow': renderCashFlow(filter); break;
+                case 'cashflow': currentCashFlowFilter = filter; paginationState.cashflow.page = 1; fetchCashTransactions(1); break;
                 case 'purchases': renderPurchases(filter); break;
             }
         });
@@ -2238,11 +2467,12 @@ const getAuthHeaders = () => ({
     'Content-Type': 'application/json'
 });
 
-async function fetchProducts() {
+async function fetchProducts(page) {
     try {
-        const res = await fetch('/api/products', { headers: getAuthHeaders() });
-        const data = await res.json();
-        PRODUCTS = data.map(p => ({
+        // Selalu ambil data lengkap untuk PRODUCTS (dipakai POS, dropdown, filter lokal)
+        const resAll = await fetch('/api/products?all=true', { headers: getAuthHeaders() });
+        const dataAll = await resAll.json();
+        const mapProduct = p => ({
             id: p.id,
             sku: p.sku,
             brand: p.brand || '',
@@ -2256,8 +2486,67 @@ async function fetchProducts() {
             unit: p.unit || 'pcs',
             unit_id: p.unit_id,
             emoji: ''
-        }));
-        renderProducts(document.getElementById('product-search')?.value, document.getElementById('product-category-filter')?.value);
+        });
+        PRODUCTS = (Array.isArray(dataAll) ? dataAll : []).map(mapProduct);
+
+        // Paginated fetch untuk tabel produk
+        if (page !== undefined) paginationState.products.page = page;
+        const q = document.getElementById('product-search')?.value || '';
+        const category = document.getElementById('product-category-filter')?.value || '';
+        const pg = paginationState.products.page;
+        let url = '/api/products?page=' + pg + '&limit=' + PAGE_SIZE;
+        if (q) url += '&q=' + encodeURIComponent(q);
+        if (category && category !== 'all') url += '&category=' + encodeURIComponent(category);
+
+        const res = await fetch(url, { headers: getAuthHeaders() });
+        const json = await res.json();
+
+        const rows = json.data || [];
+        const pag = json.pagination || {};
+        paginationState.products.total = pag.total || 0;
+        paginationState.products.totalPages = pag.totalPages || 1;
+
+        const tbody = document.getElementById('products-body');
+        if (!tbody) return;
+        tbody.innerHTML = rows.map(p => {
+            const pr = mapProduct(p);
+            const stockStatus = pr.stock <= pr.minStock ? 'rendah' : 'aman';
+            const stockLabel = pr.stock <= pr.minStock ? 'Rendah' : 'Aman';
+            return `
+            <tr>
+                <td><code style="background:var(--gray-100); padding:2px 6px; border-radius:4px; font-size:0.78rem;">${pr.sku}</code></td>
+                <td style="font-weight:600;">${pr.name}</td>
+                <td>${pr.category}</td>
+                <td>${rp(pr.cost)}</td>
+                <td style="font-weight:700;">${rp(pr.price)}</td>
+                <td style="font-weight:700;">${pr.stock}</td>
+                <td>${pr.unit}</td>
+                <td>${pr.minStock}</td>
+                <td><span class="badge-status ${stockStatus}">${stockLabel}</span></td>
+                <td style="text-align: right; white-space: nowrap;">
+                    <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem;" title="Edit Produk" onclick="openEditProductModal('${pr.id}')">
+                        <i data-lucide="edit-2" style="width: 14px; height: 14px; margin: 0;"></i>
+                    </button>
+                    <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem; color: var(--blue-600);" title="Stock Opname" onclick="openStockOpnameModal('${pr.id}')">
+                        <i data-lucide="boxes" style="width: 14px; height: 14px; margin: 0;"></i>
+                    </button>
+                    <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; color: var(--rose-500);" title="Hapus Produk" onclick="deleteProduct('${pr.id}')">
+                        <i data-lucide="trash-2" style="width: 14px; height: 14px; margin: 0;"></i>
+                    </button>
+                </td>
+            </tr>
+            `;
+        }).join('');
+
+        renderPagination({
+            containerId: 'pagination-products',
+            currentPage: pg,
+            totalItems: paginationState.products.total,
+            pageSize: PAGE_SIZE,
+            onPageChange: (p) => fetchProducts(p)
+        });
+
+        if (window.lucide) lucide.createIcons();
     } catch (err) {
         console.error('Failed to fetch products', err);
     }
@@ -2403,11 +2692,9 @@ async function deleteProduct(id) {
     }
 }
 
-async function fetchCustomers() {
+async function fetchCustomers(page) {
     try {
-        const res = await fetch('/api/customers', { headers: getAuthHeaders() });
-        const data = await res.json();
-        CUSTOMERS = data.map(c => ({
+        const mapCustomer = c => ({
             ...c,
             id: c.id,
             name: c.name,
@@ -2428,8 +2715,137 @@ async function fetchCustomers() {
             pricelistName: c.pricelist_nama || c.pricelist_name || '',
             pricelistKode: c.pricelist_kode || '',
             color: 'blue'
-        }));
-        renderCustomers(document.getElementById('customer-search')?.value, document.getElementById('customer-type-filter')?.value);
+        });
+
+        // Fetch all for POS dropdown / POS search (unpaginated)
+        const resAll = await fetch('/api/customers?all=true', { headers: getAuthHeaders() });
+        const dataAll = await resAll.json();
+        CUSTOMERS = (Array.isArray(dataAll) ? dataAll : []).map(mapCustomer);
+        // Update POS dropdown
+        if (typeof populateCustomerSelect === 'function') {
+            populateCustomerSelect(document.getElementById('pos-customer-search')?.value || '');
+        }
+
+        // Paginated fetch for table
+        if (page !== undefined) paginationState.customers.page = page;
+        const q = document.getElementById('customer-search')?.value || '';
+        const type = document.getElementById('customer-type-filter')?.value || '';
+        const pg = paginationState.customers.page;
+        let url = '/api/customers?page=' + pg + '&limit=' + PAGE_SIZE;
+        if (q) url += '&q=' + encodeURIComponent(q);
+        if (type && type !== 'all') url += '&category=' + encodeURIComponent(type);
+
+        const res = await fetch(url, { headers: getAuthHeaders() });
+        const json = await res.json();
+        const rows = (json.data || []).map(mapCustomer);
+        const pag = json.pagination || {};
+        paginationState.customers.total = pag.total || 0;
+        paginationState.customers.totalPages = pag.totalPages || 1;
+
+        // Helper
+        function limitColor(sisa, limit) {
+            if (limit <= 0) return 'var(--slate-400)';
+            const pct = sisa / limit;
+            if (pct > 0.5) return 'var(--emerald-600)';
+            if (pct > 0.1) return 'var(--amber-500)';
+            return 'var(--rose-500)';
+        }
+
+        // Render cards
+        const grid = document.getElementById('customers-grid');
+        if (grid) {
+            grid.innerHTML = rows.map(c => {
+                const color = limitColor(c.sisaLimitPiutang ?? c.remainingLimit, c.creditLimit);
+                const pctUsed = c.creditLimit > 0 ? Math.min(100, Math.round((c.totalPiutangBerjalan ?? c.outstandingReceivables) / c.creditLimit * 100)) : 0;
+                return `
+                <div class="entity-card" style="position: relative;">
+                    <button class="btn-toolbar secondary" style="position: absolute; top: 1rem; right: 1rem; padding: 0.25rem 0.5rem; font-size: 0.75rem;" title="Edit Pelanggan" onclick="openEditCustomerModal('${c.id}')">
+                        <i data-lucide="edit-2" style="width: 14px; height: 14px; margin: 0;"></i>
+                    </button>
+                    <button class="btn-toolbar secondary" style="position: absolute; top: 1rem; right: 3rem; padding: 0.25rem 0.5rem; font-size: 0.75rem; color: var(--rose-500);" title="Hapus Pelanggan" onclick="deleteCustomer('${c.id}')">
+                        <i data-lucide="trash-2" style="width: 14px; height: 14px; margin: 0;"></i>
+                    </button>
+                    <div class="entity-card-header" style="cursor:pointer;" onclick="openCustomerDetail('${c.id}')">
+                        <div class="entity-avatar ${c.color}">${c.name.charAt(0)}</div>
+                        <div>
+                            <div class="entity-name">${c.name}</div>
+                            <div class="entity-type">${c.type} &bull; ${c.city}</div>
+                            ${c.pricelistName ? `<div style="margin-top:0.25rem;"><span class="badge-pricelist-source" style="font-size:0.7rem; padding:0.15rem 0.4rem;">${c.pricelistName}</span></div>` : ''}
+                        </div>
+                    </div>
+                    <div class="entity-details">
+                        <div class="entity-detail">
+                            <span class="entity-detail-label">Telepon / WA</span>
+                            <span class="entity-detail-value">${c.phone}</span>
+                        </div>
+                        <div class="entity-detail">
+                            <span class="entity-detail-label">Sisa Limit Piutang</span>
+                            <span class="entity-detail-value" style="color:${color}; font-weight:700;">${rpShort(c.sisaLimitPiutang ?? c.remainingLimit)}</span>
+                        </div>
+                        <div class="entity-detail">
+                            <span class="entity-detail-label">Total Belanja</span>
+                            <span class="entity-detail-value">${rpShort(c.totalBelanja ?? c.totalSpent)}</span>
+                        </div>
+                    </div>
+                    <div style="margin-top:0.6rem;">
+                        <div style="display:flex;justify-content:space-between;font-size:0.7rem;color:var(--slate-500);margin-bottom:3px;">
+                            <span>Limit terpakai ${pctUsed}%</span>
+                            <span>${rpShort(c.creditLimit)}</span>
+                        </div>
+                        <div style="background:var(--slate-200);border-radius:99px;height:5px;overflow:hidden;">
+                            <div style="height:100%;width:${pctUsed}%;background:${color};border-radius:99px;transition:width .4s;"></div>
+                        </div>
+                    </div>
+                </div>
+                `;
+            }).join('');
+        }
+
+        // Render list
+        const listBody = document.getElementById('customers-list-body');
+        if (listBody) {
+            listBody.innerHTML = rows.map(c => {
+                const sisa = c.sisaLimitPiutang ?? c.remainingLimit;
+                const color = sisa / (c.creditLimit || 1) > 0.5
+                    ? 'var(--emerald-600)'
+                    : sisa / (c.creditLimit || 1) > 0.1
+                        ? 'var(--amber-500)'
+                        : 'var(--rose-500)';
+                return `
+                <tr style="cursor:pointer;" onclick="openCustomerDetail('${c.id}')">
+                    <td style="font-weight:600; color: var(--blue-600);">${c.id}</td>
+                    <td style="font-weight:600;">
+                        ${c.name}
+                        ${c.pricelistName ? `<div style="margin-top:0.2rem;"><span class="badge-pricelist-source" style="font-size:0.65rem; padding:0.1rem 0.35rem;">${c.pricelistName}</span></div>` : ''}
+                    </td>
+                    <td><span class="badge-status aman">${c.type}</span></td>
+                    <td>${c.city}</td>
+                    <td>${c.phone}</td>
+                    <td style="font-weight:700;">${rp(c.creditLimit)}</td>
+                    <td style="font-weight:700; color:${color}">${rp(sisa)}</td>
+                    <td style="font-weight:600;">${rp(c.totalBelanja ?? c.totalSpent)}</td>
+                    <td style="text-align: right; white-space: nowrap;" onclick="event.stopPropagation()">
+                        <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" title="Edit Pelanggan" onclick="openEditCustomerModal('${c.id}')">
+                            <i data-lucide="edit-2" style="width: 14px; height: 14px; margin: 0;"></i>
+                        </button>
+                        <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; color: var(--rose-500);" title="Hapus Pelanggan" onclick="deleteCustomer('${c.id}')">
+                            <i data-lucide="trash-2" style="width: 14px; height: 14px; margin: 0;"></i>
+                        </button>
+                    </td>
+                </tr>
+                `;
+            }).join('');
+        }
+
+        renderPagination({
+            containerId: 'pagination-customers',
+            currentPage: pg,
+            totalItems: paginationState.customers.total,
+            pageSize: PAGE_SIZE,
+            onPageChange: (p) => fetchCustomers(p)
+        });
+
+        if (typeof lucide !== 'undefined') lucide.createIcons();
     } catch (err) {
         console.error('Failed to fetch customers', err);
     }
@@ -2656,11 +3072,9 @@ async function deleteCustomer(id) {
 // VENDORS — CRUD
 // ==========================================================================
 
-async function fetchVendors() {
+async function fetchVendors(page) {
     try {
-        const res = await fetch('/api/vendors', { headers: getAuthHeaders() });
-        const data = await res.json();
-        VENDORS = data.map(v => ({
+        const mapVendor = v => ({
             id: v.id,
             name: v.name,
             category: v.category_name || v.vendor_category_id || '',
@@ -2674,7 +3088,12 @@ async function fetchVendors() {
             idNumber: String(v.id_number || ''),
             totalPurchases: parseFloat(v.total_purchases) || 0,
             debt: parseFloat(v.outstanding_debt) || parseFloat(v.debt) || 0
-        }));
+        });
+
+        // Fetch all for dropdowns
+        const resAll = await fetch('/api/vendors?all=true', { headers: getAuthHeaders() });
+        const dataAll = await resAll.json();
+        VENDORS = (Array.isArray(dataAll) ? dataAll : []).map(mapVendor);
 
         // Populate vendor dropdowns in PO modals
         const vendorOptions = '<option value="" disabled selected>- Pilih Vendor -</option>' +
@@ -2684,7 +3103,79 @@ async function fetchVendors() {
         const editVendorEl = document.getElementById('edit-purchase-vendor');
         if (editVendorEl) editVendorEl.innerHTML = vendorOptions;
 
-        renderVendors(document.getElementById('vendor-search')?.value);
+        // Paginated fetch for table
+        if (page !== undefined) paginationState.vendors.page = page;
+        const q = document.getElementById('vendor-search')?.value || '';
+        const pg = paginationState.vendors.page;
+        let url = '/api/vendors?page=' + pg + '&limit=' + PAGE_SIZE;
+        if (q) url += '&q=' + encodeURIComponent(q);
+
+        const res = await fetch(url, { headers: getAuthHeaders() });
+        const json = await res.json();
+        const rows = (json.data || []).map(mapVendor);
+        const pag = json.pagination || {};
+        paginationState.vendors.total = pag.total || 0;
+        paginationState.vendors.totalPages = pag.totalPages || 1;
+
+        const grid = document.getElementById('vendors-grid');
+        const listBody = document.getElementById('vendors-list-body');
+
+        if (grid) {
+            grid.innerHTML = rows.map(v => `
+            <div class="entity-card" style="position: relative;">
+                <button class="btn-toolbar secondary" style="position: absolute; top: 1rem; right: 1rem; padding: 0.25rem 0.5rem; font-size: 0.75rem;" title="Edit Vendor" onclick="openEditVendorModal('${v.id}')">
+                    <i data-lucide="edit-2" style="width: 14px; height: 14px; margin: 0;"></i>
+                </button>
+                <div class="entity-card-header">
+                    <div class="entity-avatar blue">${v.name.charAt(0)}</div>
+                    <div>
+                        <div class="entity-name">${v.name}</div>
+                        <div class="entity-type">${v.category} &middot; ${v.city}</div>
+                    </div>
+                </div>
+                <div class="entity-details">
+                    <div class="entity-detail">
+                        <span class="entity-detail-label">ID Vendor</span>
+                        <span class="entity-detail-value">${v.id || 'V0XX'}</span>
+                    </div>
+                    <div class="entity-detail">
+                        <span class="entity-detail-label">Telepon / WA</span>
+                        <span class="entity-detail-value">${v.phone}</span>
+                    </div>
+                    <div class="entity-detail">
+                        <span class="entity-detail-label">Total Pembelian</span>
+                        <span class="entity-detail-value">${rpShort(v.totalPurchases)}</span>
+                    </div>
+                </div>
+            </div>`).join('');
+        }
+
+        if (listBody) {
+            listBody.innerHTML = rows.map(v => `
+            <tr>
+                <td style="font-weight:600;">${v.id || '-'}</td>
+                <td style="font-weight:600;">${v.name}</td>
+                <td>${v.category}</td>
+                <td>${v.city}</td>
+                <td>${v.phone}</td>
+                <td style="font-weight:700;">${rp(v.totalPurchases)}</td>
+                <td style="text-align:right; white-space:nowrap;">
+                    <button class="btn-toolbar secondary" style="padding:0.25rem 0.5rem;font-size:0.75rem;" title="Edit Vendor" onclick="openEditVendorModal('${v.id}')">
+                        <i data-lucide="edit-2" style="width:14px;height:14px;margin:0;"></i>
+                    </button>
+                </td>
+            </tr>`).join('');
+        }
+
+        renderPagination({
+            containerId: 'pagination-vendors',
+            currentPage: pg,
+            totalItems: paginationState.vendors.total,
+            pageSize: PAGE_SIZE,
+            onPageChange: (p) => fetchVendors(p)
+        });
+
+        if (typeof lucide !== 'undefined') lucide.createIcons();
     } catch (err) {
         console.error('Failed to fetch vendors', err);
     }
@@ -2776,16 +3267,67 @@ async function deleteVendor(id) {
 // PURCHASE ORDERS — CRUD
 // ==========================================================================
 
-async function fetchPurchases() {
+async function fetchPurchases(page) {
     try {
-        const res = await fetch(`/api/purchases?_t=${Date.now()}`, { headers: getAuthHeaders() });
-        const data = await res.json();
-        if (!res.ok || data.error) {
+        // Full data for Hutang computation (unpaginated)
+        const resAll = await fetch('/api/purchases?all=true', { headers: getAuthHeaders() });
+        const dataAll = await resAll.json();
+        if (!resAll.ok || (dataAll && dataAll.error)) {
             showToast('Gagal memuat data purchase, coba lagi.', 'error');
             return;
         }
-        PURCHASES = data;
-        renderPurchases();
+        PURCHASES = Array.isArray(dataAll) ? dataAll : [];
+
+        // Paginated for table
+        if (page !== undefined) paginationState.purchases.page = page;
+        const q = document.getElementById('purchase-search')?.value || '';
+        const status = document.getElementById('purchase-status-filter')?.value || 'all';
+        const pg = paginationState.purchases.page;
+        let url = '/api/purchases?page=' + pg + '&limit=' + PAGE_SIZE;
+        if (q) url += '&q=' + encodeURIComponent(q);
+        if (status && status !== 'all') url += '&status=' + encodeURIComponent(status);
+
+        const res = await fetch(url, { headers: getAuthHeaders() });
+        const json = await res.json();
+        const rows = json.data || [];
+        const pag = json.pagination || {};
+        paginationState.purchases.total = pag.total || 0;
+        paginationState.purchases.totalPages = pag.totalPages || 1;
+
+        const tbody = document.getElementById('purchases-body');
+        if (tbody) {
+            tbody.innerHTML = rows.map(p => `
+            <tr>
+                <td style="font-weight:600; color: var(--blue-600);">${p.id}</td>
+                <td>${p.date}</td>
+                <td>${p.vendor}</td>
+                <td style="font-weight:700;">${rp(p.total)}</td>
+                <td>${rp(p.paid)}</td>
+                <td>${p.type}</td>
+                <td><span class="badge-status ${p.status.toLowerCase()}">${capitalize(p.status)}</span></td>
+                <td style="text-align: right; white-space: nowrap;">
+                    <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem;" title="Cetak PO" onclick="openModal('modal-print-po')">
+                        <i data-lucide="printer" style="width: 14px; height: 14px; margin: 0;"></i>
+                    </button>
+                    <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem;" title="Edit PO" onclick="openEditPurchaseModal('${p.id}')">
+                        <i data-lucide="edit-2" style="width: 14px; height: 14px; margin: 0;"></i>
+                    </button>
+                    ${p.status.toLowerCase() !== 'batal' ? `<button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; color: var(--rose-500);" title="Batalkan PO" onclick="cancelPurchase('${p.id}')">
+                        <i data-lucide="x-circle" style="width: 14px; height: 14px; margin: 0;"></i>
+                    </button>` : ''}
+                </td>
+            </tr>`).join('');
+        }
+
+        renderPagination({
+            containerId: 'pagination-purchases',
+            currentPage: pg,
+            totalItems: paginationState.purchases.total,
+            pageSize: PAGE_SIZE,
+            onPageChange: (p) => fetchPurchases(p)
+        });
+
+        if (typeof lucide !== 'undefined') lucide.createIcons();
     } catch (err) {
         console.error('Failed to fetch purchases', err);
         showToast('Gagal memuat data purchase, coba lagi.', 'error');
@@ -3134,24 +3676,185 @@ async function savePurchase(isEdit) {
 // INVOICES — CRUD
 // ==========================================================================
 
-async function fetchInvoices() {
+async function fetchInvoices(page) {
     try {
-        // FIX: correct endpoint is /api/invoices not /api/sales; cache buster prevents stale data after checkout
-        const res = await fetch(`/api/invoices?_t=${Date.now()}`, { headers: getAuthHeaders() });
-        const data = await res.json();
-        if (!res.ok || data.error) {
+        // Full data for summary cards, charts, recent transactions (unpaginated)
+        const resAll = await fetch(`/api/invoices?all=true&_t=${Date.now()}`, { headers: getAuthHeaders() });
+        const dataAll = await resAll.json();
+        if (!resAll.ok || (dataAll && dataAll.error)) {
             showToast('Gagal memuat data invoice, coba lagi.', 'error');
             return;
         }
-        INVOICES = data;
-        renderInvoices();
-        renderPiutang();
+        INVOICES = Array.isArray(dataAll) ? dataAll : [];
         renderSummaryCards();
         renderRecentTransactions();
         refreshCharts();
+
+        // Paginated fetch for invoices table
+        if (page !== undefined) paginationState.invoices.page = page;
+        const q = document.getElementById('invoice-search')?.value || '';
+        const status = document.getElementById('invoice-status-filter')?.value || 'all';
+        const pg = paginationState.invoices.page;
+        let url = '/api/invoices?page=' + pg + '&limit=' + PAGE_SIZE;
+        if (q) url += '&q=' + encodeURIComponent(q);
+        if (status && status !== 'all') url += '&status=' + encodeURIComponent(status);
+
+        const res = await fetch(url, { headers: getAuthHeaders() });
+        const json = await res.json();
+        const rows = json.data || [];
+        const pag = json.pagination || {};
+        paginationState.invoices.total = pag.total || 0;
+        paginationState.invoices.totalPages = pag.totalPages || 1;
+
+        const today = new Date().toISOString().split('T')[0];
+        const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+        const canEdit = role === 'admin' || role === 'finance';
+        const tbody = document.getElementById('invoices-body');
+        if (tbody) {
+            tbody.innerHTML = rows.map(inv => {
+                const statusLower = (inv.status || '').toLowerCase();
+                const sisa = inv.total - inv.paid;
+                const isOverdue = sisa > 0 && inv.dueDate && inv.dueDate < today;
+                const overdueBadge = isOverdue ? '<span class="badge-status overdue" style="margin-left:4px; font-size:0.7rem; padding:2px 7px;">Lewat JT</span>' : '';
+                return `
+                <tr>
+                    <td style="font-weight:600; color: var(--blue-600);">${inv.id}</td>
+                    <td>${inv.date}</td>
+                    <td style="font-weight:600;">${inv.customer || '-'}${overdueBadge}</td>
+                    <td style="font-weight:700;">${rp(inv.total)}</td>
+                    <td>${rp(inv.paid)}</td>
+                    <td>${inv.type || '-'}</td>
+                    <td><span class="badge-status ${statusLower.includes('belum') ? 'belum' : statusLower.replace(/\s+/g, '-')}">${capitalize(inv.status)}</span></td>
+                    <td style="text-align: right; white-space: nowrap;">
+                        <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem;" title="Cetak Invoice" onclick="printInvoice('${inv.id}')">
+                            <i data-lucide="printer" style="width: 14px; height: 14px; margin: 0;"></i>
+                        </button>
+                        ${canEdit ? `<button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem;" title="Edit Invoice" onclick="openEditInvoiceModal('${inv.id}')">
+                            <i data-lucide="edit-2" style="width: 14px; height: 14px; margin: 0;"></i>
+                        </button>` : ''}
+                        ${statusLower !== 'lunas' && statusLower !== 'batal' ? `<button class="btn-toolbar primary" style="padding:0.25rem 0.5rem; font-size:0.75rem;" onclick="openPiutangPaymentModal('${inv.id}', ${sisa})">Bayar</button>` : ''}
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+
+        renderPagination({
+            containerId: 'pagination-invoices',
+            currentPage: pg,
+            totalItems: paginationState.invoices.total,
+            pageSize: PAGE_SIZE,
+            onPageChange: (p) => fetchInvoices(p)
+        });
+
+        // Also refresh piutang
+        if (typeof fetchPiutang === 'function') fetchPiutang(paginationState.piutang.page);
+
+        if (typeof lucide !== 'undefined') lucide.createIcons();
     } catch (err) {
         console.error('Failed to fetch invoices', err);
         showToast('Gagal memuat data invoice, coba lagi.', 'error');
+    }
+}
+
+async function fetchPiutang(page) {
+    try {
+        if (page !== undefined) paginationState.piutang.page = page;
+        const q = document.getElementById('piutang-search')?.value || '';
+        const status = document.getElementById('piutang-status-filter')?.value || 'all';
+        const custFilter = document.getElementById('piutang-customer-filter')?.value || 'all';
+        const pg = paginationState.piutang.page;
+        let url = '/api/finance/receivables?page=' + pg + '&limit=' + PAGE_SIZE;
+        if (q) url += '&q=' + encodeURIComponent(q);
+        if (status && status !== 'all') url += '&status=' + encodeURIComponent(status);
+        if (custFilter && custFilter !== 'all') url += '&customer_id=' + encodeURIComponent(custFilter);
+
+        const res = await fetch(url, { headers: getAuthHeaders() });
+        const json = await res.json();
+        const rows = json.data || [];
+        const pag = json.pagination || {};
+        const summary = json.summary || {};
+        paginationState.piutang.total = pag.total || 0;
+        paginationState.piutang.totalPages = pag.totalPages || 1;
+
+        // Summary cards from server (full filtered dataset)
+        const summEl = document.getElementById('piutang-summary');
+        if (summEl) {
+            summEl.innerHTML =
+                '<div class="finance-summary-card highlight">' +
+                    '<div class="fs-value">' + rp(parseFloat(summary.total_piutang || 0)) + '</div>' +
+                    '<div class="fs-label">Total Piutang</div>' +
+                '</div>' +
+                '<div class="finance-summary-card">' +
+                    '<div class="fs-value" style="color:var(--rose-500);">' + rp(parseFloat(summary.belum_bayar || 0)) + '</div>' +
+                    '<div class="fs-label">Belum Dibayar</div>' +
+                '</div>' +
+                '<div class="finance-summary-card">' +
+                    '<div class="fs-value" style="color:var(--amber-500);">' + rp(parseFloat(summary.sebagian || 0)) + '</div>' +
+                    '<div class="fs-label">Dibayar Sebagian</div>' +
+                '</div>';
+        }
+
+        // Populate customer filter dropdown
+        const custFilterEl = document.getElementById('piutang-customer-filter');
+        if (custFilterEl && INVOICES.length > 0) {
+            const selectedCust = custFilterEl.value;
+            const uniqueCustomers = [...new Map(
+                INVOICES.filter(i => i.customer).map(i => [String(i.customerId), i.customer])
+            ).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+            custFilterEl.innerHTML = '<option value="all">Semua Pelanggan</option>' +
+                uniqueCustomers.map(([cid, cname]) =>
+                    '<option value="' + cid + '" ' + (selectedCust === cid ? 'selected' : '') + '>' + cname + '</option>'
+                ).join('');
+        }
+
+        const today = new Date().toISOString().split('T')[0];
+        const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+        const canPayOrVoid = role === 'admin' || role === 'finance';
+
+        const tbody = document.getElementById('piutang-body');
+        if (!tbody) return;
+        tbody.innerHTML = rows.map(inv => {
+            const sisa = inv.total - inv.paid;
+            const isOverdue = sisa > 0 && inv.dueDate && inv.dueDate < today;
+            const statusLower = (inv.status || '').toLowerCase();
+            const overdueBadge = isOverdue
+                ? '<span class="badge-status overdue" style="display:inline-flex;align-items:center;gap:3px;font-size:0.7rem;padding:2px 7px;margin-left:4px;vertical-align:middle;"><i data-lucide=\"clock\" style=\"width:11px;height:11px;\"></i> Lewat JT</span>'
+                : '';
+            let actionButtons;
+            if (canPayOrVoid) {
+                const bayarBtn = statusLower !== 'lunas'
+                    ? `<button class="btn-toolbar primary" style="padding:0.25rem 0.5rem;font-size:0.75rem;" onclick="openPiutangPaymentModal('${inv.id}', ${sisa})">Bayar</button>`
+                    : '<span style="color:var(--gray-400);font-size:0.8rem;">Lunas</span>';
+                actionButtons = `<button class="btn-toolbar secondary" style="padding:0.25rem 0.5rem;font-size:0.75rem;margin-right:0.25rem;" title="Riwayat Cicilan" onclick="openPaymentHistoryModal('${inv.id}')"><i data-lucide="list" style="width:13px;height:13px;margin:0;"></i></button>${bayarBtn}`;
+            } else {
+                actionButtons = '<span style="color:var(--gray-400);font-size:0.8rem;">Lihat Saja</span>';
+            }
+            return `
+            <tr>
+                <td style="font-weight:600; color:var(--blue-600);">${inv.id}</td>
+                <td>${inv.customer || '-'}</td>
+                <td style="font-weight:700;">${rp(inv.total)}</td>
+                <td>${rp(inv.paid)}</td>
+                <td style="font-weight:700; color:${sisa > 0 ? 'var(--rose-500)' : 'var(--emerald-500)'};">${rp(sisa)}</td>
+                <td>${inv.dueDate || '-'}${overdueBadge}</td>
+                <td>${statusLower.includes('belum') ? '-' : (inv.paidDate || '-')}</td>
+                <td>${statusLower.includes('belum') ? '-' : (inv.type || '-')}</td>
+                <td><span class="badge-status ${statusLower.includes('belum') ? 'belum' : statusLower.replace(/\s+/g, '-')}">${capitalize(inv.status)}</span></td>
+                <td style="text-align:right; white-space:nowrap;">${actionButtons}</td>
+            </tr>`;
+        }).join('');
+
+        renderPagination({
+            containerId: 'pagination-piutang',
+            currentPage: pg,
+            totalItems: paginationState.piutang.total,
+            pageSize: PAGE_SIZE,
+            onPageChange: (p) => fetchPiutang(p)
+        });
+
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    } catch (err) {
+        console.error('Failed to fetch piutang', err);
     }
 }
 
@@ -3519,12 +4222,86 @@ window.cancelPurchaseFromEdit = () => {
 // CASH FLOW — CRUD
 // ==========================================================================
 
-async function fetchCashTransactions() {
+async function fetchCashTransactions(page) {
     try {
-        const res = await fetch('/api/finance/cash-flow', { headers: getAuthHeaders() });
-        const data = await res.json();
-        CASH_TRANSACTIONS = data;
-        renderCashFlow();
+        // Full data for CASH_TRANSACTIONS global cache
+        const resAll = await fetch('/api/finance/cash-flow?all=true', { headers: getAuthHeaders() });
+        const dataAll = await resAll.json();
+        CASH_TRANSACTIONS = Array.isArray(dataAll) ? dataAll : [];
+
+        // Paginated fetch for table
+        if (page !== undefined) paginationState.cashflow.page = page;
+        const typeFilter = currentCashFlowFilter || 'all';
+        const pg = paginationState.cashflow.page;
+        let url = '/api/finance/cash-flow?page=' + pg + '&limit=' + PAGE_SIZE;
+        if (typeFilter && typeFilter !== 'all') url += '&type=' + encodeURIComponent(typeFilter.toUpperCase());
+
+        const res = await fetch(url, { headers: getAuthHeaders() });
+        const json = await res.json();
+        const rows = json.data || [];
+        const pag = json.pagination || {};
+        const summary = json.summary || {};
+        paginationState.cashflow.total = pag.total || 0;
+        paginationState.cashflow.totalPages = pag.totalPages || 1;
+
+        // Summary from server (full dataset)
+        const summEl = document.getElementById('cashflow-summary');
+        if (summEl) {
+            const totalIn = parseFloat(summary.total_in || 0);
+            const totalOut = parseFloat(summary.total_out || 0);
+            const net = parseFloat(summary.net || 0);
+            summEl.innerHTML = `
+            <div class="finance-summary-card">
+                <div class="fs-value" style="color: var(--emerald-500);">${rp(totalIn)}</div>
+                <div class="fs-label">Total Kas Masuk</div>
+            </div>
+            <div class="finance-summary-card">
+                <div class="fs-value" style="color: var(--rose-500);">${rp(totalOut)}</div>
+                <div class="fs-label">Total Kas Keluar</div>
+            </div>
+            <div class="finance-summary-card highlight">
+                <div class="fs-value">${rp(net)}</div>
+                <div class="fs-label">Saldo Bersih</div>
+            </div>`;
+        }
+
+        const tbody = document.getElementById('cashflow-body');
+        if (tbody) {
+            tbody.innerHTML = rows.map(t => {
+                const isCancelled = t.status === 'cancelled';
+                const isManual = t.isManual && t.category !== 'Penyesuaian Stok';
+                const rowStyle = isCancelled ? 'opacity:0.55; text-decoration: line-through;' : '';
+                const actionBtns = isCancelled ? '<span class="badge-status batal" style="font-size:0.7rem;">Dibatalkan</span>' : `
+                    ${isManual ? `<button class="btn-toolbar secondary" style="padding:0.2rem 0.45rem; font-size:0.72rem; margin-right:0.2rem;" title="Edit" onclick="openEditCashModal('${t.id}')"><i data-lucide="edit-2" style="width:13px;height:13px;margin:0;"></i></button>` : ''}
+                    <button class="btn-toolbar secondary" style="padding:0.2rem 0.45rem; font-size:0.72rem; color:var(--rose-500);" title="${isManual ? 'Hapus' : 'Void/Batal'}" onclick="cancelCashTransaction('${t.id}')"><i data-lucide="x-circle" style="width:13px;height:13px;margin:0;"></i></button>
+                `;
+                const runBal = (t.running_balance !== undefined && t.running_balance !== null)
+                    ? '<span style=\"font-weight:600; color:' + (t.running_balance >= 0 ? 'var(--emerald-600)' : 'var(--rose-600)') + ';\">' + rp(t.running_balance) + '</span>'
+                    : '-';
+                return `
+                <tr style="${rowStyle}">
+                    <td>${t.date}</td>
+                    <td style="font-weight:600;">${t.desc}</td>
+                    <td><span class="badge-status ${t.category === 'Penjualan' || t.category === 'Piutang' ? 'lunas' : 'tempo'}">${t.category}</span></td>
+                    <td><span class="badge-status ${t.type.toLowerCase()}">${t.type === 'IN' ? 'Masuk' : 'Keluar'}</span></td>
+                    <td style="font-weight:700; color: ${t.type === 'IN' ? 'var(--emerald-500)' : 'var(--rose-500)'};">${t.type === 'IN' ? '+' : '-'}${rp(t.amount)}</td>
+                    <td>${runBal}</td>
+                    <td><span class="badge-status ${t.status === 'cancelled' ? 'batal' : 'lunas'}">${t.status === 'cancelled' ? 'Dibatalkan' : 'Aktif'}</span></td>
+                    <td>${t.method}</td>
+                    <td style="text-align:right; white-space:nowrap;">${actionBtns}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        renderPagination({
+            containerId: 'pagination-cashflow',
+            currentPage: pg,
+            totalItems: paginationState.cashflow.total,
+            pageSize: PAGE_SIZE,
+            onPageChange: (p) => fetchCashTransactions(p)
+        });
+
+        if (typeof lucide !== 'undefined') lucide.createIcons();
     } catch (err) {
         console.error('Failed to fetch cash flow', err);
     }
@@ -5134,6 +5911,11 @@ async function commitInvoiceImport() {
             body: JSON.stringify({ invoices: validRows })
         });
 
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            const text = await res.text();
+            throw new Error(`Server mengembalikan respons tidak valid (HTTP ${res.status}). Coba import dengan jumlah baris lebih sedikit. Detail: ${text.substring(0, 200)}`);
+        }
         const result = await res.json();
         if (!res.ok) {
             throw new Error(result.error || 'Gagal menyimpan import invoice');
@@ -5508,72 +6290,42 @@ function closeImportAndRefresh() {
     }
 }
 
-function exportSection(section) {
+async function exportSection(section) {
+    // Export selalu pakai all=true untuk data lengkap (bukan hanya halaman aktif)
     let headers = [];
     let rows = [];
     let filename = "";
 
-    if (section === 'produk') {
-        headers = ["SKU", "Nama Produk", "Brand/Merk", "Kategori", "Harga Beli", "Harga Jual", "Stok", "Stok Minimum", "Satuan"];
-        rows = PRODUCTS.map(p => [
-            p.sku || '',
-            p.name || '',
-            p.brand || '',
-            p.category || '',
-            p.cost || 0,
-            p.price || 0,
-            p.stock || 0,
-            p.minStock || 0,
-            p.unit || ''
-        ]);
-        filename = "export_produk.xlsx";
-    } else if (section === 'pelanggan') {
-        headers = ["Nama", "Tipe", "Telepon", "Kota", "Alamat", "Limit Piutang"];
-        rows = CUSTOMERS.map(c => [
-            c.name || '',
-            c.type || '',
-            c.phone || '',
-            c.city || '',
-            c.address || '',
-            c.creditLimit || 0
-        ]);
-        filename = "export_pelanggan.xlsx";
-    } else if (section === 'vendor') {
-        headers = ["Nama", "Kategori", "Telepon", "Kota", "Alamat", "No. Identitas", "Bank", "No. Rekening", "Pemilik Rekening"];
-        rows = VENDORS.map(v => [
-            v.name || '',
-            v.category || '',
-            v.phone || '',
-            v.city || '',
-            v.address || '',
-            v.idNumber || '',
-            v.bank || '',
-            v.rekening || '',
-            v.pemilik || ''
-        ]);
-        filename = "export_vendor.xlsx";
-    } else if (section === 'pembelian') {
-        headers = ["Tanggal", "Nama Vendor", "Total", "Terbayar", "Tipe Pembayaran", "Jatuh Tempo"];
-        rows = PURCHASES.map(p => [
-            p.date || '',
-            p.vendor || '',
-            p.total || 0,
-            p.paid || 0,
-            p.type || '',
-            p.dueDate || ''
-        ]);
-        filename = "export_pembelian.xlsx";
-    } else if (section === 'invoice') {
-        headers = ["Tanggal", "Nama Customer", "Total", "Terbayar", "Tipe Pembayaran", "Jatuh Tempo"];
-        rows = INVOICES.map(i => [
-            i.date || '',
-            i.customer || '',
-            i.total || 0,
-            i.paid || 0,
-            i.type || '',
-            i.dueDate || ''
-        ]);
-        filename = "export_invoice.xlsx";
+    try {
+        if (section === 'produk') {
+            headers = ["SKU", "Nama Produk", "Brand/Merk", "Kategori", "Harga Beli", "Harga Jual", "Stok", "Stok Minimum", "Satuan"];
+            rows = PRODUCTS.map(p => [p.sku||'', p.name||'', p.brand||'', p.category||'', p.cost||0, p.price||0, p.stock||0, p.minStock||0, p.unit||'']);
+            filename = "export_produk.xlsx";
+        } else if (section === 'pelanggan') {
+            headers = ["Nama", "Tipe", "Telepon", "Kota", "Alamat", "Limit Piutang"];
+            rows = CUSTOMERS.map(c => [c.name||'', c.type||'', c.phone||'', c.city||'', c.address||'', c.creditLimit||0]);
+            filename = "export_pelanggan.xlsx";
+        } else if (section === 'vendor') {
+            headers = ["Nama", "Kategori", "Telepon", "Kota", "Alamat", "No. Identitas", "Bank", "No. Rekening", "Pemilik Rekening"];
+            rows = VENDORS.map(v => [v.name||'', v.category||'', v.phone||'', v.city||'', v.address||'', v.idNumber||'', v.bank||'', v.rekening||'', v.pemilik||'']);
+            filename = "export_vendor.xlsx";
+        } else if (section === 'pembelian') {
+            const res = await fetch('/api/purchases?all=true', { headers: getAuthHeaders() });
+            const data = await res.json();
+            headers = ["Tanggal", "Nama Vendor", "Total", "Terbayar", "Tipe Pembayaran", "Jatuh Tempo"];
+            rows = (Array.isArray(data) ? data : []).map(p => [p.date||'', p.vendor||'', p.total||0, p.paid||0, p.type||'', p.dueDate||'']);
+            filename = "export_pembelian.xlsx";
+        } else if (section === 'invoice') {
+            const res = await fetch('/api/invoices?all=true', { headers: getAuthHeaders() });
+            const data = await res.json();
+            headers = ["Tanggal", "Nama Customer", "Total", "Terbayar", "Tipe Pembayaran", "Jatuh Tempo"];
+            rows = (Array.isArray(data) ? data : []).map(i => [i.date||'', i.customer||'', i.total||0, i.paid||0, i.type||'', i.dueDate||'']);
+            filename = "export_invoice.xlsx";
+        }
+    } catch (err) {
+        console.error('Export failed', err);
+        showToast('Gagal export data', 'error');
+        return;
     }
 
     const data = [headers, ...rows];

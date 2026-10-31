@@ -37,7 +37,7 @@ const formatDateStr = (val) => {
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // ─── Landing page gate — must be BEFORE express.static ────────────────────────
 // Intercepts requests to the root landing page (/ or /index.html) and
@@ -952,7 +952,112 @@ app.get('/api/dashboard/sales-composition', authenticateToken, async (req, res) 
 // --- Products Routes ---
 app.get('/api/products', authenticateToken, async (req, res) => {
   try {
-    const { customer_id } = req.query;
+    const { customer_id, page, limit: limitQ, q, search, category, stock_status, paginate, all } = req.query;
+    const isPaginated = (page !== undefined || paginate === 'true') && all !== 'true' && limitQ !== 'all';
+
+    const whereConditions = [];
+    const params = [];
+
+    const searchQuery = (q || search || '').trim();
+    if (searchQuery) {
+      whereConditions.push('(p.name LIKE ? OR p.sku LIKE ? OR p.brand LIKE ?)');
+      const pattern = `%${searchQuery}%`;
+      params.push(pattern, pattern, pattern);
+    }
+
+    if (category && category !== 'all') {
+      whereConditions.push('(c.name = ? OR p.category_id = ?)');
+      params.push(category, category);
+    }
+
+    if (stock_status === 'low') {
+      whereConditions.push('p.stock <= p.min_stock');
+    } else if (stock_status === 'safe') {
+      whereConditions.push('p.stock > p.min_stock');
+    }
+
+    const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
+
+    if (isPaginated) {
+      const pageNum = Math.max(1, parseInt(page) || 1);
+      const limitNum = Math.min(80, Math.max(1, parseInt(limitQ) || 80));
+      const offset = (pageNum - 1) * limitNum;
+
+      const countSql = `
+        SELECT 
+          COUNT(*) as total,
+          COALESCE(SUM(p.stock * p.cost_price), 0) AS total_stock_value
+        FROM products p 
+        LEFT JOIN product_categories c ON p.category_id = c.id
+        ${whereClause}
+      `;
+      const countRes = await pool.query(countSql, params);
+      const total = parseInt(countRes.rows[0]?.total || 0);
+      const totalStockValue = parseFloat(countRes.rows[0]?.total_stock_value || 0);
+
+      let dataSql;
+      let dataParams = [...params];
+      if (customer_id) {
+        dataSql = `
+          SELECT 
+            p.*, 
+            c.name as category, 
+            u.name as unit,
+            pi.harga AS harga_pricelist,
+            COALESCE(pi.harga, p.sell_price) AS harga_efektif,
+            CASE WHEN pi.harga IS NOT NULL THEN 'pricelist' ELSE 'master' END AS sumber_harga,
+            pl.id AS pricelist_id,
+            pl.nama AS pricelist_nama,
+            pl.kode AS pricelist_kode
+          FROM products p 
+          LEFT JOIN product_categories c ON p.category_id = c.id 
+          LEFT JOIN product_units u ON p.unit_id = u.id
+          LEFT JOIN customers cust ON cust.id = ?
+          LEFT JOIN pricelists pl ON pl.id = cust.pricelist_id AND pl.is_active = 1
+          LEFT JOIN pricelist_items pi ON pi.pricelist_id = pl.id AND pi.product_id = p.id
+          ${whereClause}
+          ORDER BY p.name ASC, p.id ASC
+          LIMIT ? OFFSET ?
+        `;
+        dataParams = [customer_id, ...params, limitNum, offset];
+      } else {
+        dataSql = `
+          SELECT 
+            p.*, 
+            c.name as category, 
+            u.name as unit,
+            NULL AS harga_pricelist,
+            p.sell_price AS harga_efektif,
+            'master' AS sumber_harga,
+            NULL AS pricelist_id,
+            NULL AS pricelist_nama,
+            NULL AS pricelist_kode
+          FROM products p 
+          LEFT JOIN product_categories c ON p.category_id = c.id 
+          LEFT JOIN product_units u ON p.unit_id = u.id
+          ${whereClause}
+          ORDER BY p.name ASC, p.id ASC
+          LIMIT ? OFFSET ?
+        `;
+        dataParams = [...params, limitNum, offset];
+      }
+
+      const result = await pool.query(dataSql, dataParams);
+      return res.json({
+        data: result.rows,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages: Math.ceil(total / limitNum) || 1
+        },
+        summary: {
+          totalStockValue
+        }
+      });
+    }
+
+    // Unpaginated path (for backward compatibility: dropdowns, POS, test scripts)
     let result;
     if (customer_id) {
       result = await pool.query(`
@@ -969,11 +1074,12 @@ app.get('/api/products', authenticateToken, async (req, res) => {
         FROM products p 
         LEFT JOIN product_categories c ON p.category_id = c.id 
         LEFT JOIN product_units u ON p.unit_id = u.id
-        LEFT JOIN customers cust ON cust.id = $1
+        LEFT JOIN customers cust ON cust.id = ?
         LEFT JOIN pricelists pl ON pl.id = cust.pricelist_id AND pl.is_active = 1
         LEFT JOIN pricelist_items pi ON pi.pricelist_id = pl.id AND pi.product_id = p.id
-        ORDER BY p.name ASC
-      `, [customer_id]);
+        ${whereClause}
+        ORDER BY p.name ASC, p.id ASC
+      `, [customer_id, ...params]);
     } else {
       result = await pool.query(`
         SELECT 
@@ -989,8 +1095,9 @@ app.get('/api/products', authenticateToken, async (req, res) => {
         FROM products p 
         LEFT JOIN product_categories c ON p.category_id = c.id 
         LEFT JOIN product_units u ON p.unit_id = u.id
-        ORDER BY p.name ASC
-      `);
+        ${whereClause}
+        ORDER BY p.name ASC, p.id ASC
+      `, params);
     }
     res.json(result.rows);
   } catch (err) {
@@ -1130,7 +1237,67 @@ const CUSTOMER_SELECT_SQL = `
 
 app.get('/api/customers', authenticateToken, authorizeRoles('admin', 'kasir', 'finance', 'owner'), async (req, res) => {
   try {
-    const result = await pool.query(CUSTOMER_SELECT_SQL + ' GROUP BY c.id, cc.name, pl.nama, pl.kode ORDER BY c.name ASC');
+    const { page, limit: limitQ, q, search, category, type, paginate, all } = req.query;
+    const isPaginated = (page !== undefined || paginate === 'true') && all !== 'true' && limitQ !== 'all';
+
+    const whereConditions = [];
+    const params = [];
+
+    const searchQuery = (q || search || '').trim();
+    if (searchQuery) {
+      whereConditions.push('(c.name LIKE ? OR c.phone LIKE ? OR c.id LIKE ? OR c.city LIKE ?)');
+      const pattern = `%${searchQuery}%`;
+      params.push(pattern, pattern, pattern, pattern);
+    }
+
+    const catQuery = (type || category || '').trim();
+    if (catQuery && catQuery !== 'all') {
+      whereConditions.push('(cc.name = ? OR c.customer_category_id = ?)');
+      params.push(catQuery, catQuery);
+    }
+
+    const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
+
+    if (isPaginated) {
+      const pageNum = Math.max(1, parseInt(page) || 1);
+      const limitNum = Math.min(80, Math.max(1, parseInt(limitQ) || 80));
+      const offset = (pageNum - 1) * limitNum;
+
+      const countSql = `
+        SELECT COUNT(DISTINCT c.id) AS total
+        FROM customers c
+        LEFT JOIN customer_categories cc ON c.customer_category_id = cc.id
+        ${whereClause}
+      `;
+      const countRes = await pool.query(countSql, params);
+      const total = parseInt(countRes.rows[0]?.total || 0);
+
+      const dataSql = CUSTOMER_SELECT_SQL + `
+        ${whereClause}
+        GROUP BY c.id, cc.name, pl.nama, pl.kode
+        ORDER BY c.name ASC, c.id ASC
+        LIMIT ? OFFSET ?
+      `;
+      const dataParams = [...params, limitNum, offset];
+      const result = await pool.query(dataSql, dataParams);
+
+      return res.json({
+        data: result.rows,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages: Math.ceil(total / limitNum) || 1
+        }
+      });
+    }
+
+    const result = await pool.query(
+      CUSTOMER_SELECT_SQL + `
+      ${whereClause}
+      GROUP BY c.id, cc.name, pl.nama, pl.kode
+      ORDER BY c.name ASC, c.id ASC
+    `, params);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1669,10 +1836,27 @@ app.delete('/api/pricelists/:id/items/:productId', authenticateToken, authorizeR
 // --- Vendors Routes ---
 app.get('/api/vendors', authenticateToken, authorizeRoles('admin', 'gudang', 'finance'), async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT v.*, vc.name as category_name,
-        COALESCE(po_agg.total_purchases, 0) AS total_purchases,
-        COALESCE(po_agg.outstanding_debt, 0) AS outstanding_debt
+    const { page, limit: limitQ, q, search, category, paginate, all } = req.query;
+    const isPaginated = (page !== undefined || paginate === 'true') && all !== 'true' && limitQ !== 'all';
+
+    const whereConditions = [];
+    const params = [];
+
+    const searchQuery = (q || search || '').trim();
+    if (searchQuery) {
+      whereConditions.push('(v.name LIKE ? OR v.id LIKE ? OR v.phone LIKE ? OR v.city LIKE ?)');
+      const pattern = `%${searchQuery}%`;
+      params.push(pattern, pattern, pattern, pattern);
+    }
+
+    if (category && category !== 'all') {
+      whereConditions.push('(vc.name = ? OR v.vendor_category_id = ?)');
+      params.push(category, category);
+    }
+
+    const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
+
+    const baseVendorSql = `
       FROM vendors v
       LEFT JOIN vendor_categories vc ON v.vendor_category_id = vc.id
       LEFT JOIN (
@@ -1683,8 +1867,46 @@ app.get('/api/vendors', authenticateToken, authorizeRoles('admin', 'gudang', 'fi
         WHERE status != 'Batal'
         GROUP BY vendor_id
       ) po_agg ON po_agg.vendor_id = v.id
-      ORDER BY v.name ASC
-    `);
+      ${whereClause}
+    `;
+
+    if (isPaginated) {
+      const pageNum = Math.max(1, parseInt(page) || 1);
+      const limitNum = Math.min(80, Math.max(1, parseInt(limitQ) || 80));
+      const offset = (pageNum - 1) * limitNum;
+
+      const countSql = `SELECT COUNT(*) AS total FROM vendors v LEFT JOIN vendor_categories vc ON v.vendor_category_id = vc.id ${whereClause}`;
+      const countRes = await pool.query(countSql, params);
+      const total = parseInt(countRes.rows[0]?.total || 0);
+
+      const dataSql = `
+        SELECT v.*, vc.name as category_name,
+          COALESCE(po_agg.total_purchases, 0) AS total_purchases,
+          COALESCE(po_agg.outstanding_debt, 0) AS outstanding_debt
+        ${baseVendorSql}
+        ORDER BY v.name ASC, v.id ASC
+        LIMIT ? OFFSET ?
+      `;
+      const result = await pool.query(dataSql, [...params, limitNum, offset]);
+
+      return res.json({
+        data: result.rows,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages: Math.ceil(total / limitNum) || 1
+        }
+      });
+    }
+
+    const result = await pool.query(`
+      SELECT v.*, vc.name as category_name,
+        COALESCE(po_agg.total_purchases, 0) AS total_purchases,
+        COALESCE(po_agg.outstanding_debt, 0) AS outstanding_debt
+      ${baseVendorSql}
+      ORDER BY v.name ASC, v.id ASC
+    `, params);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1694,15 +1916,48 @@ app.get('/api/vendors', authenticateToken, authorizeRoles('admin', 'gudang', 'fi
 // --- Invoices Routes (Sales) ---
 app.get('/api/invoices', authenticateToken, authorizeRoles('admin', 'kasir', 'finance'), async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT si.*, c.name as customer, pt.name as payment_type_name
-      FROM sales_invoices si
-      LEFT JOIN customers c ON si.customer_id = c.id
-      LEFT JOIN payment_types pt ON si.payment_type_id = pt.id
-      ORDER BY si.date DESC, si.id DESC
-    `);
+    const { page, limit: limitQ, q, search, status, customer_id, date_from, date_to, paginate, all } = req.query;
+    const isPaginated = (page !== undefined || paginate === 'true') && all !== 'true' && limitQ !== 'all';
+
+    const whereConditions = [];
+    const params = [];
+
+    const searchQuery = (q || search || '').trim();
+    if (searchQuery) {
+      whereConditions.push('(si.id LIKE ? OR c.name LIKE ?)');
+      const pattern = `%${searchQuery}%`;
+      params.push(pattern, pattern);
+    }
+
+    if (status && status !== 'all') {
+      const qStatus = status.toLowerCase();
+      if (qStatus.includes('belum')) {
+        whereConditions.push('LOWER(si.status) LIKE ?');
+        params.push('%belum%');
+      } else {
+        whereConditions.push('LOWER(si.status) = ?');
+        params.push(qStatus);
+      }
+    }
+
+    if (customer_id && customer_id !== 'all') {
+      whereConditions.push('si.customer_id = ?');
+      params.push(customer_id);
+    }
+
+    if (date_from) {
+      whereConditions.push('si.date >= ?');
+      params.push(date_from);
+    }
+    if (date_to) {
+      whereConditions.push('si.date <= ?');
+      params.push(date_to);
+    }
+
+    const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
+
     const todayStr = formatDateStr(new Date());
-    res.json(result.rows.map(r => {
+    const mapInvoiceRow = (r) => {
       const total = parseFloat(r.total || 0);
       const paid = parseFloat(r.paid_amount || 0);
       const sisa = Math.max(0, total - paid);
@@ -1723,7 +1978,53 @@ app.get('/api/invoices', authenticateToken, authorizeRoles('admin', 'kasir', 'fi
         status: r.status,
         dueDate: dueDateStr
       };
-    }));
+    };
+
+    if (isPaginated) {
+      const pageNum = Math.max(1, parseInt(page) || 1);
+      const limitNum = Math.min(80, Math.max(1, parseInt(limitQ) || 80));
+      const offset = (pageNum - 1) * limitNum;
+
+      const countSql = `
+        SELECT COUNT(*) AS total 
+        FROM sales_invoices si 
+        LEFT JOIN customers c ON si.customer_id = c.id 
+        ${whereClause}
+      `;
+      const countRes = await pool.query(countSql, params);
+      const total = parseInt(countRes.rows[0]?.total || 0);
+
+      const dataSql = `
+        SELECT si.*, c.name as customer, pt.name as payment_type_name
+        FROM sales_invoices si
+        LEFT JOIN customers c ON si.customer_id = c.id
+        LEFT JOIN payment_types pt ON si.payment_type_id = pt.id
+        ${whereClause}
+        ORDER BY si.date DESC, si.id DESC
+        LIMIT ? OFFSET ?
+      `;
+      const result = await pool.query(dataSql, [...params, limitNum, offset]);
+
+      return res.json({
+        data: result.rows.map(mapInvoiceRow),
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages: Math.ceil(total / limitNum) || 1
+        }
+      });
+    }
+
+    const result = await pool.query(`
+      SELECT si.*, c.name as customer, pt.name as payment_type_name
+      FROM sales_invoices si
+      LEFT JOIN customers c ON si.customer_id = c.id
+      LEFT JOIN payment_types pt ON si.payment_type_id = pt.id
+      ${whereClause}
+      ORDER BY si.date DESC, si.id DESC
+    `, params);
+    res.json(result.rows.map(mapInvoiceRow));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2307,36 +2608,60 @@ async function recordInvoicePayment({ invoiceId, amount, paymentDate, paymentMet
 
 app.get('/api/finance/receivables', authenticateToken, authorizeRoles('admin', 'finance'), async (req, res) => {
   try {
+    const { page, limit: limitQ, q, search, customer_id, status, paginate, all } = req.query;
+    const isPaginated = (page !== undefined || paginate === 'true') && all !== 'true' && limitQ !== 'all';
     const todayStr = formatDateStr(new Date());
-    let query = `
-      SELECT si.*, c.name as customer_name, c.phone as customer_phone, pt.name as payment_type_name
-      FROM sales_invoices si
-      LEFT JOIN customers c ON si.customer_id = c.id
-      LEFT JOIN payment_types pt ON si.payment_type_id = pt.id
-      WHERE si.status NOT IN ('Lunas', 'Batal')
-    `;
+
+    const whereConditions = ["si.status != 'Batal'"];
     const params = [];
 
-    if (req.query.customer_id) {
-      params.push(req.query.customer_id);
-      query += ` AND si.customer_id = $${params.length}`;
+    const searchQuery = (q || search || '').trim();
+    if (searchQuery) {
+      whereConditions.push('(si.id LIKE ? OR c.name LIKE ?)');
+      const pattern = `%${searchQuery}%`;
+      params.push(pattern, pattern);
     }
 
-    if (req.query.status && req.query.status !== 'all') {
-      const qStatus = req.query.status.toLowerCase();
-      if (qStatus.includes('belum')) {
+    if (customer_id && customer_id !== 'all') {
+      whereConditions.push('si.customer_id = ?');
+      params.push(customer_id);
+    }
+
+    if (status && status !== 'all') {
+      const qStatus = status.toLowerCase();
+      if (qStatus === 'overdue') {
+        whereConditions.push('(si.total - si.paid_amount) > 0 AND si.due_date IS NOT NULL AND si.due_date < CURDATE()');
+      } else if (qStatus.includes('belum')) {
+        whereConditions.push('LOWER(si.status) LIKE ?');
         params.push('%belum%');
-        query += ` AND LOWER(si.status) LIKE $${params.length}`;
       } else if (qStatus === 'sebagian') {
+        whereConditions.push('LOWER(si.status) = ?');
         params.push('sebagian');
-        query += ` AND LOWER(si.status) = $${params.length}`;
+      } else if (qStatus === 'lunas') {
+        whereConditions.push('LOWER(si.status) = ?');
+        params.push('lunas');
       }
+    } else {
+      whereConditions.push("si.status NOT IN ('Lunas', 'Batal')");
     }
 
-    query += ' ORDER BY si.due_date ASC, si.date DESC';
-    const result = await pool.query(query, params);
+    const whereClause = 'WHERE ' + whereConditions.join(' AND ');
 
-    const rows = result.rows.map(r => {
+    // Summary query must be calculated from ALL active piutang data according to filters
+    const summaryWhereConditions = ["si.status NOT IN ('Lunas', 'Batal')"];
+    const summaryParams = [];
+    if (searchQuery) {
+      summaryWhereConditions.push('(si.id LIKE ? OR c.name LIKE ?)');
+      const pattern = `%${searchQuery}%`;
+      summaryParams.push(pattern, pattern);
+    }
+    if (customer_id && customer_id !== 'all') {
+      summaryWhereConditions.push('si.customer_id = ?');
+      summaryParams.push(customer_id);
+    }
+    const summaryWhereClause = 'WHERE ' + summaryWhereConditions.join(' AND ');
+
+    const mapReceivableRow = (r) => {
       const total = parseFloat(r.total || 0);
       const paid = parseFloat(r.paid_amount || 0);
       const sisa = Math.max(0, total - paid);
@@ -2358,9 +2683,75 @@ app.get('/api/finance/receivables', authenticateToken, authorizeRoles('admin', '
         isOverdue: isOverdue,
         paidDate: formatDateStr(r.paid_date) || null
       };
-    });
+    };
 
-    res.json(rows);
+    if (isPaginated) {
+      const pageNum = Math.max(1, parseInt(page) || 1);
+      const limitNum = Math.min(80, Math.max(1, parseInt(limitQ) || 80));
+      const offset = (pageNum - 1) * limitNum;
+
+      // Summary query
+      const summarySql = `
+        SELECT 
+          COALESCE(SUM(si.total - si.paid_amount), 0) AS total_piutang,
+          COALESCE(SUM(CASE WHEN LOWER(si.status) LIKE '%belum%' THEN si.total ELSE 0 END), 0) AS belum_bayar,
+          COALESCE(SUM(CASE WHEN LOWER(si.status) = 'sebagian' THEN si.total - si.paid_amount ELSE 0 END), 0) AS sebagian
+        FROM sales_invoices si
+        LEFT JOIN customers c ON si.customer_id = c.id
+        ${summaryWhereClause}
+      `;
+      const summaryRes = await pool.query(summarySql, summaryParams);
+      const sumRow = summaryRes.rows[0] || {};
+
+      // Count query for list
+      const countSql = `
+        SELECT COUNT(*) AS total 
+        FROM sales_invoices si 
+        LEFT JOIN customers c ON si.customer_id = c.id 
+        ${whereClause}
+      `;
+      const countRes = await pool.query(countSql, params);
+      const total = parseInt(countRes.rows[0]?.total || 0);
+
+      // Data query
+      const dataSql = `
+        SELECT si.*, c.name as customer_name, c.phone as customer_phone, pt.name as payment_type_name
+        FROM sales_invoices si
+        LEFT JOIN customers c ON si.customer_id = c.id
+        LEFT JOIN payment_types pt ON si.payment_type_id = pt.id
+        ${whereClause}
+        ORDER BY si.due_date ASC, si.date DESC, si.id DESC
+        LIMIT ? OFFSET ?
+      `;
+      const result = await pool.query(dataSql, [...params, limitNum, offset]);
+
+      return res.json({
+        data: result.rows.map(mapReceivableRow),
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages: Math.ceil(total / limitNum) || 1
+        },
+        summary: {
+          totalPiutang: parseFloat(sumRow.total_piutang || 0),
+          belumBayar: parseFloat(sumRow.belum_bayar || 0),
+          sebagian: parseFloat(sumRow.sebagian || 0),
+          total_piutang: parseFloat(sumRow.total_piutang || 0),
+          belum_bayar: parseFloat(sumRow.belum_bayar || 0)
+        }
+      });
+    }
+
+    const result = await pool.query(`
+      SELECT si.*, c.name as customer_name, c.phone as customer_phone, pt.name as payment_type_name
+      FROM sales_invoices si
+      LEFT JOIN customers c ON si.customer_id = c.id
+      LEFT JOIN payment_types pt ON si.payment_type_id = pt.id
+      ${whereClause}
+      ORDER BY si.due_date ASC, si.date DESC, si.id DESC
+    `, params);
+    res.json(result.rows.map(mapReceivableRow));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2657,10 +3048,34 @@ pool.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS status VARCHA
   }
 })();
 
-app.get('/api/finance/cash-flow', authenticateToken, authorizeRoles('admin', 'finance'), async (req, res) => {
+app.get(['/api/finance/cash-flow', '/api/finance/cashflow'], authenticateToken, authorizeRoles('admin', 'finance'), async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM cash_transactions ORDER BY date DESC, id DESC');
-    res.json(result.rows.map(r => ({
+    const { page, limit: limitQ, type, category, search, q, paginate, all } = req.query;
+    const isPaginated = (page !== undefined || paginate === 'true') && all !== 'true' && limitQ !== 'all';
+
+    const whereConditions = [];
+    const params = [];
+
+    if (type && type !== 'all') {
+      whereConditions.push('UPPER(ct.type) = ?');
+      params.push(type.toUpperCase());
+    }
+
+    if (category && category !== 'all') {
+      whereConditions.push('ct.category = ?');
+      params.push(category);
+    }
+
+    const searchQuery = (q || search || '').trim();
+    if (searchQuery) {
+      whereConditions.push('(ct.description LIKE ? OR ct.category LIKE ?)');
+      const pattern = `%${searchQuery}%`;
+      params.push(pattern, pattern);
+    }
+
+    const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
+
+    const mapCashRow = (r) => ({
       id: r.id,
       date: formatDateStr(r.date),
       type: r.type,
@@ -2671,8 +3086,77 @@ app.get('/api/finance/cash-flow', authenticateToken, authorizeRoles('admin', 'fi
       invoiceId: r.invoice_id || '',
       purchaseOrderId: r.purchase_order_id || '',
       status: r.status || 'active',
-      isManual: !r.invoice_id && !r.purchase_order_id
-    })));
+      isManual: !r.invoice_id && !r.purchase_order_id,
+      runningBalance: parseFloat(r.running_balance || 0),
+      running_balance: parseFloat(r.running_balance || 0)
+    });
+
+    if (isPaginated) {
+      const pageNum = Math.max(1, parseInt(page) || 1);
+      const limitNum = Math.min(80, Math.max(1, parseInt(limitQ) || 80));
+      const offset = (pageNum - 1) * limitNum;
+
+      // Header summary calculated from ALL active transactions matching filter
+      const summarySql = `
+        SELECT 
+          COALESCE(SUM(CASE WHEN ct.type = 'IN' AND (ct.status IS NULL OR ct.status = 'active') THEN ct.amount ELSE 0 END), 0) AS total_in,
+          COALESCE(SUM(CASE WHEN ct.type = 'OUT' AND (ct.status IS NULL OR ct.status = 'active') THEN ct.amount ELSE 0 END), 0) AS total_out
+        FROM cash_transactions ct
+        ${whereClause}
+      `;
+      const summaryRes = await pool.query(summarySql, params);
+      const sumRow = summaryRes.rows[0] || {};
+      const totalIn = parseFloat(sumRow.total_in || 0);
+      const totalOut = parseFloat(sumRow.total_out || 0);
+      const net = totalIn - totalOut;
+
+      const countSql = `SELECT COUNT(*) AS total FROM cash_transactions ct ${whereClause}`;
+      const countRes = await pool.query(countSql, params);
+      const total = parseInt(countRes.rows[0]?.total || 0);
+
+      // Running balance using MariaDB Window Function
+      const dataSql = `
+        SELECT * FROM (
+          SELECT 
+            ct.*,
+            SUM(
+              CASE 
+                WHEN (ct.status IS NULL OR ct.status = 'active') 
+                THEN (CASE WHEN ct.type = 'IN' THEN ct.amount ELSE -ct.amount END) 
+                ELSE 0 
+              END
+            ) OVER (ORDER BY ct.date ASC, ct.id ASC) AS running_balance
+          FROM cash_transactions ct
+        ) t
+        ${whereClause.replace(/\bct\./g, 't.')}
+        ORDER BY t.date DESC, t.id DESC
+        LIMIT ? OFFSET ?
+      `;
+      const result = await pool.query(dataSql, [...params, limitNum, offset]);
+
+      return res.json({
+        data: result.rows.map(mapCashRow),
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages: Math.ceil(total / limitNum) || 1
+        },
+        summary: {
+          totalIn,
+          totalOut,
+          net
+        }
+      });
+    }
+
+    // Unpaginated fallback
+    const result = await pool.query(`
+      SELECT * FROM cash_transactions ct
+      ${whereClause}
+      ORDER BY ct.date DESC, ct.id DESC
+    `, params);
+    return res.json(result.rows.map(mapCashRow));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3208,8 +3692,124 @@ app.get('/api/laporan/performa', authenticateToken, authorizeRoles('admin', 'fin
 
 app.get('/api/finance/payables', authenticateToken, authorizeRoles('admin', 'finance'), async (req, res) => {
   try {
-    const result = await pool.query('SELECT po.*, v.name as vendor_name, pt.name as payment_type_name FROM purchase_orders po LEFT JOIN vendors v ON po.vendor_id = v.id LEFT JOIN payment_types pt ON po.payment_type_id = pt.id WHERE po.status != $1 AND po.status != $2', ['Selesai', 'Batal']);
-    res.json(result.rows);
+    const { page, limit: limitQ, q, search, vendor_id, status, paginate, all } = req.query;
+    const isPaginated = (page !== undefined || paginate === 'true') && all !== 'true' && limitQ !== 'all';
+
+    const whereConditions = ["po.status != 'Batal'"];
+    const params = [];
+
+    const searchQuery = (q || search || '').trim();
+    if (searchQuery) {
+      whereConditions.push('(po.id LIKE ? OR v.name LIKE ?)');
+      const pattern = `%${searchQuery}%`;
+      params.push(pattern, pattern);
+    }
+
+    if (vendor_id && vendor_id !== 'all') {
+      whereConditions.push('po.vendor_id = ?');
+      params.push(vendor_id);
+    }
+
+    if (status && status !== 'all') {
+      const qStatus = status.toLowerCase();
+      if (qStatus === 'lunas') {
+        whereConditions.push('po.paid_amount >= po.total');
+      } else if (qStatus.includes('belum')) {
+        whereConditions.push('po.paid_amount = 0');
+      } else if (qStatus === 'sebagian') {
+        whereConditions.push('po.paid_amount > 0 AND po.paid_amount < po.total');
+      }
+    }
+
+    const whereClause = 'WHERE ' + whereConditions.join(' AND ');
+
+    const mapPayableRow = (r) => {
+      const total = parseFloat(r.total || 0);
+      const paid = parseFloat(r.paid_amount || 0);
+      const sisa = Math.max(0, total - paid);
+      return {
+        id: r.id,
+        date: formatDateStr(r.date),
+        dueDate: formatDateStr(r.due_date) || formatDateStr(r.date) || '-',
+        paidDate: formatDateStr(r.paid_date) || null,
+        vendorId: r.vendor_id,
+        vendor: r.vendor_name || 'Tanpa Vendor',
+        total: total,
+        paid: paid,
+        sisa: sisa,
+        type: r.payment_type_name || 'Tunai',
+        status: sisa > 0 ? 'Belum Lunas' : 'Lunas'
+      };
+    };
+
+    if (isPaginated) {
+      const pageNum = Math.max(1, parseInt(page) || 1);
+      const limitNum = Math.min(80, Math.max(1, parseInt(limitQ) || 80));
+      const offset = (pageNum - 1) * limitNum;
+
+      // Summary query over all vendors & debts
+      const summarySql = `
+        SELECT 
+          COALESCE(SUM(GREATEST(po.total - po.paid_amount, 0)), 0) AS total_debt,
+          COUNT(DISTINCT CASE WHEN (po.total - po.paid_amount) > 0 THEN po.vendor_id END) AS vendors_with_debt,
+          (SELECT COUNT(*) FROM vendors) AS total_vendors
+        FROM purchase_orders po
+        WHERE po.status != 'Batal'
+      `;
+      const summaryRes = await pool.query(summarySql);
+      const sumRow = summaryRes.rows[0] || {};
+      const totalVendors = parseInt(sumRow.total_vendors || 0);
+      const vendorsWithDebt = parseInt(sumRow.vendors_with_debt || 0);
+      const vendorsLunas = Math.max(0, totalVendors - vendorsWithDebt);
+
+      const countSql = `
+        SELECT COUNT(*) AS total 
+        FROM purchase_orders po 
+        LEFT JOIN vendors v ON po.vendor_id = v.id 
+        ${whereClause}
+      `;
+      const countRes = await pool.query(countSql, params);
+      const total = parseInt(countRes.rows[0]?.total || 0);
+
+      const dataSql = `
+        SELECT po.*, v.name as vendor_name, pt.name as payment_type_name
+        FROM purchase_orders po
+        LEFT JOIN vendors v ON po.vendor_id = v.id
+        LEFT JOIN payment_types pt ON po.payment_type_id = pt.id
+        ${whereClause}
+        ORDER BY po.due_date ASC, po.date DESC, po.id DESC
+        LIMIT ? OFFSET ?
+      `;
+      const result = await pool.query(dataSql, [...params, limitNum, offset]);
+
+      return res.json({
+        data: result.rows.map(mapPayableRow),
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages: Math.ceil(total / limitNum) || 1
+        },
+        summary: {
+          totalDebt: parseFloat(sumRow.total_debt || 0),
+          vendorsWithDebt,
+          vendorsLunas,
+          total_debt: parseFloat(sumRow.total_debt || 0),
+          vendors_with_debt: vendorsWithDebt,
+          vendors_lunas: vendorsLunas
+        }
+      });
+    }
+
+    const result = await pool.query(`
+      SELECT po.*, v.name as vendor_name, pt.name as payment_type_name 
+      FROM purchase_orders po 
+      LEFT JOIN vendors v ON po.vendor_id = v.id 
+      LEFT JOIN payment_types pt ON po.payment_type_id = pt.id 
+      ${whereClause}
+      ORDER BY po.due_date ASC, po.date DESC, po.id DESC
+    `, params);
+    res.json(result.rows.map(mapPayableRow));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3314,14 +3914,41 @@ app.delete('/api/vendors/:id', authenticateToken, authorizeRoles('admin', 'gudan
 // --- Purchase Orders Routes ---
 app.get('/api/purchases', authenticateToken, authorizeRoles('admin', 'gudang', 'finance'), async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT po.*, v.name as vendor_name, pt.name as payment_type 
-      FROM purchase_orders po 
-      LEFT JOIN vendors v ON po.vendor_id = v.id
-      LEFT JOIN payment_types pt ON po.payment_type_id = pt.id
-      ORDER BY po.date DESC, po.id DESC
-    `);
-    res.json(result.rows.map(row => ({
+    const { page, limit: limitQ, q, search, status, vendor_id, date_from, date_to, paginate, all } = req.query;
+    const isPaginated = (page !== undefined || paginate === 'true') && all !== 'true' && limitQ !== 'all';
+
+    const whereConditions = [];
+    const params = [];
+
+    const searchQuery = (q || search || '').trim();
+    if (searchQuery) {
+      whereConditions.push('(po.id LIKE ? OR v.name LIKE ?)');
+      const pattern = `%${searchQuery}%`;
+      params.push(pattern, pattern);
+    }
+
+    if (status && status !== 'all') {
+      whereConditions.push('LOWER(po.status) = ?');
+      params.push(status.toLowerCase());
+    }
+
+    if (vendor_id && vendor_id !== 'all') {
+      whereConditions.push('po.vendor_id = ?');
+      params.push(vendor_id);
+    }
+
+    if (date_from) {
+      whereConditions.push('po.date >= ?');
+      params.push(date_from);
+    }
+    if (date_to) {
+      whereConditions.push('po.date <= ?');
+      params.push(date_to);
+    }
+
+    const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
+
+    const mapPurchaseRow = (row) => ({
       id: row.id,
       date: formatDateStr(row.date),
       vendorId: row.vendor_id,
@@ -3333,7 +3960,53 @@ app.get('/api/purchases', authenticateToken, authorizeRoles('admin', 'gudang', '
       status: row.status,
       paymentTypeId: row.payment_type_id,
       dueDate: formatDateStr(row.due_date)
-    })));
+    });
+
+    if (isPaginated) {
+      const pageNum = Math.max(1, parseInt(page) || 1);
+      const limitNum = Math.min(80, Math.max(1, parseInt(limitQ) || 80));
+      const offset = (pageNum - 1) * limitNum;
+
+      const countSql = `
+        SELECT COUNT(*) AS total 
+        FROM purchase_orders po 
+        LEFT JOIN vendors v ON po.vendor_id = v.id 
+        ${whereClause}
+      `;
+      const countRes = await pool.query(countSql, params);
+      const total = parseInt(countRes.rows[0]?.total || 0);
+
+      const dataSql = `
+        SELECT po.*, v.name as vendor_name, pt.name as payment_type 
+        FROM purchase_orders po 
+        LEFT JOIN vendors v ON po.vendor_id = v.id
+        LEFT JOIN payment_types pt ON po.payment_type_id = pt.id
+        ${whereClause}
+        ORDER BY po.date DESC, po.id DESC
+        LIMIT ? OFFSET ?
+      `;
+      const result = await pool.query(dataSql, [...params, limitNum, offset]);
+
+      return res.json({
+        data: result.rows.map(mapPurchaseRow),
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages: Math.ceil(total / limitNum) || 1
+        }
+      });
+    }
+
+    const result = await pool.query(`
+      SELECT po.*, v.name as vendor_name, pt.name as payment_type 
+      FROM purchase_orders po 
+      LEFT JOIN vendors v ON po.vendor_id = v.id
+      LEFT JOIN payment_types pt ON po.payment_type_id = pt.id
+      ${whereClause}
+      ORDER BY po.date DESC, po.id DESC
+    `, params);
+    res.json(result.rows.map(mapPurchaseRow));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3722,22 +4395,7 @@ app.put('/api/invoices/:id/cancel', authenticateToken, authorizeRoles('admin', '
 });
 
 // --- Cash Transactions (Arus Kas) ---
-app.get('/api/finance/cashflow', authenticateToken, authorizeRoles('admin', 'finance'), async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM cash_transactions ORDER BY date DESC, id DESC');
-    res.json(result.rows.map(r => ({
-      id: r.id,
-      date: formatDateStr(r.date),
-      type: r.type,
-      category: r.category,
-      desc: r.description,
-      amount: parseFloat(r.amount),
-      method: r.method
-    })));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+
 
 app.post('/api/finance/cashflow', authenticateToken, authorizeRoles('admin', 'finance'), async (req, res) => {
   const { type, category, description, amount, method, date } = req.body;
@@ -4250,6 +4908,16 @@ setInterval(() => {
 setTimeout(() => {
   runDailyReconciliation();
 }, 10000);
+
+// Handle PayloadTooLargeError — return JSON instead of HTML 413 page
+app.use((err, req, res, next) => {
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({
+      error: 'Payload terlalu besar. Maksimal 10MB per request. Bagi file import menjadi beberapa batch yang lebih kecil.'
+    });
+  }
+  next(err);
+});
 
 // Bind ke 0.0.0.0 agar bisa diakses dari luar (wajib di hosting)
 app.listen(port, '0.0.0.0', () => {

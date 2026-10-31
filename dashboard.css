@@ -683,6 +683,8 @@
 .badge-status.out { background: var(--rose-100); color: #e11d48; }
 .badge-status.overdue { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; font-weight: 700; }
 .badge-status.void { background: #f1f5f9; color: #64748b; text-decoration: line-through; }
+.badge-status.cancel, .badge-status.batal { background: #fee2e2; color: #e11d48; border: 1px solid #fecaca; font-weight: 600; }
+.badge-status.belum-lunas { background: var(--rose-100); color: #e11d48; }
 .badge-dp { display: inline-block; padding: 2px 6px; font-size: 0.65rem; font-weight: 700; border-radius: 4px; background: #eff6ff; color: #2563eb; margin-left: 4px; }
 
 /* ---------- Page Toolbar ---------- */
@@ -797,6 +799,19 @@
 .btn-toolbar.secondary:hover {
     background: var(--gray-50);
     border-color: var(--gray-300);
+}
+
+.btn-toolbar.danger {
+    background: linear-gradient(135deg, #e11d48, #be123c);
+    color: white;
+    border: none;
+    box-shadow: 0 1px 3px rgba(225, 29, 72, 0.4);
+}
+
+.btn-toolbar.danger:hover {
+    background: linear-gradient(135deg, #be123c, #9f1239);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(225, 29, 72, 0.4);
 }
 
 .btn-toolbar i {

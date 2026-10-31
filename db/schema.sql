@@ -138,6 +138,8 @@ CREATE TABLE IF NOT EXISTS sales_invoices (
   payment_type_id VARCHAR(255),
   status VARCHAR(255) DEFAULT 'belum',
   user_id INT,
+  is_outstanding_import TINYINT(1) DEFAULT 0,
+  INDEX idx_is_outstanding_import (is_outstanding_import),
   FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
   FOREIGN KEY (payment_type_id) REFERENCES payment_types(id) ON DELETE SET NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL

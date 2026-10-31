@@ -605,6 +605,9 @@
                                 <option value="sebagian">Sebagian</option>
                                 <option value="batal">Batal</option>
                             </select>
+                            <select class="filter-select" id="invoice-payment-type-filter" onchange="renderInvoices()">
+                                <option value="all">Semua Tipe</option>
+                            </select>
                         </div>
                         <div class="page-toolbar-right">
                             <button class="btn-toolbar secondary" id="btn-import-invoice" onclick="openImportModal('invoice')">
@@ -667,6 +670,9 @@
                             </select>
                         </div>
                         <div class="page-toolbar-right">
+                            <button class="btn-toolbar secondary" id="btn-export-pdf-piutang" disabled onclick="exportPiutangPDF()">
+                                <i data-lucide="file-text"></i> Export PDF
+                            </button>
                             <button class="btn-toolbar secondary" id="btn-import-piutang" onclick="openImportModal('invoice')">
                                 <i data-lucide="upload"></i> Import Outstanding
                             </button>
@@ -677,6 +683,7 @@
                         <table class="data-table">
                             <thead>
                                 <tr>
+                                    <th style="width: 36px; text-align: center;"><input type="checkbox" id="check-all-piutang" onchange="toggleSelectAllPiutang(this)"></th>
                                     <th>Invoice</th>
                                     <th>Pelanggan</th>
                                     <th>Total</th>
@@ -2411,10 +2418,7 @@
                                 <!-- Filled by JS -->
                             </select>
                         </div>
-                        <div class="form-group">
-                            <label>Jumlah Bayar (Rp)</label>
-                            <input type="number" id="add-purchase-paid" class="form-input" placeholder="0">
-                        </div>
+                        
                         <div class="form-group" id="add-purchase-duedate-group" style="display: none;">
                             <label>Tanggal Jatuh Tempo</label>
                             <input type="date" id="add-purchase-due-date" class="form-input">
@@ -3075,10 +3079,9 @@
             </div>
             <div class="modal-footer" style="justify-content: space-between; align-items: center;">
                 <div>
-                    <button class="btn-toolbar primary"
-                        style="background: var(--rose-600); border-color: var(--rose-600); color: white;"
+                    <button class="btn-toolbar danger"
                         onclick="cancelInvoice()">
-                        <i data-lucide="x-circle"></i> Batalkan Invoice
+                        <i data-lucide="x-circle"></i> Cancel Invoice
                     </button>
                 </div>
                 <div style="display: flex; gap: 0.5rem; align-items: center;">
@@ -3805,6 +3808,38 @@
 
     <!-- Application Script -->
     <script src="dashboard.js?v=7"></script>
+
+    <!-- Modal Delete Outstanding Invoice -->
+    <div class="modal-overlay" id="modal-delete-outstanding">
+        <div class="modal" style="max-width: 450px;">
+            <div class="modal-header">
+                <h3>Hapus Invoice Outstanding</h3>
+                <button class="modal-close" onclick="closeModal('modal-delete-outstanding')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="delete-outstanding-id">
+                <input type="hidden" id="delete-outstanding-paid">
+                <p id="delete-outstanding-text" style="color: var(--gray-700); margin-bottom: 1rem;">
+                    Apakah Anda yakin ingin menghapus invoice outstanding ini?
+                </p>
+                <div id="delete-outstanding-alert" style="display: none; margin-bottom: 1rem; font-size: 0.875rem; color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; padding: 0.75rem; border-radius: 0.5rem; line-height: 1.4;">
+                    <i data-lucide="alert-triangle" style="width: 16px; height: 16px; display: inline-block; vertical-align: middle; margin-right: 0.25rem;"></i>
+                    <span id="delete-outstanding-alert-text"></span>
+                </div>
+                <p style="font-size: 0.825rem; color: var(--gray-500); background: var(--gray-50); padding: 0.5rem 0.75rem; border-radius: 0.375rem; border: 1px solid var(--gray-200);">
+                    <i data-lucide="info" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 0.25rem;"></i>
+                    Penghapusan invoice outstanding tidak mengubah stok master produk.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-toolbar secondary" onclick="closeModal('modal-delete-outstanding')">Batal</button>
+                <button class="btn-toolbar primary" id="btn-confirm-delete-outstanding" style="background: #e11d48; color: white; border-color: #e11d48;" onclick="executeDeleteOutstandingInvoice()">
+                    <i data-lucide="trash-2"></i> Ya, Hapus
+                </button>
+            </div>
+        </div>
+    </div>
+
 </body>
 
 </html>

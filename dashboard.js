@@ -2089,12 +2089,26 @@ document.getElementById('btn-checkout')?.addEventListener('click', async () => {
 
     console.log(`[Checkout] payment_type_id=${payment_type_id} | name=${payTypeName} | isTempo=${isTempo} | paid=${paid} | total=${total}`);
 
+    // Get order date from input; fallback to today (WITA) if empty
+    const orderDateInput = document.getElementById('cart-order-date');
+    const todayWITA = getTodayWITA();
+    let orderDate = (orderDateInput && orderDateInput.value) ? orderDateInput.value : todayWITA;
+    if (orderDateInput && !orderDateInput.value) {
+        orderDateInput.value = todayWITA;
+    }
+    if (orderDate > todayWITA) {
+        showToast('Tanggal order tidak boleh lebih dari hari ini.', 'warning');
+        if (orderDateInput) orderDateInput.value = todayWITA;
+        return;
+    }
+
     const payload = {
         customer_id: customerId,
+        date: orderDate,
         total: total,
         paid: paid,
         payment_type_id: payment_type_id,
-        due_date: calculateDueDate(getPaymentTypeName(paymentTypeSelect), new Date().toISOString()),
+        due_date: calculateDueDate(getPaymentTypeName(paymentTypeSelect), orderDate),
         items: cart.map(item => ({
             id: item.id,
             quantity: item.qty,
@@ -2129,6 +2143,13 @@ document.getElementById('btn-checkout')?.addEventListener('click', async () => {
             currentPOSCustomerEffectivePrices = {};
             document.getElementById('pos-customer-id').value = '';
             document.getElementById('pos-customer-search').value = '';
+            // Reset Tanggal Order to today
+            const resetDateEl = document.getElementById('cart-order-date');
+            if (resetDateEl) {
+                const todayStr = getTodayWITA();
+                resetDateEl.value = todayStr;
+                resetDateEl.max = todayStr;
+            }
             const posBadge = document.getElementById('pos-customer-pricelist-badge');
             if (posBadge) posBadge.innerHTML = '';
             selectedCartPaymentTypeId = 'PT-1';
@@ -2284,6 +2305,20 @@ function capitalize(str) {
     return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
+/**
+ * Returns today's date string in YYYY-MM-DD format using WITA (UTC+8) timezone.
+ * Avoids the off-by-one shift that occurs when using new Date().toISOString() on a UTC server.
+ */
+function getTodayWITA() {
+    try {
+        return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Makassar' }).format(new Date());
+    } catch (e) {
+        const now = new Date();
+        const wita = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+        return wita.toISOString().split('T')[0];
+    }
+}
+
 function calculateDueDate(paymentTypeName, transactionDateStr) {
     if (!paymentTypeName) return '';
     const nameLower = paymentTypeName.toLowerCase();
@@ -2293,10 +2328,17 @@ function calculateDueDate(paymentTypeName, transactionDateStr) {
     const match = paymentTypeName.match(/(kredit|credit)\s+(\d+)\s+hari/i);
     if (match && match[2]) {
         const days = parseInt(match[2], 10);
-        const date = new Date(transactionDateStr);
-        if (!isNaN(date.getTime())) {
-            date.setDate(date.getDate() + days);
-            return date.toISOString().split('T')[0];
+        if (!transactionDateStr) return '';
+        const parts = transactionDateStr.split('T')[0].split('-');
+        if (parts.length === 3) {
+            const y = parseInt(parts[0], 10);
+            const m = parseInt(parts[1], 10) - 1;
+            const d = parseInt(parts[2], 10);
+            const dt = new Date(y, m, d + days);
+            const ry = dt.getFullYear();
+            const rm = String(dt.getMonth() + 1).padStart(2, '0');
+            const rd = String(dt.getDate()).padStart(2, '0');
+            return `${ry}-${rm}-${rd}`;
         }
     }
     return '';
@@ -4857,6 +4899,33 @@ async function populateMasterDropdowns() {
 
         // Restore cart payment type from frontend state variable
         const cartPaymentTypeSelect = document.getElementById('cart-payment-type');
+        // Initialize Tanggal Order to today (WITA) with max constraint & listeners
+        const cartOrderDateEl = document.getElementById('cart-order-date');
+        if (cartOrderDateEl) {
+            const curToday = getTodayWITA();
+            cartOrderDateEl.max = curToday;
+            if (!cartOrderDateEl.value) {
+                cartOrderDateEl.value = curToday;
+            }
+            if (!cartOrderDateEl.dataset.initialized) {
+                cartOrderDateEl.dataset.initialized = 'true';
+                cartOrderDateEl.addEventListener('change', () => {
+                    const todayStr = getTodayWITA();
+                    cartOrderDateEl.max = todayStr;
+                    if (!cartOrderDateEl.value) {
+                        cartOrderDateEl.value = todayStr;
+                    } else if (cartOrderDateEl.value > todayStr) {
+                        showToast('Tanggal order tidak boleh lebih dari hari ini.', 'warning');
+                        cartOrderDateEl.value = todayStr;
+                    }
+                });
+                cartOrderDateEl.addEventListener('blur', () => {
+                    if (!cartOrderDateEl.value) {
+                        cartOrderDateEl.value = getTodayWITA();
+                    }
+                });
+            }
+        }
         if (cartPaymentTypeSelect) {
             cartPaymentTypeSelect.value = selectedCartPaymentTypeId;
             console.log('[Frontend State] Restored #cart-payment-type select value to: ' + selectedCartPaymentTypeId);

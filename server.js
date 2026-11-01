@@ -20,6 +20,15 @@ process.on('unhandledRejection', (reason) => {
 
 const SECRET_KEY = process.env.JWT_SECRET || 'supplierpro_secret_key_demo';
 
+const getTodayWITA = () => {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Makassar' }).format(new Date());
+  } catch (e) {
+    const d = new Date(Date.now() + 8 * 3600 * 1000);
+    return d.toISOString().split('T')[0];
+  }
+};
+
 const formatDateStr = (val) => {
   if (!val) return '';
   if (typeof val === 'string') return val.split('T')[0].split(' ')[0];
@@ -2155,6 +2164,23 @@ app.post('/api/invoices', authenticateToken, authorizeRoles('admin', 'kasir'), a
   // Server-side input validation — never let an empty string reach the FK constraint
   if (!customer_id) return res.status(400).json({ error: 'customer_id wajib diisi' });
   if (!payment_type_id) return res.status(400).json({ error: 'payment_type_id wajib diisi. Pilih metode pembayaran yang valid.' });
+
+  // Validate tanggal order if provided
+  if (req.body.date) {
+    const dateVal = req.body.date.split('T')[0];
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateVal)) {
+      return res.status(400).json({ error: 'Format tanggal tidak valid. Gunakan format YYYY-MM-DD.' });
+    }
+    const [y, m, d] = dateVal.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    if (dt.getFullYear() !== y || dt.getMonth() !== (m - 1) || dt.getDate() !== d) {
+      return res.status(400).json({ error: 'Format tanggal tidak valid. Tanggal tidak ada dalam kalender.' });
+    }
+    const todayWITA = getTodayWITA();
+    if (dateVal > todayWITA) {
+      return res.status(400).json({ error: 'Tanggal order tidak boleh lebih dari hari ini.' });
+    }
+  }
   if ((!items || !Array.isArray(items) || items.length === 0) && !req.body.is_import) {
     return res.status(400).json({ error: 'Invoice harus memiliki minimal satu item produk.' });
   }
@@ -2188,7 +2214,8 @@ app.post('/api/invoices', authenticateToken, authorizeRoles('admin', 'kasir'), a
     const taxAmount = ppnEnabled ? Math.round((subtotal - diskon) * (pajakDefault / 100)) : 0;
     const finalTotal = subtotal - diskon + taxAmount;
 
-    const date = req.body.date ? req.body.date.split('T')[0] : new Date().toISOString().split('T')[0];
+    const todayWITA = getTodayWITA();
+    const date = req.body.date ? req.body.date.split('T')[0] : todayWITA;
 
     // Determine status based on payment type:
     // Tunai / Transfer = instant settlement (Lunas), Kredit X Hari = Belum Lunas / Sebagian
@@ -2201,11 +2228,30 @@ app.post('/api/invoices', authenticateToken, authorizeRoles('admin', 'kasir'), a
 
     // Generate invoice ID using atomic per-year counter
     // Use date from request body so year/month match the invoice date (not server clock)
-    const invoiceDateForId = req.body.date ? req.body.date.split('T')[0] : new Date().toISOString().split('T')[0];
+    const invoiceDateForId = req.body.date ? req.body.date.split('T')[0] : todayWITA;
     const id = await generateInvoiceId(client, invoiceDateForId);
     
     console.log(`[Invoice Creation API] Saving invoice ${id} with payment_type_id: "${payment_type_id}"`);
-    await client.query(insertInvoiceQuery, [id, date, customer_id, subtotal, diskon, taxAmount, finalTotal, effectivePaid, payment_type_id, due_date, paidDate, status, userId]);
+    // Ensure due_date is calculated if Kredit and due_date not passed
+    let finalDueDate = due_date || null;
+    if (!finalDueDate && !instant) {
+      const ptRes = await client.query('SELECT name FROM payment_types WHERE id = ?', [payment_type_id]);
+      const ptName = ptRes.rows[0]?.name || '';
+      const match = ptName.match(/(kredit|credit)\s+(\d+)\s+hari/i);
+      if (match && match[2]) {
+        const days = parseInt(match[2], 10);
+        const parts = date.split('-');
+        if (parts.length === 3) {
+          const dt = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10) + days);
+          const ry = dt.getFullYear();
+          const rm = String(dt.getMonth() + 1).padStart(2, '0');
+          const rd = String(dt.getDate()).padStart(2, '0');
+          finalDueDate = `${ry}-${rm}-${rd}`;
+        }
+      }
+    }
+
+    await client.query(insertInvoiceQuery, [id, date, customer_id, subtotal, diskon, taxAmount, finalTotal, effectivePaid, payment_type_id, finalDueDate, paidDate, status, userId]);
 
     // Reduce stock & insert items with HPP snapshot
     if (items && Array.isArray(items)) {

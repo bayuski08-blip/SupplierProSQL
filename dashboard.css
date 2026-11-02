@@ -2065,6 +2065,47 @@ textarea.form-input {
 }
 .invoice-items-table td {
     font-weight: normal;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.invoice-compact-header-wrap {
+    margin-bottom: 0.35rem;
+    color: #000;
+}
+.invoice-compact-strip {
+    font-size: var(--invoice-header-font-size, 9pt);
+    font-weight: bold;
+    line-height: 1.2;
+    color: #000;
+    border-bottom: 1px solid #000;
+    padding-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.invoice-continuation-note {
+    font-size: 8pt;
+    font-style: italic;
+    color: #000;
+    margin-top: 2px;
+}
+.invoice-bersambung {
+    text-align: right;
+    font-size: 8pt;
+    font-style: italic;
+    margin-top: 2px;
+    margin-bottom: 2px;
+    color: #000;
+}
+.invoice-page-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 8pt;
+    margin-top: 0.25rem;
+    color: #000;
 }
 
 .invoice-bottom {

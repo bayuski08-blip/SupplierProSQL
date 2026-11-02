@@ -22,27 +22,46 @@
             --invoice-table-pad-x: 6px;
         }
 
-        /* Screen: center the invoice card */
+        /* Screen: center the invoice cards */
         body {
             background: #f3f4f6;
             margin: 0;
-            padding: 1rem 0;
+            padding: 1.5rem 0;
             display: flex;
-            justify-content: center;
+            flex-direction: column;
+            align-items: center;
             min-height: 100vh;
             box-sizing: border-box;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
+
         #print-invoice-view {
             display: block !important;
             position: relative !important;
             inset: auto !important;
-            min-height: auto !important;
             width: 24.13cm;
             max-width: 24.13cm;
-            padding: 2rem;
+            box-sizing: border-box;
+        }
+
+        .actions-bar {
+            display: flex;
+            justify-content: flex-end;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            width: 100%;
+        }
+
+        /* Each printed page container */
+        .invoice-page {
+            background: white;
+            width: 24.13cm;
+            max-width: 24.13cm;
+            padding: 1.5rem 2rem;
             box-sizing: border-box;
             box-shadow: 0 4px 24px rgba(0,0,0,0.12);
-            align-self: flex-start;
+            margin-bottom: 2rem;
+            position: relative;
         }
 
         /* Header info text styles */
@@ -56,12 +75,35 @@
             line-height: var(--invoice-header-line-height);
         }
 
+        /* Compact header strip on continuation pages */
+        .invoice-compact-header-wrap {
+            margin-bottom: 0.35rem;
+            color: #000;
+        }
+        .invoice-compact-strip {
+            font-size: var(--invoice-header-font-size);
+            font-weight: bold;
+            line-height: 1.2;
+            color: #000;
+            border-bottom: 1px solid #000;
+            padding-bottom: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .invoice-continuation-note {
+            font-size: 8pt;
+            font-style: italic;
+            color: #000;
+            margin-top: 2px;
+        }
+
         /* Product items table */
         .invoice-items-table {
             table-layout: fixed;
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.35rem;
             font-size: var(--invoice-table-font-size);
             line-height: var(--invoice-table-line-height);
             color: #000;
@@ -89,9 +131,22 @@
         }
         .invoice-items-table td {
             font-weight: normal;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
-        /* Footer (signatures + totals) */
+        /* Continuation indicator */
+        .invoice-bersambung {
+            text-align: right;
+            font-size: 8pt;
+            font-style: italic;
+            margin-top: 2px;
+            margin-bottom: 2px;
+            color: #000;
+        }
+
+        /* Bottom (signatures + totals) */
         .invoice-bottom {
             break-inside: avoid;
             page-break-inside: avoid;
@@ -102,28 +157,36 @@
             page-break-inside: avoid;
         }
 
-        /* Print: clean page, no chrome from dashboard.css @media print */
+        /* Page footer */
+        .invoice-page-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 8pt;
+            margin-top: 0.25rem;
+            color: #000;
+        }
+
+        /* Print: clean page for continuous form dot matrix (Epson LQ-590) */
         @media print {
-            /* ─── Calibration variables — adjust here if content still clips ─── */
             :root {
-                --print-content-width: 19.5cm;  /* LQ-590 printable area ~20.3cm; leave safety margin */
-                --print-offset-left: 0cm;       /* shift right if left edge clips */
+                --print-content-width: 19.5cm;  /* LQ-590 printable area ~20.3cm; safety margin */
+                --print-offset-left: 0cm;
             }
             html, body {
-                background: white;
-                width: auto;
-                height: auto;
-                margin: 0;
-                padding: 0;
-                display: block;
-                overflow: visible;
+                background: white !important;
+                width: auto !important;
+                height: auto !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                display: block !important;
+                overflow: visible !important;
             }
             /* Cancel dashboard.css overrides that hide everything */
             body > *:not(.dashboard-wrapper),
             .sidebar, .topbar, .sidebar-overlay, .modal-overlay, .page-section, .page-toolbar {
                 display: revert !important;
             }
-            /* Wrapper: constrained to printer printable width */
             #print-invoice-view {
                 display: block !important;
                 position: static !important;
@@ -139,13 +202,26 @@
                 box-shadow: none !important;
                 box-sizing: border-box !important;
             }
-            /* Inner container: full width of wrapper */
-            #print-invoice-view > div {
-                max-width: 100% !important;
+            .invoice-page {
+                display: block !important;
+                background: white !important;
+                box-shadow: none !important;
                 width: 100% !important;
+                max-width: var(--print-content-width) !important;
+                margin: 0 !important;
+                padding: 0 !important;
                 height: auto !important;
+                min-height: 0 !important;
+                page-break-after: always !important;
+                break-after: page !important;
+                box-sizing: border-box !important;
+                overflow: visible !important;
             }
-            /* Items table: fixed layout with % widths, repeat thead, no row splitting */
+            .invoice-page.is-last-page,
+            .invoice-page:last-child {
+                page-break-after: auto !important;
+                break-after: auto !important;
+            }
             .invoice-items-table {
                 table-layout: fixed;
                 width: 100% !important;
@@ -157,7 +233,6 @@
                 break-inside: avoid !important;
                 page-break-inside: avoid !important;
             }
-            /* Footer (signatures + totals): stay together, never split */
             .invoice-bottom {
                 break-inside: avoid !important;
                 page-break-inside: avoid !important;
@@ -174,124 +249,16 @@
     </style>
 </head>
 <body>
-    <div id="print-invoice-view" class="invoice-container" style="background: white; width: 100%; padding: 2rem; box-sizing: border-box;">
-        <div style="max-width: 100%; margin: 0 auto; background: white; height: 100%;">
-            <!-- Actions (Not printed) -->
-            <div class="no-print" style="display: flex; justify-content: flex-end; gap: 1rem; margin-bottom: 2rem;">
-                <button class="btn-toolbar secondary" onclick="closePrintTab()">Tutup</button>
-                <button class="btn-toolbar primary" onclick="window.print()"><i data-lucide="printer"></i> Cetak / Print</button>
-            </div>
+    <div id="print-invoice-view">
+        <!-- Actions (Not printed) -->
+        <div class="no-print actions-bar">
+            <button class="btn-toolbar secondary" onclick="closePrintTab()">Tutup</button>
+            <button class="btn-toolbar primary" onclick="window.print()"><i data-lucide="printer"></i> Cetak / Print</button>
+        </div>
 
-            <!-- Invoice Header -->
-            <div style="display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 0.5rem;">
-                <!-- Kiri: Logo -->
-                <div style="flex: 0 0 15%; text-align: center;">
-                    <img id="print-company-logo" src="" style="max-height: 100px; max-width: 100%; display: none; margin: 0 auto;">
-                </div>
-                <!-- Tengah: Vinz Media & Alamat -->
-                <div class="invoice-header-info" style="flex: 0 0 45%;">
-                    <h2 id="print-company-name" style="margin: 0 0 0.35rem 0; font-size: 2.6rem; color: #000; font-weight: bold; line-height: 1.1; word-break: break-word;"></h2>
-                    <table style="border: none; border-collapse: collapse; margin-bottom: 0;">
-                        <tr>
-                            <td style="font-weight: bold; padding: 0.1rem 0.5rem 0.1rem 0; white-space: nowrap; vertical-align: top;">Alamat</td>
-                            <td style="vertical-align: top; padding: 0.1rem 0;">: <span id="print-company-address"></span></td>
-                        </tr>
-                        <tr>
-                            <td style="font-weight: bold; padding: 0.1rem 0.5rem 0.1rem 0; white-space: nowrap;">Email</td>
-                            <td style="padding: 0.1rem 0;">: <span id="print-company-email"></span></td>
-                        </tr>
-                        <tr>
-                            <td style="font-weight: bold; padding: 0.1rem 0.5rem 0.1rem 0; white-space: nowrap;">Tlp</td>
-                            <td style="padding: 0.1rem 0;">: <span id="print-company-phone"></span></td>
-                        </tr>
-                    </table>
-                </div>
-                <!-- Kanan: Customer -->
-                <div class="invoice-header-info" style="flex: 0 0 40%; padding-top: 0.5rem;">
-                    <table style="border: none; width: 100%; border-collapse: collapse;">
-                        <tr>
-                            <td style="font-weight: bold; padding: 0.15rem 0; width: 110px;">Nama Customer</td>
-                            <td style="padding: 0.15rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;" id="print-customer-name"></span></td>
-                        </tr>
-                        <tr>
-                            <td style="font-weight: bold; padding: 0.15rem 0;">Alamat Customer</td>
-                            <td style="padding: 0.15rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;" id="print-customer-address"></span></td>
-                        </tr>
-                        <tr>
-                            <td style="font-weight: bold; padding: 0.15rem 0;">Tanggal</td>
-                            <td style="padding: 0.15rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;" id="print-invoice-date"></span></td>
-                        </tr>
-                        <tr>
-                            <td style="font-weight: bold; padding: 0.15rem 0;">No. Invoice</td>
-                            <td style="padding: 0.15rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;" id="print-invoice-id"></span></td>
-                        </tr>
-                        <tr id="print-row-due-date">
-                            <td style="font-weight: bold; padding: 0.15rem 0;">Jatuh Tempo</td>
-                            <td style="padding: 0.15rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;" id="print-invoice-due-date"></span></td>
-                        </tr>
-                        <tr>
-                            <td style="font-weight: bold; padding: 0.15rem 0;">Payment</td>
-                            <td style="padding: 0.15rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;" id="print-invoice-payment-type"></span></td>
-                        </tr>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Items Table -->
-            <!-- table-layout: fixed + % widths set in <style> @media print for LQ-590 compatibility -->
-            <!-- No. 5% | Produk 36% | Satuan 12% | Qty 8% | Harga 19% | Total 20% -->
-            <table class="invoice-items-table">
-                <thead>
-                    <tr>
-                        <th style="text-align: center; width: 5%;">No.</th>
-                        <th style="text-align: left; width: 36%;">Produk</th>
-                        <th style="text-align: center; width: 12%;">Satuan</th>
-                        <th style="text-align: center; width: 8%;">Qty</th>
-                        <th style="text-align: right; width: 19%;">Harga</th>
-                        <th style="text-align: right; width: 20%;">Total</th>
-                    </tr>
-                </thead>
-                <tbody id="print-invoice-items">
-                    <!-- JS fills this -->
-                </tbody>
-            </table>
-
-            <!-- Footer area -->
-            <div class="invoice-bottom" style="display: flex; justify-content: space-between; align-items: flex-start; color: #000;">
-                <!-- Signatures -->
-                <div class="invoice-signatures" style="display: flex; gap: 2rem; margin-top: 0.5rem; font-size: 0.875rem;">
-                    <div style="text-align: center;">
-                        <div style="margin-bottom: 3rem;">Regards,</div>
-                        <div>(__________________)</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="margin-bottom: 3rem;">Driver,</div>
-                        <div>(__________________)</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="margin-bottom: 3rem;">Customer,</div>
-                        <div>(__________________)</div>
-                    </div>
-                </div>
-
-                <!-- Totals: min-width to accommodate large numbers; flex-shrink:0 to not get squeezed -->
-                <div class="invoice-totals" style="min-width: 210px; max-width: 230px; flex-shrink: 0; font-size: 0.875rem;">
-                    <table style="width: 100%; border-collapse: collapse; border: none;">
-                        <tr>
-                            <td style="padding: 0.25rem 0; font-weight: bold;">SUB TOTAL</td>
-                            <td style="text-align: right; padding-left: 0.5rem; white-space: nowrap;" id="print-invoice-subtotal"></td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 0.25rem 0; font-weight: bold;">TAX</td>
-                            <td style="text-align: right; padding-left: 0.5rem; white-space: nowrap;" id="print-invoice-tax"></td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 0.5rem 0; font-weight: bold; font-size: 1rem; border-top: 2px solid #000;">GRAND TOTAL</td>
-                            <td style="text-align: right; font-weight: bold; font-size: 1rem; border-top: 2px solid #000; padding-left: 0.5rem; white-space: nowrap;" id="print-invoice-grand-total"></td>
-                        </tr>
-                    </table>
-                </div>
-            </div>
+        <!-- Rendered invoice pages (1 or multiple pages) -->
+        <div id="print-pages-container">
+            <div style="text-align: center; padding: 3rem; color: #6b7280;">Memuat invoice...</div>
         </div>
     </div>
 

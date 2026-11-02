@@ -4063,7 +4063,7 @@ async function openEditInvoiceModal(id) {
 
     document.getElementById('edit-invoice-id').value = inv.id;
     document.getElementById('edit-invoice-number-display').value = inv.id;
-    document.getElementById('edit-invoice-date').value = inv.date || '';
+    document.getElementById('edit-invoice-date').value = inv.date ? String(inv.date).split('T')[0].split(' ')[0] : '';
     document.getElementById('edit-invoice-customer-display').value = inv.customer || '';
 
     const statusEl = document.getElementById('edit-invoice-status');

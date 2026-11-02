@@ -52,123 +52,340 @@ function closePrintTab() {
     }, 300);
 }
 
-// Main Logic
-document.addEventListener('DOMContentLoaded', async () => {
-    // Check Auth
-    const token = localStorage.getItem('token');
-    if (!token) {
-        window.location.href = 'index.html';
-        return;
+// Timezone-safe date formatting to DD/MM/YYYY (never instantiate Date object)
+function formatDate(ds) {
+    if (!ds) return '-';
+    const clean = String(ds).split('T')[0].split(' ')[0];
+    const p = clean.split('-');
+    if (p.length < 3) return ds;
+    return `${p[2]}/${p[1]}/${p[0]}`;
+}
+
+/**
+ * Deterministic pagination algorithm for Epson LQ-590 continuous form (24.13 x 13.97 cm).
+ * Distributes items across pages respecting height capacities:
+ * - C_SINGLE: max items if invoice fits entirely on 1 page (includes full header, totals & signatures)
+ * - C_P1: max items on Page 1 of multi-page (full header + items + "Bersambung", no totals/signatures)
+ * - C_MID: max items on intermediate page (compact header + items + "Bersambung")
+ * - C_LAST: max items on last page (compact header + items + totals & signatures)
+ * Guarantees every page, especially the last page, has at least 1 item alongside totals.
+ */
+function paginateItems(items, config = {}) {
+    const C_SINGLE = config.C_SINGLE || 9;
+    const C_P1 = config.C_P1 || 12;
+    const C_MID = config.C_MID || 16;
+    const C_LAST = config.C_LAST || 12;
+
+    const totalItems = items.length;
+    if (totalItems === 0) return [[]];
+    if (totalItems <= C_SINGLE) return [items];
+
+    let K;
+    if (totalItems <= C_P1 + C_LAST) {
+        K = 2;
+    } else {
+        K = 2 + Math.ceil((totalItems - C_P1 - C_LAST) / C_MID);
     }
 
-    if (typeof lucide !== 'undefined') lucide.createIcons();
+    const pages = [];
+    let itemIndex = 0;
 
-    // Get ID from query string
-    const urlParams = new URLSearchParams(window.location.search);
-    const invoiceId = urlParams.get('id');
+    for (let p = 1; p <= K; p++) {
+        if (p === K) {
+            pages.push(items.slice(itemIndex));
+            break;
+        }
 
-    if (!invoiceId) {
-        showToast('ID Invoice tidak ditemukan', 'error');
-        return;
+        const maxCap = (p === 1) ? C_P1 : C_MID;
+        const remainingPagesAfterThis = K - p;
+        const minNeededForLater = remainingPagesAfterThis * 1;
+        const maxCapacityLater = (remainingPagesAfterThis - 1) * C_MID + C_LAST;
+        const remainingItemsNow = totalItems - itemIndex;
+
+        const minToTake = Math.max(1, remainingItemsNow - maxCapacityLater);
+        const maxToTake = Math.min(maxCap, remainingItemsNow - minNeededForLater);
+        const take = Math.max(minToTake, maxToTake);
+
+        pages.push(items.slice(itemIndex, itemIndex + take));
+        itemIndex += take;
     }
 
-    try {
-        const res = await fetch(`/api/invoices/${encodeURIComponent(invoiceId)}/print-data`, { headers: getAuthHeaders() });
-        if (!res.ok) {
-            if (res.status === 401 || res.status === 403) {
-                window.location.href = 'index.html';
-                return;
-            }
-            throw new Error('Failed to load print data');
-        }
-        const data = await res.json();
-        
-        // PPN status: prefer field from print-data API (same source as tax calculation),
-        // fall back to /api/settings for backward compatibility.
-        // Logic: show TAX row only when ppn_enabled is true in current settings.
-        // Backend already recalculates tax = 0 when PPN is off, so the two stay in sync.
-        let ppnEnabled = (data.invoice.ppn_enabled === true || data.invoice.ppn_enabled === 'true');
-        // If backend does not yet include ppn_enabled, fall back to /api/settings
-        if (data.invoice.ppn_enabled === undefined) {
-            try {
-                const settingsRes = await fetch('/api/settings', { headers: getAuthHeaders() });
-                if (settingsRes.ok) {
-                    const settingsData = await settingsRes.json();
-                    ppnEnabled = settingsData.ppn_enabled !== 'false' && settingsData.ppn_enabled !== false;
-                }
-            } catch(e) {}
-        }
+    return pages;
+}
 
-        // Populate Company
-        const comp = data.company;
-        document.getElementById('print-company-name').textContent = comp.name || 'Nama Bisnis';
-        document.getElementById('print-company-address').textContent = comp.address || '-';
-        document.getElementById('print-company-email').textContent = comp.email || '-';
-        document.getElementById('print-company-phone').textContent = comp.phone || '-';
+// Render paginated invoice into the container
+function renderInvoice(data, ppnEnabled) {
+    const comp = data.company || {};
+    const customer = data.customer || {};
+    const inv = data.invoice || {};
+    const items = data.items || [];
 
-        if (comp.logo) {
-            document.getElementById('print-company-logo').src = comp.logo;
-            document.getElementById('print-company-logo').style.display = 'block';
+    const storeName = comp.name || 'Nama Bisnis';
+    const customerName = customer.name || 'Pelanggan Umum';
+    const invoiceId = inv.id || '-';
+    const invoiceDateStr = formatDate(inv.date);
+    const invoiceDueDateStr = formatDate(inv.due_date);
+    const paymentTypeName = inv.payment_type_name || 'Tunai';
+    const isTempo = paymentTypeName.toLowerCase().includes('tempo');
+
+    const pages = paginateItems(items, {
+        C_SINGLE: 9,
+        C_P1: 12,
+        C_MID: 16,
+        C_LAST: 12
+    });
+
+    const totalPages = pages.length;
+    const isSinglePage = (totalPages === 1);
+
+    const container = document.getElementById('print-pages-container');
+    if (!container) return;
+
+    let globalItemNo = 1;
+    let htmlOutput = '';
+
+    pages.forEach((pageItems, pageIdx) => {
+        const pageNum = pageIdx + 1;
+        const isFirstPage = (pageNum === 1);
+        const isLastPage = (pageNum === totalPages);
+
+        // 1. Header
+        let headerHtml = '';
+        if (isFirstPage) {
+            // Full header
+            const logoHtml = comp.logo
+                ? `<img src="${comp.logo}" style="max-height: 80px; max-width: 100%; display: block; margin: 0 auto;">`
+                : '';
+
+            const dueDateRowHtml = isTempo ? `
+                <tr id="print-row-due-date">
+                    <td style="font-weight: bold; padding: 0.12rem 0;">Jatuh Tempo</td>
+                    <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${invoiceDueDateStr}</span></td>
+                </tr>` : '';
+
+            headerHtml = `
+            <div style="display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 0.4rem;">
+                <!-- Kiri: Logo -->
+                <div style="flex: 0 0 15%; text-align: center;">
+                    ${logoHtml}
+                </div>
+                <!-- Tengah: Toko & Alamat -->
+                <div class="invoice-header-info" style="flex: 0 0 45%;">
+                    <h2 style="margin: 0 0 0.25rem 0; font-size: 2.6rem; color: #000; font-weight: bold; line-height: 1.1; word-break: break-word;">${storeName}</h2>
+                    <table style="border: none; border-collapse: collapse; margin-bottom: 0;">
+                        <tr>
+                            <td style="font-weight: bold; padding: 0.1rem 0.5rem 0.1rem 0; white-space: nowrap; vertical-align: top;">Alamat</td>
+                            <td style="vertical-align: top; padding: 0.1rem 0;">: <span>${comp.address || '-'}</span></td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: bold; padding: 0.1rem 0.5rem 0.1rem 0; white-space: nowrap;">Email</td>
+                            <td style="padding: 0.1rem 0;">: <span>${comp.email || '-'}</span></td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: bold; padding: 0.1rem 0.5rem 0.1rem 0; white-space: nowrap;">Tlp</td>
+                            <td style="padding: 0.1rem 0;">: <span>${comp.phone || '-'}</span></td>
+                        </tr>
+                    </table>
+                </div>
+                <!-- Kanan: Customer & Info Invoice -->
+                <div class="invoice-header-info" style="flex: 0 0 40%; padding-top: 0.25rem;">
+                    <table style="border: none; width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="font-weight: bold; padding: 0.12rem 0; width: 110px;">Nama Customer</td>
+                            <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${customerName}</span></td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: bold; padding: 0.12rem 0;">Alamat Customer</td>
+                            <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${customer.address || '-'}</span></td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: bold; padding: 0.12rem 0;">Tanggal</td>
+                            <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${invoiceDateStr}</span></td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: bold; padding: 0.12rem 0;">No. Invoice</td>
+                            <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${invoiceId}</span></td>
+                        </tr>
+                        ${dueDateRowHtml}
+                        <tr>
+                            <td style="font-weight: bold; padding: 0.12rem 0;">Payment</td>
+                            <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${paymentTypeName}</span></td>
+                        </tr>
+                    </table>
+                </div>
+            </div>`;
         } else {
-            document.getElementById('print-company-logo').style.display = 'none';
+            // Continuation pages: compact header strip + continuation line
+            headerHtml = `
+            <div class="invoice-compact-header-wrap">
+                <div class="invoice-compact-strip">
+                    ${storeName} | ${invoiceId} | ${customerName} | ${invoiceDateStr}
+                </div>
+                <div class="invoice-continuation-note">
+                    Lanjutan ${invoiceId} (dari halaman sebelumnya)
+                </div>
+            </div>`;
         }
 
-        // Populate Customer
-        document.getElementById('print-customer-name').textContent = data.customer.name;
-        document.getElementById('print-customer-address').textContent = data.customer.address || '-';
-
-        // Populate Invoice
-        const inv = data.invoice;
-        document.getElementById('print-invoice-id').textContent = inv.id;
-        // Format dates to DD/MM/YYYY
-        const formatDate = (ds) => {
-            if (!ds) return '-';
-            const p = ds.split('-');
-            if (p.length < 3) return ds;
-            return `${p[2]}/${p[1]}/${p[0]}`;
-        };
-        document.getElementById('print-invoice-date').textContent = formatDate(inv.date);
-
-        const trDueDate = document.getElementById('print-row-due-date');
-        if (inv.payment_type_name && inv.payment_type_name.toLowerCase().includes('tempo')) {
-            document.getElementById('print-invoice-due-date').textContent = formatDate(inv.due_date);
-            trDueDate.style.display = 'table-row';
-        } else {
-            trDueDate.style.display = 'none';
-        }
-
-        document.getElementById('print-invoice-payment-type').textContent = inv.payment_type_name;
-
-        // Items
-        const tbody = document.getElementById('print-invoice-items');
-        tbody.innerHTML = data.items.map((it, idx) => `
+        // 2. Table rows
+        const rowsHtml = pageItems.map(it => {
+            const rowNo = globalItemNo++;
+            return `
             <tr>
-                <td style="text-align: center;">${idx + 1}</td>
-                <td style="text-align: left;">${it.product_name}</td>
-                <td style="text-align: center;">${it.unit_name}</td>
+                <td style="text-align: center;">${rowNo}</td>
+                <td style="text-align: left;">${it.product_name || '-'}</td>
+                <td style="text-align: center;">${it.unit_name || '-'}</td>
                 <td style="text-align: center;">${it.quantity}</td>
                 <td style="text-align: right;">${rp(it.price).replace('Rp', '').trim()}</td>
                 <td style="text-align: right;">${rp(it.total).replace('Rp', '').trim()}</td>
-            </tr>
-        `).join('');
+            </tr>`;
+        }).join('');
 
-        // Totals
-        const subtotal = inv.subtotal; // Use real subtotal from API
-        document.getElementById('print-invoice-subtotal').textContent = rp(subtotal).replace('Rp', '').trim();
-        document.getElementById('print-invoice-grand-total').textContent = rp(inv.total).replace('Rp', '').trim();
-
-        // TAX row: remove from DOM when PPN is disabled so no empty row or zero is shown.
-        // The separator line (border-top on GRAND TOTAL row) remains, keeping the totals block tidy.
-        const taxRow = document.getElementById('print-invoice-tax').closest('tr');
-        if (ppnEnabled) {
-            document.getElementById('print-invoice-tax').textContent = rp(inv.tax).replace('Rp', '').trim();
-            if (taxRow) taxRow.style.display = '';  // ensure visible (default)
-        } else {
-            if (taxRow) taxRow.remove();  // fully remove from DOM — not just hidden
+        // 3. "Bersambung" notice (only on pages that are not last)
+        let bersambungHtml = '';
+        if (!isLastPage) {
+            bersambungHtml = `
+            <div class="invoice-bersambung">
+                Bersambung ke halaman berikutnya &rarr;
+            </div>`;
         }
 
-    } catch (err) {
-        console.error(err);
-        showToast('Gagal menyiapkan print data', 'error');
-    }
-});
+        // 4. Bottom block (signatures + totals ONLY on last page)
+        let bottomHtml = '';
+        if (isLastPage) {
+            const taxRowHtml = ppnEnabled ? `
+                <tr>
+                    <td style="padding: 0.15rem 0; font-weight: bold;">TAX</td>
+                    <td style="text-align: right; padding-left: 0.5rem; white-space: nowrap;">${rp(inv.tax).replace('Rp', '').trim()}</td>
+                </tr>` : '';
+
+            bottomHtml = `
+            <div class="invoice-bottom" style="display: flex; justify-content: space-between; align-items: flex-start; color: #000; margin-top: 0.35rem;">
+                <!-- Signatures -->
+                <div class="invoice-signatures" style="display: flex; gap: 2rem; font-size: 0.875rem;">
+                    <div style="text-align: center;">
+                        <div style="margin-bottom: 2.5rem;">Regards,</div>
+                        <div>(__________________)</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="margin-bottom: 2.5rem;">Driver,</div>
+                        <div>(__________________)</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="margin-bottom: 2.5rem;">Customer,</div>
+                        <div>(__________________)</div>
+                    </div>
+                </div>
+
+                <!-- Totals -->
+                <div class="invoice-totals" style="min-width: 210px; max-width: 230px; flex-shrink: 0; font-size: 0.875rem;">
+                    <table style="width: 100%; border-collapse: collapse; border: none;">
+                        <tr>
+                            <td style="padding: 0.15rem 0; font-weight: bold;">SUB TOTAL</td>
+                            <td style="text-align: right; padding-left: 0.5rem; white-space: nowrap;">${rp(inv.subtotal).replace('Rp', '').trim()}</td>
+                        </tr>
+                        ${taxRowHtml}
+                        <tr>
+                            <td style="padding: 0.35rem 0; font-weight: bold; font-size: 1rem; border-top: 2px solid #000;">GRAND TOTAL</td>
+                            <td style="text-align: right; font-weight: bold; font-size: 1rem; border-top: 2px solid #000; padding-left: 0.5rem; white-space: nowrap;">${rp(inv.total).replace('Rp', '').trim()}</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>`;
+        }
+
+        // 5. Footer
+        const footerRight = isSinglePage ? '' : `Hal. ${pageNum} dari ${totalPages}`;
+        const footerHtml = `
+        <div class="invoice-page-footer">
+            <div>${invoiceId}</div>
+            <div>${footerRight}</div>
+        </div>`;
+
+        // Assemble page
+        htmlOutput += `
+        <div class="invoice-page ${isLastPage ? 'is-last-page' : ''}">
+            ${headerHtml}
+            <table class="invoice-items-table">
+                <thead>
+                    <tr>
+                        <th style="text-align: center; width: 5%;">No.</th>
+                        <th style="text-align: left; width: 36%;">Produk</th>
+                        <th style="text-align: center; width: 12%;">Satuan</th>
+                        <th style="text-align: center; width: 8%;">Qty</th>
+                        <th style="text-align: right; width: 19%;">Harga</th>
+                        <th style="text-align: right; width: 20%;">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rowsHtml}
+                </tbody>
+            </table>
+            ${bersambungHtml}
+            ${bottomHtml}
+            ${footerHtml}
+        </div>`;
+    });
+
+    container.innerHTML = htmlOutput;
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+// Main Logic
+if (typeof document !== 'undefined') {
+    document.addEventListener('DOMContentLoaded', async () => {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = 'index.html';
+            return;
+        }
+
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const invoiceId = urlParams.get('id');
+
+        if (!invoiceId) {
+            showToast('ID Invoice tidak ditemukan', 'error');
+            return;
+        }
+
+        try {
+            const res = await fetch(`/api/invoices/${encodeURIComponent(invoiceId)}/print-data`, { headers: getAuthHeaders() });
+            if (!res.ok) {
+                if (res.status === 401 || res.status === 403) {
+                    window.location.href = 'index.html';
+                    return;
+                }
+                throw new Error('Failed to load print data');
+            }
+            const data = await res.json();
+
+            // PPN status
+            let ppnEnabled = (data.invoice.ppn_enabled === true || data.invoice.ppn_enabled === 'true');
+            if (data.invoice.ppn_enabled === undefined) {
+                try {
+                    const settingsRes = await fetch('/api/settings', { headers: getAuthHeaders() });
+                    if (settingsRes.ok) {
+                        const settingsData = await settingsRes.json();
+                        ppnEnabled = settingsData.ppn_enabled !== 'false' && settingsData.ppn_enabled !== false;
+                    }
+                } catch(e) {}
+            }
+
+            renderInvoice(data, ppnEnabled);
+        } catch (err) {
+            console.error(err);
+            showToast('Gagal menyiapkan print data', 'error');
+            const container = document.getElementById('print-pages-container');
+            if (container) {
+                container.innerHTML = '<div style="text-align: center; padding: 3rem; color: #ef4444;">Gagal memuat invoice. Silakan coba lagi.</div>';
+            }
+        }
+    });
+}
+
+// Export functions for unit testing in node
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { rp, formatDate, paginateItems, renderInvoice };
+}

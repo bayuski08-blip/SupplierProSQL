@@ -114,19 +114,22 @@ function paginateItems(items, config = {}) {
 }
 
 // Render paginated invoice into the container
-function renderInvoice(data, ppnEnabled) {
+function renderInvoice(data, ppnEnabled, isProforma = false) {
     const comp = data.company || {};
     const customer = data.customer || {};
-    const inv = data.invoice || {};
+    const inv = isProforma ? (data.proforma || {}) : (data.invoice || {});
     const items = data.items || [];
 
     const storeName = comp.name || 'Nama Bisnis';
     const customerName = customer.name || 'Pelanggan Umum';
-    const invoiceId = inv.id || '-';
-    const invoiceDateStr = formatDate(inv.date);
+    const invoiceId = isProforma ? (inv.proforma_no || '-') : (inv.id || '-');
+    const revisiSuffix = (isProforma && inv.revisi && Number(inv.revisi) > 0) ? ` (Rev. ${inv.revisi})` : '';
+    const invoiceIdDisplay = `${invoiceId}${revisiSuffix}`;
+    const invoiceDateStr = formatDate(isProforma ? inv.order_date : inv.date);
     const invoiceDueDateStr = formatDate(inv.due_date);
+    const berlakuHinggaStr = formatDate(inv.berlaku_hingga);
     const paymentTypeName = inv.payment_type_name || 'Tunai';
-    const isTempo = paymentTypeName.toLowerCase().includes('tempo');
+    const isTempo = !isProforma && paymentTypeName.toLowerCase().includes('tempo');
 
     const pages = paginateItems(items, {
         C_SINGLE: 9,
@@ -163,6 +166,23 @@ function renderInvoice(data, ppnEnabled) {
                     <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${invoiceDueDateStr}</span></td>
                 </tr>` : '';
 
+            const berlakuRowHtml = (isProforma && inv.sumber !== 'dari_invoice') ? `
+                <tr>
+                    <td style="font-weight: bold; padding: 0.12rem 0;">Berlaku Hingga</td>
+                    <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${berlakuHinggaStr}</span></td>
+                </tr>` : '';
+
+            const refInvoiceRowHtml = (isProforma && inv.invoice_id) ? `
+                <tr>
+                    <td style="font-weight: bold; padding: 0.12rem 0;">Ref. Invoice</td>
+                    <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${inv.invoice_id}</span></td>
+                </tr>` : '';
+
+            const proformaBadge = isProforma ? `
+                <div style="text-align:center; margin-bottom: 4px;">
+                    <span style="text-align:center; font-size:13pt; font-weight:bold; letter-spacing:1px; color:#000; border:2px solid #000; display:inline-block; padding:1px 10px; margin-bottom:4px;">PROFORMA INVOICE</span>
+                </div>` : '';
+
             headerHtml = `
             <div style="display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 0.4rem;">
                 <!-- Kiri: Logo -->
@@ -171,6 +191,7 @@ function renderInvoice(data, ppnEnabled) {
                 </div>
                 <!-- Tengah: Toko & Alamat -->
                 <div class="invoice-header-info" style="flex: 0 0 45%;">
+                    ${proformaBadge}
                     <h2 style="margin: 0 0 0.25rem 0; font-size: 2.6rem; color: #000; font-weight: bold; line-height: 1.1; word-break: break-word;">${storeName}</h2>
                     <table style="border: none; border-collapse: collapse; margin-bottom: 0;">
                         <tr>
@@ -191,7 +212,7 @@ function renderInvoice(data, ppnEnabled) {
                 <div class="invoice-header-info" style="flex: 0 0 40%; padding-top: 0.25rem;">
                     <table style="border: none; width: 100%; border-collapse: collapse;">
                         <tr>
-                            <td style="font-weight: bold; padding: 0.12rem 0; width: 110px;">Nama Customer</td>
+                            <td style="font-weight: bold; padding: 0.12rem 0; width: ${isProforma ? '130px' : '110px'};">Nama Customer</td>
                             <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${customerName}</span></td>
                         </tr>
                         <tr>
@@ -203,12 +224,14 @@ function renderInvoice(data, ppnEnabled) {
                             <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${invoiceDateStr}</span></td>
                         </tr>
                         <tr>
-                            <td style="font-weight: bold; padding: 0.12rem 0;">No. Invoice</td>
-                            <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${invoiceId}</span></td>
+                            <td style="font-weight: bold; padding: 0.12rem 0;">${isProforma ? 'No. Proforma' : 'No. Invoice'}</td>
+                            <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${invoiceIdDisplay}</span></td>
                         </tr>
+                        ${refInvoiceRowHtml}
                         ${dueDateRowHtml}
+                        ${berlakuRowHtml}
                         <tr>
-                            <td style="font-weight: bold; padding: 0.12rem 0;">Payment</td>
+                            <td style="font-weight: bold; padding: 0.12rem 0;">${isProforma ? 'Syarat Pembayaran' : 'Payment'}</td>
                             <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${paymentTypeName}</span></td>
                         </tr>
                     </table>
@@ -219,7 +242,7 @@ function renderInvoice(data, ppnEnabled) {
             headerHtml = `
             <div class="invoice-compact-header-wrap">
                 <div class="invoice-compact-strip">
-                    ${storeName} | ${invoiceId} | ${customerName} | ${invoiceDateStr}
+                    ${isProforma ? 'PROFORMA | ' : ''}${storeName} | ${invoiceId} | ${customerName} | ${invoiceDateStr}
                 </div>
                 <div class="invoice-continuation-note">
                     Lanjutan ${invoiceId} (dari halaman sebelumnya)
@@ -255,13 +278,22 @@ function renderInvoice(data, ppnEnabled) {
         if (isLastPage) {
             const taxRowHtml = ppnEnabled ? `
                 <tr>
-                    <td style="padding: 0.15rem 0; font-weight: bold;">TAX</td>
-                    <td style="text-align: right; padding-left: 0.5rem; white-space: nowrap;">${rp(inv.tax).replace('Rp', '').trim()}</td>
+                    <td style="padding: 0.15rem 0; font-weight: bold;">TAX ${isProforma && inv.ppn_rate ? `(${inv.ppn_rate}%)` : ''}</td>
+                    <td style="text-align: right; padding-left: 0.5rem; white-space: nowrap;">${rp(inv.tax || inv.ppn_amount).replace('Rp', '').trim()}</td>
                 </tr>` : '';
 
-            bottomHtml = `
-            <div class="invoice-bottom" style="display: flex; justify-content: space-between; align-items: flex-start; color: #000; margin-top: 0.35rem;">
-                <!-- Signatures -->
+            const signaturesHtml = isProforma ? `
+                <div class="invoice-signatures" style="display: flex; gap: 2rem; font-size: 0.875rem;">
+                    <div style="text-align: center;">
+                        <div style="margin-bottom: 2.5rem;">Hormat kami,</div>
+                        <div>(__________________)</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="margin-bottom: 2.5rem;">Customer,</div>
+                        <div>(__________________)</div>
+                    </div>
+                </div>
+            ` : `
                 <div class="invoice-signatures" style="display: flex; gap: 2rem; font-size: 0.875rem;">
                     <div style="text-align: center;">
                         <div style="margin-bottom: 2.5rem;">Regards,</div>
@@ -276,6 +308,18 @@ function renderInvoice(data, ppnEnabled) {
                         <div>(__________________)</div>
                     </div>
                 </div>
+            `;
+
+            const footerNoteHtml = isProforma ? `
+                <div style="font-size: 7.5pt; font-style: italic; color: #444; text-align: center; margin-top: 0.4rem; border-top: 1px dashed #aaa; padding-top: 3px;">
+                    Dokumen ini bukan bukti penagihan atau pembayaran.
+                </div>
+            ` : '';
+
+            bottomHtml = `
+            <div class="invoice-bottom" style="display: flex; justify-content: space-between; align-items: flex-start; color: #000; margin-top: 0.35rem;">
+                <!-- Signatures -->
+                ${signaturesHtml}
 
                 <!-- Totals -->
                 <div class="invoice-totals" style="min-width: 210px; max-width: 230px; flex-shrink: 0; font-size: 0.875rem;">
@@ -284,6 +328,7 @@ function renderInvoice(data, ppnEnabled) {
                             <td style="padding: 0.15rem 0; font-weight: bold;">SUB TOTAL</td>
                             <td style="text-align: right; padding-left: 0.5rem; white-space: nowrap;">${rp(inv.subtotal).replace('Rp', '').trim()}</td>
                         </tr>
+                        ${inv.discount > 0 ? `<tr><td style="padding:0.15rem 0;font-weight:bold;">DISKON</td><td style="text-align:right;padding-left:0.5rem;white-space:nowrap;">(${rp(inv.discount).replace('Rp','').trim()})</td></tr>` : ''}
                         ${taxRowHtml}
                         <tr>
                             <td style="padding: 0.35rem 0; font-weight: bold; font-size: 1rem; border-top: 2px solid #000;">GRAND TOTAL</td>
@@ -291,7 +336,8 @@ function renderInvoice(data, ppnEnabled) {
                         </tr>
                     </table>
                 </div>
-            </div>`;
+            </div>
+            ${footerNoteHtml}`;
         }
 
         // 5. Footer
@@ -343,27 +389,44 @@ if (typeof document !== 'undefined') {
         if (typeof lucide !== 'undefined') lucide.createIcons();
 
         const urlParams = new URLSearchParams(window.location.search);
-        const invoiceId = urlParams.get('id');
+        const isProforma = urlParams.get('type') === 'proforma' || urlParams.has('pk');
+        const entityId = isProforma ? (urlParams.get('pk') || urlParams.get('id')) : urlParams.get('id');
 
-        if (!invoiceId) {
-            showToast('ID Invoice tidak ditemukan', 'error');
+        if (!entityId) {
+            showToast(isProforma ? 'PK Proforma tidak ditemukan' : 'ID Invoice tidak ditemukan', 'error');
             return;
         }
 
         try {
-            const res = await fetch(`/api/invoices/${encodeURIComponent(invoiceId)}/print-data`, { headers: getAuthHeaders() });
+            const endpoint = isProforma
+                ? `/api/proformas/${encodeURIComponent(entityId)}/print-data`
+                : `/api/invoices/${encodeURIComponent(entityId)}/print-data`;
+            const res = await fetch(endpoint, { headers: getAuthHeaders() });
             if (!res.ok) {
                 if (res.status === 401 || res.status === 403) {
                     window.location.href = 'index.html';
                     return;
                 }
-                throw new Error('Failed to load print data');
+                let errDetail = `Status ${res.status}`;
+                try {
+                    const errJson = await res.json();
+                    if (errJson.error) errDetail = errJson.error;
+                } catch(_) {}
+                throw new Error(errDetail);
             }
             const data = await res.json();
 
+            if (isProforma) {
+                document.title = `Proforma ${data.proforma?.proforma_no || ''} - SupplierPro`;
+            } else {
+                document.title = `Invoice ${data.invoice?.id || ''} - SupplierPro`;
+            }
+
             // PPN status
-            let ppnEnabled = (data.invoice.ppn_enabled === true || data.invoice.ppn_enabled === 'true');
-            if (data.invoice.ppn_enabled === undefined) {
+            let ppnEnabled = isProforma
+                ? (data.proforma.ppn_enabled === true || data.proforma.ppn_enabled === 'true' || data.proforma.ppn_enabled === 1)
+                : (data.invoice.ppn_enabled === true || data.invoice.ppn_enabled === 'true');
+            if (!isProforma && data.invoice.ppn_enabled === undefined) {
                 try {
                     const settingsRes = await fetch('/api/settings', { headers: getAuthHeaders() });
                     if (settingsRes.ok) {
@@ -373,13 +436,14 @@ if (typeof document !== 'undefined') {
                 } catch(e) {}
             }
 
-            renderInvoice(data, ppnEnabled);
+            renderInvoice(data, ppnEnabled, isProforma);
         } catch (err) {
-            console.error(err);
-            showToast('Gagal menyiapkan print data', 'error');
+            console.error('[Print Data] Error:', err);
+            const docName = isProforma ? 'proforma' : 'invoice';
+            showToast(`Gagal memuat ${docName}: ${err.message}`, 'error');
             const container = document.getElementById('print-pages-container');
             if (container) {
-                container.innerHTML = '<div style="text-align: center; padding: 3rem; color: #ef4444;">Gagal memuat invoice. Silakan coba lagi.</div>';
+                container.innerHTML = `<div style="text-align: center; padding: 3rem; color: #ef4444;">Gagal memuat ${docName}: ${err.message}. Silakan coba lagi.</div>`;
             }
         }
     });

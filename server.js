@@ -29,6 +29,50 @@ const getTodayWITA = () => {
   }
 };
 
+/**
+ * Hitung tanggal maksimum order = hari ini (WITA) + maxDays hari.
+ * Masalah 2: izin maksimal +7 hari ke depan.
+ */
+const getMaxOrderDateWITA = (maxDays = 7) => {
+  try {
+    const today = getTodayWITA(); // 'YYYY-MM-DD'
+    const [y, m, d] = today.split('-').map(Number);
+    const dt = new Date(y, m - 1, d + maxDays);
+    return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+  } catch (e) {
+    const d = new Date(Date.now() + 8 * 3600 * 1000 + maxDays * 86400 * 1000);
+    return d.toISOString().split('T')[0];
+  }
+};
+
+/**
+ * Validasi tanggal order: format YYYY-MM-DD, tanggal harus ada di kalender,
+ * dan tidak boleh melebihi hari ini + maxDays (default 7).
+ * Tanggal lampau (tanpa batas) tetap diizinkan.
+ * Melempar Error jika tidak valid.
+ */
+const validateOrderDate = (dateStr, maxDays = 7) => {
+  const s = String(dateStr || '').split('T')[0].trim();
+  if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    throw Object.assign(new Error('Format tanggal tidak valid. Gunakan format YYYY-MM-DD.'), { status: 400 });
+  }
+  const [y, m, d] = s.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== (m - 1) || dt.getDate() !== d) {
+    throw Object.assign(new Error('Tanggal tidak ada dalam kalender.'), { status: 400 });
+  }
+  const maxDate = getMaxOrderDateWITA(maxDays);
+  if (s > maxDate) {
+    // Format maxDate sebagai dd/mm/yyyy untuk pesan ke user
+    const [my, mm, md] = maxDate.split('-');
+    throw Object.assign(
+      new Error(`Tanggal Order maksimal 7 hari ke depan (sampai ${md}/${mm}/${my}).`),
+      { status: 400 }
+    );
+  }
+  return s; // tanggal valid, kembalikan string bersih
+};
+
 const formatDateStr = (val) => {
   if (!val) return '';
   if (typeof val === 'string') return val.split('T')[0].split(' ')[0];
@@ -2016,7 +2060,24 @@ app.get('/api/invoices', authenticateToken, authorizeRoles('admin', 'kasir', 'fi
         LEFT JOIN customers c ON si.customer_id = c.id
         LEFT JOIN payment_types pt ON si.payment_type_id = pt.id
         ${whereClause}
-        ORDER BY si.date DESC, si.id DESC
+        ORDER BY
+          CASE
+            WHEN si.id REGEXP '^INV[-/][0-9]{4}' THEN 3
+            WHEN si.id REGEXP '^PIUTANG-[0-9]+' THEN 2
+            WHEN si.id REGEXP '^[0-9]+$' THEN 1
+            ELSE 0
+          END DESC,
+          CASE
+            WHEN si.id REGEXP '^INV[-/][0-9]{4}' THEN CAST(SUBSTRING(si.id, 5, 4) AS UNSIGNED)
+            ELSE 0
+          END DESC,
+          CASE
+            WHEN si.id REGEXP '^INV[-/][0-9]{4}' THEN CAST(SUBSTRING_INDEX(si.id, '-', -1) AS UNSIGNED)
+            WHEN si.id REGEXP '^PIUTANG-[0-9]+' THEN CAST(SUBSTRING_INDEX(si.id, '-', -1) AS UNSIGNED)
+            WHEN si.id REGEXP '^[0-9]+$' THEN CAST(si.id AS UNSIGNED)
+            ELSE 0
+          END DESC,
+          si.id DESC
         LIMIT ? OFFSET ?
       `;
       const result = await pool.query(dataSql, [...params, limitNum, offset]);
@@ -2038,7 +2099,24 @@ app.get('/api/invoices', authenticateToken, authorizeRoles('admin', 'kasir', 'fi
       LEFT JOIN customers c ON si.customer_id = c.id
       LEFT JOIN payment_types pt ON si.payment_type_id = pt.id
       ${whereClause}
-      ORDER BY si.date DESC, si.id DESC
+      ORDER BY
+        CASE
+          WHEN si.id REGEXP '^INV[-/][0-9]{4}' THEN 3
+          WHEN si.id REGEXP '^PIUTANG-[0-9]+' THEN 2
+          WHEN si.id REGEXP '^[0-9]+$' THEN 1
+          ELSE 0
+        END DESC,
+        CASE
+          WHEN si.id REGEXP '^INV[-/][0-9]{4}' THEN CAST(SUBSTRING(si.id, 5, 4) AS UNSIGNED)
+          ELSE 0
+        END DESC,
+        CASE
+          WHEN si.id REGEXP '^INV[-/][0-9]{4}' THEN CAST(SUBSTRING_INDEX(si.id, '-', -1) AS UNSIGNED)
+          WHEN si.id REGEXP '^PIUTANG-[0-9]+' THEN CAST(SUBSTRING_INDEX(si.id, '-', -1) AS UNSIGNED)
+          WHEN si.id REGEXP '^[0-9]+$' THEN CAST(si.id AS UNSIGNED)
+          ELSE 0
+        END DESC,
+        si.id DESC
     `, params);
     res.json(result.rows.map(mapInvoiceRow));
   } catch (err) {
@@ -2165,20 +2243,12 @@ app.post('/api/invoices', authenticateToken, authorizeRoles('admin', 'kasir'), a
   if (!customer_id) return res.status(400).json({ error: 'customer_id wajib diisi' });
   if (!payment_type_id) return res.status(400).json({ error: 'payment_type_id wajib diisi. Pilih metode pembayaran yang valid.' });
 
-  // Validate tanggal order if provided
+  // Validate tanggal order if provided (Masalah 2: max +7 hari ke depan)
   if (req.body.date) {
-    const dateVal = req.body.date.split('T')[0];
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateVal)) {
-      return res.status(400).json({ error: 'Format tanggal tidak valid. Gunakan format YYYY-MM-DD.' });
-    }
-    const [y, m, d] = dateVal.split('-').map(Number);
-    const dt = new Date(y, m - 1, d);
-    if (dt.getFullYear() !== y || dt.getMonth() !== (m - 1) || dt.getDate() !== d) {
-      return res.status(400).json({ error: 'Format tanggal tidak valid. Tanggal tidak ada dalam kalender.' });
-    }
-    const todayWITA = getTodayWITA();
-    if (dateVal > todayWITA) {
-      return res.status(400).json({ error: 'Tanggal order tidak boleh lebih dari hari ini.' });
+    try {
+      validateOrderDate(req.body.date, 7);
+    } catch (e) {
+      return res.status(e.status || 400).json({ error: e.message });
     }
   }
   if ((!items || !Array.isArray(items) || items.length === 0) && !req.body.is_import) {
@@ -4345,7 +4415,15 @@ app.get('/api/purchases', authenticateToken, authorizeRoles('admin', 'gudang', '
         LEFT JOIN vendors v ON po.vendor_id = v.id
         LEFT JOIN payment_types pt ON po.payment_type_id = pt.id
         ${whereClause}
-        ORDER BY po.date DESC, po.id DESC
+        ORDER BY
+          CASE WHEN po.id REGEXP '^PO-[0-9]{4}' THEN 1 ELSE 0 END DESC,
+          CASE WHEN po.id REGEXP '^PO-[0-9]{4}' THEN CAST(SUBSTRING(po.id, 4, 4) AS UNSIGNED) ELSE 0 END DESC,
+          CASE WHEN po.id REGEXP '^PO-[0-9]{4}-[0-9]{2}' THEN CAST(SUBSTRING(po.id, 9, 2) AS UNSIGNED) ELSE 0 END DESC,
+          CASE WHEN po.id REGEXP '^PO-' THEN CAST(SUBSTRING_INDEX(po.id, '-', -1) AS UNSIGNED)
+               WHEN po.id REGEXP '^[0-9]+$' THEN CAST(po.id AS UNSIGNED)
+               ELSE 0
+          END DESC,
+          po.id DESC
         LIMIT ? OFFSET ?
       `;
       const result = await pool.query(dataSql, [...params, limitNum, offset]);
@@ -4367,7 +4445,15 @@ app.get('/api/purchases', authenticateToken, authorizeRoles('admin', 'gudang', '
       LEFT JOIN vendors v ON po.vendor_id = v.id
       LEFT JOIN payment_types pt ON po.payment_type_id = pt.id
       ${whereClause}
-      ORDER BY po.date DESC, po.id DESC
+      ORDER BY
+        CASE WHEN po.id REGEXP '^PO-[0-9]{4}' THEN 1 ELSE 0 END DESC,
+        CASE WHEN po.id REGEXP '^PO-[0-9]{4}' THEN CAST(SUBSTRING(po.id, 4, 4) AS UNSIGNED) ELSE 0 END DESC,
+        CASE WHEN po.id REGEXP '^PO-[0-9]{4}-[0-9]{2}' THEN CAST(SUBSTRING(po.id, 9, 2) AS UNSIGNED) ELSE 0 END DESC,
+        CASE WHEN po.id REGEXP '^PO-' THEN CAST(SUBSTRING_INDEX(po.id, '-', -1) AS UNSIGNED)
+             WHEN po.id REGEXP '^[0-9]+$' THEN CAST(po.id AS UNSIGNED)
+             ELSE 0
+        END DESC,
+        po.id DESC
     `, params);
     res.json(result.rows.map(mapPurchaseRow));
   } catch (err) {
@@ -4606,6 +4692,15 @@ app.put('/api/invoices/:id', authenticateToken, authorizeRoles('admin', 'kasir')
   const { customer_id, customerId, date, paid, paid_amount, payment_type_id, due_date, items, discount, diskon } = req.body;
   const custId = customer_id || customerId;
   const pType = payment_type_id || 'PT-1';
+
+  // Masalah 2: Validasi batas tanggal order maksimal +7 hari ke depan pada Edit Invoice
+  if (date) {
+    try {
+      validateOrderDate(date, 7);
+    } catch (e) {
+      return res.status(e.status || 400).json({ error: e.message });
+    }
+  }
 
   const client = await pool.connect();
   try {
@@ -5357,6 +5452,1039 @@ app.use((err, req, res, next) => {
   }
   next(err);
 });
+
+// ─── PROFORMA INVOICE MODULE ──────────────────────────────────────────────────
+
+/**
+ * Auto-migrate: create proforma tables if not exist
+ * Uses the same idempotent pattern as invoice_counters migration above.
+ */
+(async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS proforma_counters (
+        year INT NOT NULL PRIMARY KEY,
+        last_number INT NOT NULL DEFAULT 0
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS proformas (
+        pk INT AUTO_INCREMENT PRIMARY KEY,
+        proforma_no VARCHAR(20) NOT NULL UNIQUE,
+        customer_id VARCHAR(255),
+        order_date DATE NOT NULL,
+        berlaku_hingga DATE NOT NULL,
+        payment_type_id VARCHAR(255),
+        subtotal DECIMAL(20,4) DEFAULT 0,
+        discount DECIMAL(20,4) DEFAULT 0,
+        ppn_rate DECIMAL(5,2) DEFAULT 0,
+        ppn_amount DECIMAL(20,4) DEFAULT 0,
+        ppn_enabled TINYINT(1) DEFAULT 0,
+        total DECIMAL(20,4) DEFAULT 0,
+        status VARCHAR(20) NOT NULL DEFAULT 'aktif',
+        alasan_pembatalan TEXT DEFAULT NULL,
+        user_id INT,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        invoice_id VARCHAR(255) DEFAULT NULL,
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+        FOREIGN KEY (payment_type_id) REFERENCES payment_types(id) ON DELETE SET NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+        FOREIGN KEY (invoice_id) REFERENCES sales_invoices(id) ON DELETE SET NULL,
+        INDEX idx_proforma_customer (customer_id),
+        INDEX idx_proforma_status (status),
+        INDEX idx_proforma_order_date (order_date),
+        INDEX idx_proforma_berlaku (berlaku_hingga)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS proforma_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        proforma_pk INT NOT NULL,
+        product_id VARCHAR(255),
+        product_name_snapshot VARCHAR(255) NOT NULL,
+        unit_name_snapshot VARCHAR(50) DEFAULT '-',
+        quantity DECIMAL(20,4) NOT NULL,
+        price DECIMAL(20,4) NOT NULL,
+        subtotal_item DECIMAL(20,4) NOT NULL,
+        customer_fee DECIMAL(20,4) DEFAULT 0,
+        fee_notes TEXT DEFAULT NULL,
+        cost_price_snapshot DECIMAL(20,4) DEFAULT 0,
+        FOREIGN KEY (proforma_pk) REFERENCES proformas(pk) ON DELETE CASCADE,
+        FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,
+        INDEX idx_proforma_items_pk (proforma_pk)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+    `);
+    // Ensure default setting for masa berlaku
+    await pool.query(`INSERT IGNORE INTO settings (\`key\`, value) VALUES ('proforma_berlaku_hari', '7')`);
+
+    // Ensure Item 3 & Item 4 columns exist (idempotent ALTER)
+    try {
+      const colRes = await pool.query("SHOW COLUMNS FROM proformas LIKE 'revisi'");
+      if (colRes.rows.length === 0) {
+        await pool.query("ALTER TABLE proformas ADD COLUMN revisi INT NOT NULL DEFAULT 0 AFTER status");
+      }
+      const diubahPadaRes = await pool.query("SHOW COLUMNS FROM proformas LIKE 'diubah_pada'");
+      if (diubahPadaRes.rows.length === 0) {
+        await pool.query("ALTER TABLE proformas ADD COLUMN diubah_pada DATETIME NULL AFTER revisi");
+      }
+      const diubahOlehRes = await pool.query("SHOW COLUMNS FROM proformas LIKE 'diubah_oleh'");
+      if (diubahOlehRes.rows.length === 0) {
+        await pool.query("ALTER TABLE proformas ADD COLUMN diubah_oleh INT NULL AFTER diubah_pada, ADD CONSTRAINT fk_proforma_diubah_oleh FOREIGN KEY (diubah_oleh) REFERENCES users(id) ON DELETE SET NULL");
+      }
+      const sumberRes = await pool.query("SHOW COLUMNS FROM proformas LIKE 'sumber'");
+      if (sumberRes.rows.length === 0) {
+        await pool.query("ALTER TABLE proformas ADD COLUMN sumber ENUM('manual','dari_invoice') NOT NULL DEFAULT 'manual' AFTER diubah_oleh");
+      }
+      const ukIdx = await pool.query("SHOW INDEX FROM proformas WHERE Key_name = 'uk_proforma_invoice_id'");
+      if (ukIdx.rows.length === 0) {
+        await pool.query("ALTER TABLE proformas ADD UNIQUE KEY uk_proforma_invoice_id (invoice_id)");
+      }
+    } catch (e) {
+      console.warn('[Startup] Proforma column migration check:', e.message);
+    }
+
+    console.log('[Startup] Proforma tables ready.');
+  } catch (err) {
+    console.error('[Startup] Failed to create proforma tables:', err.message);
+  }
+})();
+
+/**
+ * Generates the next proforma number using an atomic per-year counter.
+ * Format: PF-{YYYY}-{NNNNN} (year from order_date, resets yearly)
+ * Thread-safe via LAST_INSERT_ID() trick (same as generateInvoiceId).
+ */
+async function generateProformaNo(pgClient, orderDate) {
+  // Use the order_date year for the number (consistent with invoice behavior, resets yearly)
+  const year = orderDate
+    ? parseInt(String(orderDate).split('-')[0], 10)
+    : new Date().getFullYear();
+
+  await pgClient.query(
+    `INSERT INTO proforma_counters (year, last_number) VALUES (?, LAST_INSERT_ID(1))
+     ON DUPLICATE KEY UPDATE last_number = LAST_INSERT_ID(last_number + 1)`,
+    [year]
+  );
+
+  const result = await pgClient.query('SELECT LAST_INSERT_ID() AS next_number');
+  const nextNum = Number(result.rows[0].next_number);
+  const padded = String(nextNum).padStart(5, '0');
+  return `PF-${year}-${padded}`;
+}
+
+// ─── Shared calculation helper (same logic as POST /api/invoices) ──────────
+async function calcProformaAmounts(pgClient, items, discount) {
+  const settingsRes = await pgClient.query(
+    `SELECT \`key\`, value FROM settings WHERE \`key\` IN ('ppn_enabled', 'pajak_default')`
+  );
+  const settingsMap = {};
+  settingsRes.rows.forEach(r => { settingsMap[r.key] = r.value; });
+
+  const ppnEnabled = settingsMap['ppn_enabled'] === 'true' || settingsMap['ppn_enabled'] === '1';
+  const ppnRate = parseFloat(settingsMap['pajak_default'] || 11);
+  const diskon = parseFloat(discount || 0);
+
+  let subtotal = 0;
+  items.forEach(item => {
+    subtotal += parseFloat(item.price || 0) * parseFloat(item.quantity || item.qty || 0);
+  });
+
+  const ppnAmount = ppnEnabled ? Math.round((subtotal - diskon) * (ppnRate / 100)) : 0;
+  const total = subtotal - diskon + ppnAmount;
+
+  return { subtotal, diskon, ppnEnabled, ppnRate, ppnAmount, total };
+}
+
+// POST /api/proformas — Buat proforma baru
+app.post('/api/proformas', authenticateToken, authorizeRoles('admin', 'kasir'), async (req, res) => {
+  const { customer_id, order_date, payment_type_id, items, discount } = req.body;
+
+  if (!customer_id) return res.status(400).json({ error: 'customer_id wajib diisi' });
+  if (!payment_type_id) return res.status(400).json({ error: 'payment_type_id wajib diisi' });
+  if (!items || !Array.isArray(items) || items.length === 0)
+    return res.status(400).json({ error: 'Proforma harus memiliki minimal satu item.' });
+
+  // Validate order_date (Masalah 2: max +7 hari ke depan)
+  const todayWITA = getTodayWITA();
+  let orderDateStr;
+  try {
+    orderDateStr = order_date ? validateOrderDate(order_date, 7) : todayWITA;
+  } catch (e) {
+    return res.status(e.status || 400).json({ error: e.message });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Calculate amounts using shared logic
+    const { subtotal, diskon, ppnEnabled, ppnRate, ppnAmount, total } =
+      await calcProformaAmounts(client, items, discount);
+
+    // Masa berlaku default from settings
+    const berlakuHari = parseInt(await getSetting('proforma_berlaku_hari', '7'), 10);
+    // Calculate berlaku_hingga from order_date (not today) — string arithmetic is safe for dates
+    const [oy, om, od] = orderDateStr.split('-').map(Number);
+    const berlakuDt = new Date(oy, om - 1, od + berlakuHari);
+    const berlakuStr = `${berlakuDt.getFullYear()}-${String(berlakuDt.getMonth()+1).padStart(2,'0')}-${String(berlakuDt.getDate()).padStart(2,'0')}`;
+
+    const proformaNo = await generateProformaNo(client, orderDateStr);
+    const userId = req.user.id;
+
+    await client.query(
+      `INSERT INTO proformas (proforma_no, customer_id, order_date, berlaku_hingga, payment_type_id,
+        subtotal, discount, ppn_rate, ppn_amount, ppn_enabled, total, status, user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'aktif', ?)`,
+      [proformaNo, customer_id, orderDateStr, berlakuStr, payment_type_id,
+       subtotal, diskon, ppnRate, ppnAmount, ppnEnabled ? 1 : 0, total, userId]
+    );
+
+    // Get the inserted pk
+    const pkRes = await client.query('SELECT LAST_INSERT_ID() AS pk');
+    const proformaPk = Number(pkRes.rows[0].pk);
+
+    // Insert items — snapshot product name and unit
+    for (const item of items) {
+      const prodId = item.id || item.product_id;
+      const qty = parseFloat(item.quantity || item.qty || 0);
+      const price = parseFloat(item.price || 0);
+      const subtotalItem = qty * price;
+
+      // Fetch product snapshot data
+      const prodRes = await client.query(
+        `SELECT p.name, pu.name AS unit_name, p.cost_price
+         FROM products p LEFT JOIN product_units pu ON p.unit_id = pu.id
+         WHERE p.id = ?`,
+        [prodId]
+      );
+      const prodRow = prodRes.rows[0] || {};
+      const prodNameSnap = prodRow.name || item.name || 'Produk';
+      const unitNameSnap = prodRow.unit_name || '-';
+      const costSnap = parseFloat(prodRow.cost_price || 0);
+
+      // Fee: only admin can set fee
+      const itemFee = req.user.role === 'admin' ? (parseFloat(item.customer_fee) || 0) : 0;
+      const itemFeeNotes = req.user.role === 'admin' ? (item.fee_notes || null) : null;
+
+      await client.query(
+        `INSERT INTO proforma_items (proforma_pk, product_id, product_name_snapshot, unit_name_snapshot,
+          quantity, price, subtotal_item, customer_fee, fee_notes, cost_price_snapshot)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [proformaPk, prodId, prodNameSnap, unitNameSnap, qty, price, subtotalItem, itemFee, itemFeeNotes, costSnap]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, proformaNo, proformaPk });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[Proforma Create] Error:', err.message);
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/proformas — Daftar proforma dengan filter dan pagination
+app.get('/api/proformas', authenticateToken, authorizeRoles('admin', 'kasir'), async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page || 1));
+    const limit = Math.min(80, Math.max(1, parseInt(req.query.limit || 30)));
+    const offset = (page - 1) * limit;
+    const status = req.query.status || 'all';
+    const search = req.query.search || '';
+    const sumber = req.query.sumber || 'all';
+
+    let whereClause = '';
+    const params = [];
+
+    const conditions = [];
+    if (status !== 'all') {
+      conditions.push('p.status = ?');
+      params.push(status);
+    }
+    if (sumber !== 'all') {
+      conditions.push('p.sumber = ?');
+      params.push(sumber);
+    }
+    if (search) {
+      conditions.push('(p.proforma_no LIKE ? OR c.name LIKE ?)');
+      params.push(`%${search}%`, `%${search}%`);
+    }
+    if (conditions.length) whereClause = 'WHERE ' + conditions.join(' AND ');
+
+    const todayStr = getTodayWITA();
+
+    const countRes = await pool.query(
+      `SELECT COUNT(*) AS total FROM proformas p
+       LEFT JOIN customers c ON p.customer_id = c.id
+       ${whereClause}`,
+      params
+    );
+    const totalRows = Number(countRes.rows[0].total);
+
+    const rows = await pool.query(
+      `SELECT p.pk, p.proforma_no, p.order_date, p.berlaku_hingga, p.status,
+              p.subtotal, p.discount, p.ppn_amount, p.total,
+              p.payment_type_id, p.invoice_id, p.sumber,
+              c.name AS customer_name,
+              pt.name AS payment_type_name,
+              CASE
+                WHEN p.status = 'aktif' AND p.berlaku_hingga < ? THEN 'kedaluwarsa'
+                ELSE p.status
+              END AS display_status
+       FROM proformas p
+       LEFT JOIN customers c ON p.customer_id = c.id
+       LEFT JOIN payment_types pt ON p.payment_type_id = pt.id
+       ${whereClause}
+       ORDER BY
+         CASE WHEN p.proforma_no REGEXP '^PF-[0-9]{4}' THEN 1 ELSE 0 END DESC,
+         CASE WHEN p.proforma_no REGEXP '^PF-[0-9]{4}' THEN CAST(SUBSTRING(p.proforma_no, 4, 4) AS UNSIGNED) ELSE 0 END DESC,
+         CASE WHEN p.proforma_no REGEXP '^PF-' THEN CAST(SUBSTRING_INDEX(p.proforma_no, '-', -1) AS UNSIGNED) ELSE 0 END DESC,
+         p.pk DESC
+       LIMIT ${limit} OFFSET ${offset}`,
+      [todayStr, ...params]
+    );
+
+    res.json({
+      rows: rows.rows.map(r => ({
+        pk: r.pk,
+        proforma_no: r.proforma_no,
+        order_date: formatDateStr(r.order_date),
+        berlaku_hingga: formatDateStr(r.berlaku_hingga),
+        status: r.status,
+        display_status: r.display_status,
+        subtotal: parseFloat(r.subtotal),
+        discount: parseFloat(r.discount),
+        ppn_amount: parseFloat(r.ppn_amount),
+        total: parseFloat(r.total),
+        payment_type_id: r.payment_type_id,
+        payment_type_name: r.payment_type_name,
+        customer_name: r.customer_name,
+        invoice_id: r.invoice_id,
+        sumber: r.sumber || 'manual'
+      })),
+      total: totalRows,
+      page,
+      limit,
+      totalPages: Math.ceil(totalRows / limit)
+    });
+  } catch (err) {
+    console.error('[GET /api/proformas] Stack trace:', err.stack || err);
+    res.status(500).json({ error: err.message || 'Gagal memuat daftar proforma' });
+  }
+});
+
+// GET /api/proformas/:pk/print-data — Data cetak proforma
+app.get('/api/proformas/:pk/print-data', authenticateToken, async (req, res) => {
+  try {
+    const { pk } = req.params;
+    const todayStr = getTodayWITA();
+
+    const pfRes = await pool.query(
+      `SELECT p.*, c.name AS customer_name, c.address AS customer_address,
+              pt.name AS payment_type_name,
+              CASE
+                WHEN p.status = 'aktif' AND p.berlaku_hingga < ? THEN 'kedaluwarsa'
+                ELSE p.status
+              END AS display_status
+       FROM proformas p
+       LEFT JOIN customers c ON p.customer_id = c.id
+       LEFT JOIN payment_types pt ON p.payment_type_id = pt.id
+       WHERE p.pk = ?`,
+      [todayStr, pk]
+    );
+    if (pfRes.rows.length === 0) return res.status(404).json({ error: 'Proforma tidak ditemukan' });
+
+    const pf = pfRes.rows[0];
+
+    const itemsRes = await pool.query(
+      `SELECT pi.*
+       FROM proforma_items pi
+       WHERE pi.proforma_pk = ?
+       ORDER BY pi.id`,
+      [pk]
+    );
+
+    const settingsRes = await pool.query(
+      `SELECT \`key\`, value FROM settings WHERE \`key\` IN
+       ('company_name','company_phone','company_email','company_address','company_logo','ppn_enabled','pajak_default')`
+    );
+    const company = {};
+    settingsRes.rows.forEach(r => {
+      if (r.key.startsWith('company_')) company[r.key.replace('company_', '')] = r.value;
+    });
+
+    res.json({
+      proforma: {
+        pk: pf.pk,
+        proforma_no: pf.proforma_no,
+        order_date: formatDateStr(pf.order_date),    // tanggal order yg tersimpan, bukan hari cetak
+        berlaku_hingga: formatDateStr(pf.berlaku_hingga),
+        status: pf.status,
+        display_status: pf.display_status,
+        subtotal: parseFloat(pf.subtotal),
+        discount: parseFloat(pf.discount),
+        ppn_rate: parseFloat(pf.ppn_rate),
+        ppn_amount: parseFloat(pf.ppn_amount),
+        ppn_enabled: pf.ppn_enabled === 1 || pf.ppn_enabled === true,
+        total: parseFloat(pf.total),
+        payment_type_name: pf.payment_type_name || 'Tunai',
+        payment_type_id: pf.payment_type_id,
+        customer_id: pf.customer_id,
+        revisi: parseInt(pf.revisi || 0),
+        sumber: pf.sumber || 'manual',
+        invoice_id: pf.invoice_id
+      },
+      customer: {
+        name: pf.customer_name || 'Pelanggan Umum',
+        address: pf.customer_address || ''
+      },
+      // Items: NO fee fields (not exposed regardless of role — fee tidak tampil di cetakan proforma)
+      items: itemsRes.rows.map(item => ({
+        product_name: item.product_name_snapshot,
+        unit_name: item.unit_name_snapshot || '-',
+        quantity: parseFloat(item.quantity),
+        price: parseFloat(item.price),
+        total: parseFloat(item.subtotal_item)
+      })),
+      company
+    });
+  } catch (err) {
+    console.error('[GET /api/proformas/:pk/print-data] Stack trace:', err.stack || err);
+    res.status(500).json({ error: err.message || 'Gagal memuat data cetak proforma' });
+  }
+});
+
+// GET /api/proformas/:pk/items — Item proforma (role-based sanitization: fee stripped for non-admin)
+app.get('/api/proformas/:pk/items', authenticateToken, authorizeRoles('admin', 'kasir'), async (req, res) => {
+  try {
+    const { pk } = req.params;
+    const itemsRes = await pool.query(
+      `SELECT pi.*
+       FROM proforma_items pi
+       WHERE pi.proforma_pk = ?
+       ORDER BY pi.id`,
+      [pk]
+    );
+
+    const rows = itemsRes.rows.map(row => {
+      if (req.user.role !== 'admin') {
+        const { customer_fee, fee_notes, cost_price_snapshot, ...rest } = row;
+        return rest;
+      }
+      return row;
+    });
+
+    res.json(rows);
+  } catch (err) {
+    console.error('[GET /api/proformas/:pk/items] Stack trace:', err.stack || err);
+    res.status(500).json({ error: err.message || 'Gagal memuat item proforma' });
+  }
+});
+
+// PUT /api/proformas/:pk — Edit / Update proforma (Item 3)
+app.put('/api/proformas/:pk', authenticateToken, authorizeRoles('admin', 'kasir'), async (req, res) => {
+  const { pk } = req.params;
+  const { revisi, order_date, berlaku_hingga, payment_type_id, items, discount, ppn_enabled } = req.body;
+  const userId = req.user.id;
+
+  // 1. Validasi input dasar
+  let cleanOrderDate = '';
+  try {
+    cleanOrderDate = validateOrderDate(order_date, 7);
+  } catch (dateErr) {
+    return res.status(dateErr.status || 400).json({ error: dateErr.message });
+  }
+
+  let cleanBerlaku = String(berlaku_hingga || '').split('T')[0].trim();
+  if (!cleanBerlaku || !/^\d{4}-\d{2}-\d{2}$/.test(cleanBerlaku)) {
+    const berlakuHari = parseInt(await getSetting('proforma_berlaku_hari', '7'), 10);
+    const [oy, om, od] = cleanOrderDate.split('-').map(Number);
+    const berlakuDt = new Date(oy, om - 1, od + berlakuHari);
+    cleanBerlaku = `${berlakuDt.getFullYear()}-${String(berlakuDt.getMonth() + 1).padStart(2, '0')}-${String(berlakuDt.getDate()).padStart(2, '0')}`;
+  } else if (cleanBerlaku < cleanOrderDate) {
+    return res.status(400).json({ error: 'Masa berlaku tidak boleh lebih awal dari Tanggal Order.' });
+  }
+
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'Minimal harus ada 1 item produk dalam proforma.' });
+  }
+
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    const q = parseFloat(it.quantity !== undefined ? it.quantity : it.qty);
+    const p = parseFloat(it.price);
+    if (isNaN(q) || q <= 0) {
+      return res.status(400).json({ error: `Jumlah item baris ke-${i + 1} harus lebih dari 0.` });
+    }
+    if (isNaN(p) || p < 0) {
+      return res.status(400).json({ error: `Harga item baris ke-${i + 1} tidak valid.` });
+    }
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 2. Kunci proforma row untuk mencegah tabrakan / perubahan konkruen
+    const pfRes = await client.query('SELECT * FROM proformas WHERE pk = ? FOR UPDATE', [pk]);
+    if (pfRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Proforma tidak ditemukan.' });
+    }
+    const currentPf = pfRes.rows[0];
+
+    // Status check: hanya proforma berstatus 'aktif' yang boleh diedit
+    if (currentPf.status !== 'aktif') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Proforma sudah berstatus '${currentPf.status}' dan tidak bisa diedit.` });
+    }
+
+    // Tabrakan (Optimistic Concurrency Control): cek nilai revisi
+    if (revisi !== undefined && revisi !== null && Number(revisi) !== Number(currentPf.revisi)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Proforma sudah diubah oleh pengguna lain, muat ulang halaman.' });
+    }
+
+    // Pelanggan tidak boleh berubah
+    if (req.body.customer_id && req.body.customer_id !== currentPf.customer_id) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Pelanggan tidak boleh diubah pada proforma ini.' });
+    }
+
+    // 3. Ambil data fee item lama untuk preservasi fee jika diedit oleh non-admin
+    const oldItemsRes = await client.query('SELECT * FROM proforma_items WHERE proforma_pk = ?', [pk]);
+    const oldFeeMap = {};
+    oldItemsRes.rows.forEach(oi => {
+      if (oi.product_id) {
+        oldFeeMap[oi.product_id] = {
+          customer_fee: parseFloat(oi.customer_fee) || 0,
+          fee_notes: oi.fee_notes || null,
+          cost_price_snapshot: parseFloat(oi.cost_price_snapshot) || 0,
+          unit: oi.unit_name_snapshot || '-'
+        };
+      }
+    });
+
+    // 4. Hitung ulang total di SERVER
+    const prodIds = items.map(it => it.id || it.product_id).filter(Boolean);
+    let dbProducts = [];
+    if (prodIds.length > 0) {
+      const placeholders = prodIds.map(() => '?').join(',');
+      const prRes = await client.query(
+        `SELECT p.id, p.name, pu.name AS unit_name, p.cost_price, p.sell_price
+         FROM products p
+         LEFT JOIN product_units pu ON p.unit_id = pu.id
+         WHERE p.id IN (${placeholders})`,
+        prodIds
+      );
+      dbProducts = prRes.rows;
+    }
+    const prodMap = {};
+    dbProducts.forEach(p => { prodMap[p.id] = p; });
+
+    let subtotal = 0;
+    const finalItems = [];
+
+    for (const it of items) {
+      const pid = it.id || it.product_id;
+      const qty = parseFloat(it.quantity !== undefined ? it.quantity : it.qty);
+      const price = parseFloat(it.price);
+      const itemSubtotal = Math.round(qty * price * 100) / 100;
+      subtotal += itemSubtotal;
+
+      const dbP = prodMap[pid] || {};
+      const oldFee = oldFeeMap[pid];
+
+      let custFee = 0;
+      let fNotes = null;
+      let costSnap = parseFloat(dbP.cost_price) || (oldFee ? oldFee.cost_price_snapshot : 0);
+      let prodName = it.product_name_snapshot || it.name || dbP.name || 'Produk';
+      let unitName = it.unit_name_snapshot || it.unit || dbP.unit_name || (oldFee ? oldFee.unit : '-');
+
+      if (req.user.role === 'admin') {
+        custFee = parseFloat(it.customer_fee !== undefined ? it.customer_fee : it.fee) || 0;
+        fNotes = (it.fee_notes !== undefined ? it.fee_notes : it.feeNotes) || null;
+      } else {
+        // Non-admin: jika item sudah ada sebelumnya, pertahankan fee & notes!
+        if (oldFee) {
+          custFee = oldFee.customer_fee;
+          fNotes = oldFee.fee_notes;
+          costSnap = oldFee.cost_price_snapshot;
+        } else {
+          custFee = 0;
+          fNotes = null;
+        }
+      }
+
+      finalItems.push({
+        product_id: pid || null,
+        product_name_snapshot: prodName,
+        unit_name_snapshot: unitName,
+        quantity: qty,
+        price: price,
+        subtotal_item: itemSubtotal,
+        customer_fee: custFee,
+        fee_notes: fNotes,
+        cost_price_snapshot: costSnap
+      });
+    }
+
+    subtotal = Math.round(subtotal * 100) / 100;
+    const discNum = Math.min(subtotal, Math.max(0, parseFloat(discount) || 0));
+    const dpp = Math.max(0, subtotal - discNum);
+    const isPpn = ppn_enabled !== undefined
+      ? (ppn_enabled === true || ppn_enabled === 'true' || ppn_enabled === 1)
+      : (currentPf.ppn_enabled === 1 || currentPf.ppn_enabled === true);
+    const ppnRate = isPpn ? (parseFloat(currentPf.ppn_rate) || 11.00) : 0.00;
+    const ppnAmount = isPpn ? Math.round(dpp * (ppnRate / 100)) : 0;
+    const total = dpp + ppnAmount;
+
+    const paymentTypeId = payment_type_id || currentPf.payment_type_id;
+
+    // 5. Ganti item atomik di dalam transaksi
+    await client.query('DELETE FROM proforma_items WHERE proforma_pk = ?', [pk]);
+
+    for (const fi of finalItems) {
+      await client.query(
+        `INSERT INTO proforma_items (
+          proforma_pk, product_id, product_name_snapshot, unit_name_snapshot,
+          quantity, price, subtotal_item, customer_fee, fee_notes, cost_price_snapshot
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          pk, fi.product_id, fi.product_name_snapshot, fi.unit_name_snapshot,
+          fi.quantity, fi.price, fi.subtotal_item, fi.customer_fee, fi.fee_notes, fi.cost_price_snapshot
+        ]
+      );
+    }
+
+    // 6. Update proforma header
+    const nextRevisi = Number(currentPf.revisi || 0) + 1;
+    await client.query(
+      `UPDATE proformas SET
+        order_date = ?,
+        berlaku_hingga = ?,
+        payment_type_id = ?,
+        subtotal = ?,
+        discount = ?,
+        ppn_rate = ?,
+        ppn_amount = ?,
+        ppn_enabled = ?,
+        total = ?,
+        revisi = ?,
+        diubah_pada = NOW(),
+        diubah_oleh = ?
+       WHERE pk = ?`,
+      [
+        cleanOrderDate,
+        cleanBerlaku,
+        paymentTypeId,
+        subtotal,
+        discNum,
+        ppnRate,
+        ppnAmount,
+        isPpn ? 1 : 0,
+        total,
+        nextRevisi,
+        userId,
+        pk
+      ]
+    );
+
+    await client.query('COMMIT');
+    console.log(`[Proforma Edit] PF ${currentPf.proforma_no} (PK ${pk}) updated to Rev.${nextRevisi} by user ${userId}`);
+
+    res.json({
+      success: true,
+      pk: Number(pk),
+      proforma_no: currentPf.proforma_no,
+      revisi: nextRevisi,
+      nextRevisi: nextRevisi
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[PUT /api/proformas/:pk] Stack trace:', err.stack || err);
+    res.status(500).json({ error: err.message || 'Gagal menyimpan perubahan proforma.' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/proformas/:pk/cancel — Batalkan proforma
+app.put('/api/proformas/:pk/cancel', authenticateToken, authorizeRoles('admin', 'kasir'), async (req, res) => {
+  try {
+    const { pk } = req.params;
+    const { alasan } = req.body;
+
+    const pfRes = await pool.query('SELECT status FROM proformas WHERE pk = ?', [pk]);
+    if (pfRes.rows.length === 0) return res.status(404).json({ error: 'Proforma tidak ditemukan' });
+    const current = pfRes.rows[0].status;
+    if (current !== 'aktif') {
+      return res.status(400).json({ error: `Hanya proforma berstatus 'aktif' yang bisa dibatalkan. Status saat ini: ${current}` });
+    }
+
+    await pool.query(
+      `UPDATE proformas SET status = 'dibatalkan', alasan_pembatalan = ? WHERE pk = ?`,
+      [alasan || null, pk]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/proformas/:pk/extend — Perpanjang masa berlaku
+app.put('/api/proformas/:pk/extend', authenticateToken, authorizeRoles('admin', 'kasir'), async (req, res) => {
+  try {
+    const { pk } = req.params;
+    const { berlaku_hingga } = req.body;
+
+    if (!berlaku_hingga || !/^\d{4}-\d{2}-\d{2}$/.test(berlaku_hingga))
+      return res.status(400).json({ error: 'berlaku_hingga harus format YYYY-MM-DD' });
+
+    const pfRes = await pool.query('SELECT status FROM proformas WHERE pk = ?', [pk]);
+    if (pfRes.rows.length === 0) return res.status(404).json({ error: 'Proforma tidak ditemukan' });
+    if (pfRes.rows[0].status !== 'aktif')
+      return res.status(400).json({ error: 'Hanya proforma aktif yang bisa diperpanjang' });
+
+    await pool.query('UPDATE proformas SET berlaku_hingga = ? WHERE pk = ?', [berlaku_hingga, pk]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/proformas/:pk/convert — Konversi proforma menjadi invoice
+app.post('/api/proformas/:pk/convert', authenticateToken, authorizeRoles('admin', 'kasir'), async (req, res) => {
+  const { pk } = req.params;
+  // order_date for the resulting invoice (user picks in modal, defaults to today)
+  const { order_date: invoiceOrderDate, payment_type_id: overridePaymentTypeId, force_expired } = req.body;
+  const userId = req.user.id;
+  const todayWITA = getTodayWITA();
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Lock the proforma row to prevent concurrent conversion
+    const pfRes = await client.query(
+      `SELECT p.*, c.name AS customer_name, pt.name AS payment_type_name
+       FROM proformas p
+       LEFT JOIN customers c ON p.customer_id = c.id
+       LEFT JOIN payment_types pt ON p.payment_type_id = pt.id
+       WHERE p.pk = ? FOR UPDATE`,
+      [pk]
+    );
+    if (pfRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Proforma tidak ditemukan' });
+    }
+
+    const pf = pfRes.rows[0];
+
+    // Prevent double conversion
+    if (pf.status !== 'aktif') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Proforma berstatus '${pf.status}', tidak bisa dikonversi` });
+    }
+
+    // Check if expired and force not set
+    const berlakuStr = formatDateStr(pf.berlaku_hingga);
+    const isExpired = berlakuStr < todayWITA;
+    if (isExpired && !force_expired) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: 'Proforma sudah kedaluwarsa.',
+        expired: true,
+        berlaku_hingga: berlakuStr
+      });
+    }
+
+    // Fetch items
+    const itemsRes = await client.query(
+      `SELECT * FROM proforma_items WHERE proforma_pk = ? ORDER BY id`,
+      [pk]
+    );
+    const pfItems = itemsRes.rows;
+
+    // --- Stock check ---
+    const stockErrors = [];
+    for (const item of pfItems) {
+      if (!item.product_id) continue;
+      const stockRes = await client.query('SELECT stock, name FROM products WHERE id = ?', [item.product_id]);
+      if (stockRes.rows.length === 0) continue;
+      const available = parseFloat(stockRes.rows[0].stock);
+      const needed = parseFloat(item.quantity);
+      if (available < needed) {
+        stockErrors.push({
+          product_name: item.product_name_snapshot,
+          available,
+          needed
+        });
+      }
+    }
+    if (stockErrors.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: 'Stok tidak mencukupi untuk beberapa produk.',
+        stock_errors: stockErrors
+      });
+    }
+
+    // --- Price change check (warning only, use snapshot) ---
+    const priceWarnings = [];
+    for (const item of pfItems) {
+      if (!item.product_id) continue;
+      const priceRes = await client.query('SELECT sell_price FROM products WHERE id = ?', [item.product_id]);
+      if (priceRes.rows.length === 0) continue;
+      const currentPrice = parseFloat(priceRes.rows[0].sell_price);
+      const snapshotPrice = parseFloat(item.price);
+      if (Math.abs(currentPrice - snapshotPrice) > 0.001) {
+        priceWarnings.push({
+          product_name: item.product_name_snapshot,
+          snapshot_price: snapshotPrice,
+          current_price: currentPrice,
+          diff: currentPrice - snapshotPrice
+        });
+      }
+    }
+
+    // Determine invoice date (Masalah 2: validasi +7 hari)
+    let invoiceDateStr;
+    if (invoiceOrderDate) {
+      try {
+        invoiceDateStr = validateOrderDate(invoiceOrderDate, 7);
+      } catch (e) {
+        await client.query('ROLLBACK');
+        return res.status(e.status || 400).json({ error: e.message });
+      }
+    } else {
+      invoiceDateStr = todayWITA;
+    }
+
+    // Determine payment type (use proforma's unless overridden)
+    const finalPaymentTypeId = overridePaymentTypeId || pf.payment_type_id;
+
+    // --- Build items for invoice creation (use SNAPSHOT prices) ---
+    const invoiceItems = pfItems.map(item => ({
+      id: item.product_id,
+      quantity: parseFloat(item.quantity),
+      price: parseFloat(item.price),        // snapshot price
+      customer_fee: req.user.role === 'admin' ? parseFloat(item.customer_fee || 0) : 0,
+      fee_notes: req.user.role === 'admin' ? (item.fee_notes || null) : null
+    }));
+
+    // --- Reuse exact same calculation as invoice creation ---
+    const settingsRes = await client.query(
+      `SELECT \`key\`, value FROM settings WHERE \`key\` IN ('ppn_enabled', 'pajak_default')`
+    );
+    const settingsMap = {};
+    settingsRes.rows.forEach(r => { settingsMap[r.key] = r.value; });
+    const ppnEnabled = settingsMap['ppn_enabled'] === 'true' || settingsMap['ppn_enabled'] === '1';
+    const pajakDefault = parseFloat(settingsMap['pajak_default'] || 11);
+
+    let subtotal = 0;
+    invoiceItems.forEach(item => { subtotal += item.price * item.quantity; });
+    const diskon = parseFloat(pf.discount || 0);
+    const taxAmount = ppnEnabled ? Math.round((subtotal - diskon) * (pajakDefault / 100)) : 0;
+    const finalTotal = subtotal - diskon + taxAmount;
+
+    const instant = await isInstantPayment(finalPaymentTypeId);
+    const effectivePaid = instant ? finalTotal : 0;
+    const status = instant ? 'Lunas' : 'Belum Lunas';
+    const paidDate = status === 'Lunas' ? invoiceDateStr : null;
+
+    // Calculate due date for credit
+    let finalDueDate = null;
+    if (!instant) {
+      const ptRes = await client.query('SELECT name FROM payment_types WHERE id = ?', [finalPaymentTypeId]);
+      const ptName = ptRes.rows[0]?.name || '';
+      const match = ptName.match(/(kredit|credit)\s+(\d+)\s+hari/i);
+      if (match && match[2]) {
+        const days = parseInt(match[2], 10);
+        const [iy, im, id_] = invoiceDateStr.split('-').map(Number);
+        const dt = new Date(iy, im - 1, id_ + days);
+        finalDueDate = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+      }
+    }
+
+    const invoiceId = await generateInvoiceId(client, invoiceDateStr);
+
+    await client.query(
+      `INSERT INTO sales_invoices (id, date, customer_id, subtotal, discount, tax, total, paid_amount,
+        payment_type_id, due_date, paid_date, status, user_id, is_outstanding_import)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+      [invoiceId, invoiceDateStr, pf.customer_id, subtotal, diskon, taxAmount, finalTotal,
+       effectivePaid, finalPaymentTypeId, finalDueDate, paidDate, status, userId]
+    );
+
+    // Insert invoice items & reduce stock
+    for (const item of invoiceItems) {
+      if (!item.id) continue;
+      await client.query('UPDATE products SET stock = stock - ? WHERE id = ?', [item.quantity, item.id]);
+      const costRes = await client.query('SELECT cost_price FROM products WHERE id = ?', [item.id]);
+      const costSnapshot = parseFloat(costRes.rows[0]?.cost_price || 0);
+      await client.query(
+        `INSERT INTO invoice_items (id, invoice_id, product_id, quantity, price, cost_price_snapshot, customer_fee, fee_notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [Date.now().toString() + Math.floor(Math.random() * 1000), invoiceId, item.id,
+         item.quantity, item.price, costSnapshot, item.customer_fee || 0, item.fee_notes || null]
+      );
+    }
+
+    // Cash transaction for instant payment
+    if (effectivePaid > 0) {
+      const ctPrefix = await getSetting('prefix_cash_transaction', 'CT');
+      const ctId = await generateNextId(client, 'cash_transactions', ctPrefix);
+      const ptNameRes = await client.query('SELECT name FROM payment_types WHERE id = ?', [finalPaymentTypeId]);
+      const method = ptNameRes.rows[0]?.name || 'Transfer Bank';
+      await client.query(
+        `INSERT INTO cash_transactions (id, date, type, category, description, amount, method, invoice_id, payment_type_id, user_id, status)
+         VALUES (?, ?, 'IN', 'Penjualan', ?, ?, ?, ?, ?, ?, 'active')`,
+        [ctId, invoiceDateStr, `Pembayaran Invoice ${invoiceId}`, effectivePaid, method, invoiceId, finalPaymentTypeId, userId]
+      );
+    }
+
+    // Mark proforma as converted
+    await client.query(
+      `UPDATE proformas SET status = 'dikonversi', invoice_id = ? WHERE pk = ?`,
+      [invoiceId, pk]
+    );
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      invoiceId,
+      price_warnings: priceWarnings.length > 0 ? priceWarnings : undefined
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[Proforma Convert] Error:', err.message);
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+
+// POST /api/invoices/:id/proforma — Buat proforma dari invoice (Item 4)
+app.post('/api/invoices/:id/proforma', authenticateToken, authorizeRoles('admin', 'kasir'), async (req, res) => {
+  const { id: invoiceId } = req.params;
+  const userId = req.user.id;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Cek invoice ada dan tidak dibatalkan
+    const invRes = await client.query(
+      `SELECT si.*, c.name AS customer_name, pt.name AS payment_type_name
+       FROM sales_invoices si
+       LEFT JOIN customers c ON si.customer_id = c.id
+       LEFT JOIN payment_types pt ON si.payment_type_id = pt.id
+       WHERE si.id = ?`,
+      [invoiceId]
+    );
+    if (invRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: `Invoice ${invoiceId} tidak ditemukan.` });
+    }
+    const inv = invRes.rows[0];
+    const statusLower = (inv.status || '').toLowerCase();
+    if (statusLower === 'batal' || statusLower === 'cancel') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Invoice ${invoiceId} sudah dibatalkan, tidak bisa dibuatkan proforma.` });
+    }
+
+    // 2. Cek apakah sudah ada proforma dari invoice ini
+    const existRes = await client.query(
+      `SELECT p.pk, p.proforma_no, p.status FROM proformas p WHERE p.invoice_id = ?`,
+      [invoiceId]
+    );
+    if (existRes.rows.length > 0) {
+      const existing = existRes.rows[0];
+      await client.query('ROLLBACK');
+      return res.json({
+        success: true,
+        sudah_ada: true,
+        proforma: { pk: existing.pk, proforma_no: existing.proforma_no, status: existing.status }
+      });
+    }
+
+    // 3. Ambil items dari invoice
+    const itemsRes = await client.query(
+      `SELECT ii.product_id, ii.quantity, ii.price, ii.customer_fee, ii.fee_notes, ii.cost_price_snapshot,
+              COALESCE(p.name, ii.product_id) AS product_name_snapshot,
+              COALESCE(pu.name, '-') AS unit_name_snapshot
+       FROM invoice_items ii
+       LEFT JOIN products p ON ii.product_id = p.id
+       LEFT JOIN product_units pu ON p.unit_id = pu.id
+       WHERE ii.invoice_id = ?`,
+      [invoiceId]
+    );
+    const items = itemsRes.rows;
+    if (items.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Invoice ${invoiceId} tidak memiliki item.` });
+    }
+
+    // 4. Kalkulasi ulang amounts dari invoice (ikuti invoice asli)
+    const subtotal = items.reduce((s, it) => s + parseFloat(it.price) * parseFloat(it.quantity), 0);
+    const diskon = parseFloat(inv.discount || 0);
+    const ppnRate = parseFloat(inv.tax && inv.subtotal ? (inv.tax / (inv.subtotal - diskon) * 100) : 11) || 11;
+    const ppnAmount = parseFloat(inv.tax || 0);
+    const ppnEnabled = ppnAmount > 0 ? 1 : 0;
+    const total = parseFloat(inv.total || (subtotal - diskon + ppnAmount));
+
+    // 5. Nomor proforma (ikuti tanggal invoice)
+    const orderDateStr = formatDateStr(inv.date) || getTodayWITA();
+    const proformaNo = await generateProformaNo(client, orderDateStr);
+
+    // 6. berlaku_hingga = order_date (proforma dari invoice = snapshot, tidak punya masa berlaku)
+    const berlakuStr = orderDateStr;
+
+    // 7. Insert proforma
+    await client.query(
+      `INSERT INTO proformas (proforma_no, customer_id, order_date, berlaku_hingga, payment_type_id,
+        subtotal, discount, ppn_rate, ppn_amount, ppn_enabled, total, status, user_id, invoice_id, sumber)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'dikonversi', ?, ?, 'dari_invoice')`,
+      [proformaNo, inv.customer_id, orderDateStr, berlakuStr, inv.payment_type_id,
+       subtotal, diskon, ppnRate, ppnAmount, ppnEnabled, total, userId, invoiceId]
+    );
+    const pkRes = await client.query('SELECT LAST_INSERT_ID() AS pk');
+    const proformaPk = Number(pkRes.rows[0].pk);
+
+    // 8. Insert items (salin dari invoice, termasuk fee — disimpan di DB, tidak ditampilkan di cetakan)
+    for (const item of items) {
+      const qty = parseFloat(item.quantity || 0);
+      const price = parseFloat(item.price || 0);
+      const subtotalItem = qty * price;
+      await client.query(
+        `INSERT INTO proforma_items (proforma_pk, product_id, product_name_snapshot, unit_name_snapshot,
+          quantity, price, subtotal_item, customer_fee, fee_notes, cost_price_snapshot)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [proformaPk, item.product_id, item.product_name_snapshot, item.unit_name_snapshot,
+         qty, price, subtotalItem, parseFloat(item.customer_fee || 0), item.fee_notes || null, parseFloat(item.cost_price_snapshot || 0)]
+      );
+    }
+
+    await client.query('COMMIT');
+    console.log(`[Proforma dari Invoice] PF ${proformaNo} (PK ${proformaPk}) dibuat dari Invoice ${invoiceId} oleh user ${userId}`);
+    res.json({
+      success: true,
+      sudah_ada: false,
+      proforma: { pk: proformaPk, proforma_no: proformaNo, status: 'dikonversi' }
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[POST /api/invoices/:id/proforma] Error:', err.stack || err);
+    res.status(500).json({ error: err.message || 'Gagal membuat proforma dari invoice.' });
+  } finally {
+    client.release();
+  }
+});
+// ─── END PROFORMA MODULE ───────────────────────────────────────────────────────
 
 // Bind ke 0.0.0.0 agar bisa diakses dari luar (wajib di hosting)
 app.listen(port, '0.0.0.0', () => {

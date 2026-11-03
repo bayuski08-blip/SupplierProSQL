@@ -63,6 +63,9 @@
                     <div class="nav-item" data-page="purchases" id="nav-purchases">
                         <i data-lucide="clipboard-list"></i> Pembelian
                     </div>
+                    <div class="nav-item" data-page="proformas" id="nav-proformas">
+                        <i data-lucide="file-check"></i> Proforma
+                    </div>
                     <div class="nav-item" data-page="invoices" id="nav-invoices">
                         <i data-lucide="file-text"></i> Transaksi / Invoice
                     </div>
@@ -282,7 +285,21 @@
 
                         <!-- Cart -->
                         <div class="pos-cart">
-                            <div class="pos-cart-header">
+                            <div id="pos-edit-mode-banner" style="display:none; background:linear-gradient(90deg,#eff6ff,#dbeafe); border:1.5px solid #93c5fd; border-radius:0.6rem; padding:0.6rem 0.85rem; margin-bottom:0.6rem; display:none;">
+                            <div style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem; flex-wrap:wrap;">
+                                <div style="display:flex; align-items:center; gap:0.5rem;">
+                                    <i data-lucide="edit-3" style="width:15px;height:15px;color:#2563eb;flex-shrink:0;"></i>
+                                    <span style="font-size:0.82rem; font-weight:700; color:#1d4ed8;" id="pos-edit-mode-label">Mode Edit Proforma</span>
+                                </div>
+                                <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                                    <span style="font-size:0.75rem; color:#475569;">Pelanggan tidak bisa diubah</span>
+                                    <button onclick="exitProformaEditMode(true)" style="background:white;border:1px solid #93c5fd;color:#1d4ed8;padding:3px 10px;border-radius:5px;font-size:0.75rem;font-weight:600;cursor:pointer;">
+                                        <i data-lucide="arrow-left" style="width:12px;height:12px;display:inline-block;vertical-align:middle;"></i> Kembali
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="pos-cart-header">
                                 <h3><i data-lucide="shopping-cart" style="width:18px;height:18px;"></i> Keranjang <span
                                         class="cart-count" id="cart-count">0</span></h3>
                             </div>
@@ -298,17 +315,20 @@
                                     <div style="display: flex; align-items: center; background: white; border: 1px solid var(--gray-300); border-radius: 0.5rem; padding: 0.5rem; cursor: text;"
                                         onclick="document.getElementById('pos-customer-search').focus()">
                                         <i data-lucide="search"
-                                            style="color: var(--gray-400); width: 16px; height: 16px; margin-right: 0.5rem;"></i>
+                                            style="color: var(--gray-400); width: 16px; height: 16px; margin-right: 0.5rem; flex-shrink: 0;"></i>
                                         <input type="text" id="pos-customer-search" placeholder="Cari pelanggan..."
                                             autocomplete="off"
-                                            style="border: none; outline: none; background: transparent; width: 100%; font-size: 0.875rem;">
+                                            style="border: none; outline: none; background: transparent; width: 100%; font-size: 0.875rem; color: var(--gray-800);">
+                                        <i data-lucide="x"
+                                            style="color: var(--gray-400); width: 15px; height: 15px; cursor: pointer; display: none; margin-right: 4px; flex-shrink: 0;"
+                                            id="pos-customer-clear" title="Hapus pilihan pelanggan"></i>
                                         <i data-lucide="chevron-down"
-                                            style="color: var(--gray-400); width: 16px; height: 16px; cursor: pointer;"
+                                            style="color: var(--gray-400); width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;"
                                             id="pos-customer-dropdown-toggle"></i>
                                     </div>
                                     <input type="hidden" id="pos-customer-id">
                                     <div id="pos-customer-dropdown"
-                                        style="display: none; position: absolute; width: 100%; max-height: 200px; overflow-y: auto; background: white; border: 1px solid var(--gray-200); border-radius: 0.5rem; margin-top: 0.25rem; z-index: 50; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);">
+                                        style="display: none; position: absolute; top: calc(100% + 4px); left: 0; width: 100%; max-height: 220px; overflow-y: auto; background: white; border: 1px solid var(--gray-200); border-radius: 0.5rem; z-index: 999; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);">
                                         <!-- Filled by JS -->
                                     </div>
                                 </div>
@@ -338,30 +358,44 @@
                                     <span>Total</span>
                                     <span id="cart-total">Rp 0</span>
                                 </div>
-                                <div class="cart-payment-type-wrapper"
-                                    style="margin-top: 0.75rem; margin-bottom: 0.75rem;">
-                                    <select id="cart-payment-type" class="form-input" style="width: 100%;">
-                                        <!-- Filled by JS -->
-                                    </select>
-                                    <div id="cart-dp-wrapper" style="display: none; margin-top: 0.6rem;">
-                                        <label style="font-size: 0.75rem; color: var(--gray-600); font-weight: 600; display: block; margin-bottom: 4px;">Uang Muka / DP (Opsional)</label>
-                                        <div style="position: relative;">
-                                            <span style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--gray-500); font-size: 0.85rem; font-weight: 500;">Rp</span>
-                                            <input type="number" id="cart-dp-amount" class="form-input" style="padding-left: 32px; width: 100%;" placeholder="0" min="0">
-                                        </div>
+                                <!-- Pembayaran + Tanggal Order: 2-col layout -->
+                                <div class="cart-footer-row-2col">
+                                    <div>
+                                        <label style="font-size: 0.72rem; color: var(--gray-600); font-weight: 600; display: block; margin-bottom: 2px;">Pembayaran</label>
+                                        <select id="cart-payment-type" class="form-input" style="width: 100%;">
+                                            <!-- Filled by JS -->
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label style="font-size: 0.72rem; color: var(--gray-600); font-weight: 600; display: block; margin-bottom: 2px;"><i data-lucide="calendar" style="width:11px;height:11px;display:inline-block;vertical-align:middle;margin-right:2px;"></i> Tanggal Order</label>
+                                        <input type="date" id="cart-order-date" class="form-input" style="width: 100%;">
                                     </div>
                                 </div>
-                                <!-- Tanggal Order -->
-                                <div class="cart-order-date-wrapper" style="margin-bottom: 0.75rem;">
-                                    <label style="font-size: 0.75rem; color: var(--gray-600); font-weight: 600; display: block; margin-bottom: 4px;">
-                                        <i data-lucide="calendar" style="width:12px;height:12px;display:inline-block;vertical-align:middle;margin-right:3px;"></i>
-                                        Tanggal Order
-                                    </label>
-                                    <input type="date" id="cart-order-date" class="form-input" style="width: 100%;">
+                                <!-- DP wrapper: conditional, di luar 2-col -->
+                                <div id="cart-dp-wrapper" style="display: none; margin-top: 0.5rem;">
+                                    <label style="font-size: 0.72rem; color: var(--gray-600); font-weight: 600; display: block; margin-bottom: 3px;">Uang Muka / DP (Opsional)</label>
+                                    <div style="position: relative;">
+                                        <span style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--gray-500); font-size: 0.85rem; font-weight: 500;">Rp</span>
+                                        <input type="number" id="cart-dp-amount" class="form-input" style="padding-left: 32px; width: 100%;" placeholder="0" min="0">
+                                    </div>
                                 </div>
-                                <button class="btn-checkout" id="btn-checkout">
-                                    Buat Invoice
-                                </button>
+                                <div class="cart-actions-row">
+                                    <button class="btn-checkout" id="btn-checkout">
+                                        Buat Invoice
+                                    </button>
+                                    <button class="btn-proforma-checkout" id="btn-create-proforma" type="button">
+                                        <i data-lucide="printer" style="width:15px;height:15px;"></i> Cetak Proforma
+                                    </button>
+                                </div>
+                                <!-- Mode Edit Proforma: tombol tersembunyi -->
+                                <div id="pos-edit-actions-row" style="display:none; gap:0.4rem; margin-top:0.4rem;">
+                                    <button class="btn-checkout" id="btn-save-proforma-edit" type="button" style="flex:1; background:var(--blue-600);" onclick="saveProformaEdit(false)">
+                                        <i data-lucide="save" style="width:14px;height:14px;"></i> Simpan Perubahan
+                                    </button>
+                                    <button class="btn-proforma-checkout" id="btn-save-print-proforma-edit" type="button" onclick="saveProformaEdit(true)" style="flex:1;">
+                                        <i data-lucide="printer" style="width:14px;height:14px;"></i> Simpan &amp; Cetak
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -593,6 +627,57 @@
                         </table>
                     </div>
                                     <div id="pagination-purchases" class="pagination-container"></div>
+                </section>
+
+                <!-- ============================================================
+                 PAGE 6B: PROFORMA INVOICE
+                 ============================================================ -->
+                <section class="page-section" id="page-proformas">
+                    <div class="page-toolbar">
+                        <div class="page-toolbar-left">
+                            <div class="toolbar-search">
+                                <i data-lucide="search"></i>
+                                <input type="text" id="proforma-search" placeholder="Cari No Proforma / Pelanggan..."
+                                    onkeyup="fetchProformas(1)">
+                            </div>
+                            <select class="filter-select" id="proforma-status-filter" onchange="fetchProformas(1)">
+                                <option value="all">Semua Status</option>
+                                <option value="aktif">Aktif</option>
+                                <option value="dikonversi">Dikonversi</option>
+                                <option value="dibatalkan">Dibatalkan</option>
+                            </select>
+                            <select class="filter-select" id="proforma-sumber-filter" onchange="fetchProformas(1)">
+                                <option value="all">Semua Sumber</option>
+                                <option value="manual">Manual (Kasir)</option>
+                                <option value="dari_invoice">Dari Invoice</option>
+                            </select>
+                        </div>
+                        <div class="page-toolbar-right">
+                            <button class="btn-toolbar primary" onclick="navigateTo('pos')">
+                                <i data-lucide="plus"></i> Buat Proforma Baru (Kasir)
+                            </button>
+                        </div>
+                    </div>
+                    <div class="data-table-wrapper">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>No. Proforma</th>
+                                    <th>Tanggal</th>
+                                    <th>Pelanggan</th>
+                                    <th>Total</th>
+                                    <th>Berlaku Hingga</th>
+                                    <th>Tipe</th>
+                                    <th>Status</th>
+                                    <th style="text-align: right;">Aksi</th>
+                                </tr>
+                            </thead>
+                            <tbody id="proformas-body">
+                                <tr><td colspan="8" style="text-align:center; padding: 2rem; color: var(--gray-400);">Memuat data...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div id="pagination-proformas" class="pagination-container"></div>
                 </section>
 
                 <!-- ============================================================
@@ -952,7 +1037,7 @@
                     <!-- No-data notice -->
                     <div id="reports-no-data"
                         style="display:none; margin-bottom:1rem; padding:0.75rem 1.25rem; background:var(--gray-50); border:1px solid var(--gray-200); border-radius:8px; color:var(--gray-500); font-size:0.88rem;">
-                        ℹ️ Tidak ada transaksi pada periode ini
+                        â„¹ï¸ Tidak ada transaksi pada periode ini
                     </div>
 
                     <!-- Insight Cards -->
@@ -1575,6 +1660,31 @@
             </div><!-- /content-area -->
         </div><!-- /main-content -->
     </div><!-- /dashboard-wrapper -->
+
+    <!-- Modal: Buat Proforma dari Invoice (Item 4) -->
+    <div class="modal-overlay" id="modal-buat-proforma-dari-invoice">
+        <div class="modal" style="max-width:460px;">
+            <div class="modal-header">
+                <h3><i data-lucide="file-plus" style="width:18px;height:18px;display:inline-block;vertical-align:middle;margin-right:6px;"></i> Buat Proforma dari Invoice</h3>
+                <button class="modal-close" onclick="closeModal('modal-buat-proforma-dari-invoice')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="buat-proforma-desc" style="margin:0 0 1rem; color:var(--gray-700); line-height:1.5;">
+                    Buat dokumen proforma dari invoice ini?
+                </p>
+                <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:0.5rem; padding:0.75rem; font-size:0.82rem; color:#0c4a6e; line-height:1.5;">
+                    <strong>Catatan:</strong> Proforma ini hanya dokumen salinan penawaran dan tidak mengubah stok, piutang, atau kas.
+                </div>
+                <input type="hidden" id="buat-proforma-invoice-id">
+            </div>
+            <div class="modal-footer">
+                <button class="btn-toolbar secondary" onclick="closeModal('modal-buat-proforma-dari-invoice')">Batal</button>
+                <button class="btn-toolbar primary" id="btn-confirm-buat-proforma" onclick="confirmBuatProformaDariInvoice()">
+                    <i data-lucide="printer" style="width:14px;height:14px;"></i> Buat &amp; Cetak
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- ============================================================
      MODALS
@@ -3843,6 +3953,99 @@
                 <button class="btn-toolbar secondary" onclick="closeModal('modal-delete-outstanding')">Batal</button>
                 <button class="btn-toolbar primary" id="btn-confirm-delete-outstanding" style="background: #e11d48; color: white; border-color: #e11d48;" onclick="executeDeleteOutstandingInvoice()">
                     <i data-lucide="trash-2"></i> Ya, Hapus
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Konversi Proforma ke Invoice -->
+    <div class="modal-overlay" id="modal-convert-proforma">
+        <div class="modal" style="max-width: 540px;">
+            <div class="modal-header">
+                <h3><i data-lucide="receipt" style="width:20px;height:20px;display:inline-block;vertical-align:middle;margin-right:6px;"></i> Jadikan Invoice</h3>
+                <button class="modal-close" onclick="closeModal('modal-convert-proforma')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body" style="padding: 1.25rem;">
+                <input type="hidden" id="convert-proforma-pk">
+                <div id="convert-proforma-info" style="background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 8px; padding: 0.85rem; margin-bottom: 1rem; font-size: 0.875rem;">
+                    <!-- Filled by JS -->
+                </div>
+
+                <!-- Warning container for stock, price difference, or expiration -->
+                <div id="convert-proforma-warnings" style="margin-bottom: 1rem;"></div>
+
+                <div class="form-group" style="margin-bottom: 0.85rem;">
+                    <label style="font-weight: 600; font-size: 0.82rem; margin-bottom: 4px; display: block;">
+                        <i data-lucide="calendar" style="width:13px;height:13px;display:inline-block;vertical-align:middle;margin-right:3px;"></i>
+                        Tanggal Order Invoice <span style="color:var(--rose-500);font-size:0.75rem;">(Wajib)</span>
+                    </label>
+                    <input type="date" id="convert-order-date" class="form-input" style="width: 100%;">
+                    <small style="color: var(--gray-500); font-size: 0.72rem; display: block; margin-top: 3px;">
+                        Tanggal yang dipilih akan menjadi Tanggal Order invoice dan tercetak di dokumen invoice.
+                    </small>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 0.5rem;">
+                    <label style="font-weight: 600; font-size: 0.82rem; margin-bottom: 4px; display: block;">Metode Pembayaran</label>
+                    <select id="convert-payment-type" class="form-input" style="width: 100%;">
+                        <!-- Filled by JS -->
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 1rem 1.25rem; display: flex; justify-content: flex-end; gap: 0.75rem;">
+                <button class="btn-toolbar secondary" onclick="closeModal('modal-convert-proforma')">Batal</button>
+                <button class="btn-toolbar primary" id="btn-confirm-convert" onclick="submitConvertProforma()">
+                    <i data-lucide="check-circle"></i> Konfirmasi Jadikan Invoice
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Perpanjang Masa Berlaku Proforma -->
+    <div class="modal-overlay" id="modal-extend-proforma">
+        <div class="modal" style="max-width: 440px;">
+            <div class="modal-header">
+                <h3><i data-lucide="calendar-plus" style="width:18px;height:18px;display:inline-block;vertical-align:middle;margin-right:6px;"></i> Perpanjang Masa Berlaku</h3>
+                <button class="modal-close" onclick="closeModal('modal-extend-proforma')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body" style="padding: 1.25rem;">
+                <input type="hidden" id="extend-proforma-pk">
+                <p id="extend-proforma-desc" style="font-size: 0.875rem; color: var(--gray-700); margin-bottom: 1rem;"></p>
+                <div class="form-group">
+                    <label style="font-weight: 600; font-size: 0.82rem; margin-bottom: 4px; display: block;">Berlaku Hingga Tanggal Baru</label>
+                    <input type="date" id="extend-berlaku-date" class="form-input" style="width: 100%;">
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 1rem 1.25rem; display: flex; justify-content: flex-end; gap: 0.75rem;">
+                <button class="btn-toolbar secondary" onclick="closeModal('modal-extend-proforma')">Batal</button>
+                <button class="btn-toolbar primary" onclick="submitExtendProforma()">
+                    <i data-lucide="check"></i> Simpan
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Batalkan Proforma -->
+    <div class="modal-overlay" id="modal-cancel-proforma">
+        <div class="modal" style="max-width: 450px;">
+            <div class="modal-header">
+                <h3><i data-lucide="x-circle" style="width:18px;height:18px;display:inline-block;vertical-align:middle;margin-right:6px;color:var(--rose-600);"></i> Batalkan Proforma</h3>
+                <button class="modal-close" onclick="closeModal('modal-cancel-proforma')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body" style="padding: 1.25rem;">
+                <input type="hidden" id="cancel-proforma-pk">
+                <p id="cancel-proforma-desc" style="font-size: 0.875rem; color: var(--gray-700); margin-bottom: 1rem;">
+                    Apakah Anda yakin ingin membatalkan proforma ini?
+                </p>
+                <div class="form-group">
+                    <label style="font-weight: 600; font-size: 0.82rem; margin-bottom: 4px; display: block;">Alasan Pembatalan (Opsional)</label>
+                    <textarea id="cancel-proforma-reason" class="form-input" rows="3" placeholder="Contoh: Pelanggan membatalkan penawaran..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 1rem 1.25rem; display: flex; justify-content: flex-end; gap: 0.75rem;">
+                <button class="btn-toolbar secondary" onclick="closeModal('modal-cancel-proforma')">Kembali</button>
+                <button class="btn-toolbar primary" style="background:#e11d48;border-color:#e11d48;color:white;" onclick="submitCancelProforma()">
+                    <i data-lucide="trash-2"></i> Ya, Batalkan
                 </button>
             </div>
         </div>

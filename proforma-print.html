@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Redirecting to Unified Print Template...</title>
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        params.set('type', 'proforma');
+        window.location.replace('invoice-print.html?' + params.toString());
+    </script>
+</head>
+<body>
+    <p>Mengalihkan ke template cetak...</p>
+</body>
+</html>

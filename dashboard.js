@@ -78,6 +78,16 @@ function rpShort(n) {
     return rp(n);
 }
 
+// ---------- Date Formatter (DD/MM/YYYY, timezone-safe) ----------
+function formatDate(ds) {
+    if (!ds) return '-';
+    const clean = String(ds).split('T')[0].split(' ')[0];
+    const p = clean.split('-');
+    if (p.length < 3) return ds;
+    return `${p[2]}/${p[1]}/${p[0]}`;
+}
+window.formatDate = formatDate;
+
 // ---------- Pagination & State ----------
 const PAGE_SIZE = 80;
 
@@ -87,6 +97,7 @@ const paginationState = {
     vendors: { page: 1, total: 0, totalPages: 1 },
     purchases: { page: 1, total: 0, totalPages: 1 },
     invoices: { page: 1, total: 0, totalPages: 1 },
+    proformas: { page: 1, total: 0, totalPages: 1 },
     piutang: { page: 1, total: 0, totalPages: 1 },
     hutang: { page: 1, total: 0, totalPages: 1 },
     cashflow: { page: 1, total: 0, totalPages: 1 }
@@ -95,9 +106,12 @@ const paginationState = {
 let ALL_PRODUCTS = [];
 let ALL_CUSTOMERS = [];
 let ALL_VENDORS = [];
+let ALL_PAYMENT_TYPES = [];
 let PIUTANG_LIST = [];
 let HUTANG_LIST = [];
 let currentCashFlowFilter = 'all';
+window.ALL_PAYMENT_TYPES = ALL_PAYMENT_TYPES;
+window.paymentTypes = ALL_PAYMENT_TYPES;
 
 /**
  * Reusable Pagination Renderer (Vanilla JS)
@@ -203,6 +217,15 @@ let PRICELISTS = [];
 // POS effective prices cache
 let currentPOSCustomerEffectivePrices = {};
 
+// ─── State Mode Edit Proforma ─────────────────────────────────────────────────
+let posEditMode = false;
+let posEditProformaPk = null;
+let posEditProformaRevisi = 0;
+let posEditCartDirty = false; // Track perubahan belum disimpan
+
+// Map invoice_id → proforma_pk untuk tombol di tabel invoice
+let INVOICE_PROFORMA_MAP = {};
+
 // Sales data for chart (dynamic)
 let SALES_CHART_DATA = [];
 
@@ -217,6 +240,7 @@ const PAGE_TITLES = {
     customers: { title: 'Pelanggan', subtitle: 'Daftar pelanggan dan reseller' },
     vendors: { title: 'Vendor', subtitle: 'Daftar pemasok dan supplier' },
     purchases: { title: 'Pembelian', subtitle: 'Riwayat purchase order' },
+    proformas: { title: 'Proforma Invoice', subtitle: 'Daftar dokumen proforma dan penawaran pra-invoice' },
     invoices: { title: 'Transaksi / Invoice', subtitle: 'Riwayat invoice penjualan' },
     piutang: { title: 'Piutang', subtitle: 'Tagihan pelanggan yang belum lunas' },
     hutang: { title: 'Hutang', subtitle: 'Kewajiban pembayaran ke vendor' },
@@ -232,10 +256,10 @@ const PAGE_TITLES = {
 
 // ---------- Role Based Access Control (RBAC) ----------
 const ROLE_PERMISSIONS = {
-    admin: ['dashboard', 'pos', 'products', 'customers', 'vendors', 'purchases', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'reports', 'settings', 'roles', 'master-data', 'customerfee', 'pricelists'],
+    admin: ['dashboard', 'pos', 'products', 'customers', 'vendors', 'purchases', 'proformas', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'reports', 'settings', 'roles', 'master-data', 'customerfee', 'pricelists'],
     finance: ['dashboard', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'reports'],
     gudang: ['dashboard', 'products', 'purchases', 'vendors'],
-    kasir: ['dashboard', 'pos', 'customers', 'invoices', 'piutang']
+    kasir: ['dashboard', 'pos', 'customers', 'proformas', 'invoices', 'piutang']
 };
 
 function applyRoleRestrictions() {
@@ -308,11 +332,45 @@ function navigateTo(page) {
 
     currentPage = page;
 
+    // A1: Toggle pos-active class untuk desktop full-height POS layout
+    if (page === 'pos') {
+        document.body.classList.add('pos-active');
+        if (typeof populateCustomerSelect === 'function') {
+            populateCustomerSelect(document.getElementById('pos-customer-search')?.value || '');
+        }
+        // Jika mode edit aktif dan navigasi manual ke POS dari sidebar, keluar mode edit (tanpa confirm)
+        // enterProformaEditMode akan set ulang state setelah navigasi
+    } else {
+        // Keluar mode edit jika navigate ke halaman lain (kecuali enterProformaEditMode yang trigger navigateTo sendiri)
+        if (posEditMode && page !== 'pos') {
+            // exitProformaEditMode sudah handle navigateTo('proformas'), tapi di sini kita skip
+            // karena user mungkin klik nav lain intentionally
+            posEditMode = false;
+            posEditProformaPk = null;
+            const banner = document.getElementById('pos-edit-mode-banner');
+            if (banner) banner.style.display = 'none';
+            const btnCheckout = document.getElementById('btn-checkout');
+            const btnCreateProforma = document.getElementById('btn-create-proforma');
+            const editActionsRow = document.getElementById('pos-edit-actions-row');
+            if (btnCheckout) btnCheckout.style.display = '';
+            if (btnCreateProforma) btnCreateProforma.style.display = '';
+            if (editActionsRow) editActionsRow.style.display = 'none';
+            const custSearch = document.getElementById('pos-customer-search');
+            if (custSearch) { custSearch.disabled = false; custSearch.style.background = ''; }
+            cart = [];
+            currentPOSCustomerEffectivePrices = {};
+        }
+        document.body.classList.remove('pos-active');
+    }
+
     if (page === 'settings') {
         loadCompanyProfile();
     }
     if (page === 'pricelists') {
         fetchPricelists();
+    }
+    if (page === 'proformas') {
+        fetchProformas(1);
     }
 
     // Close mobile sidebar
@@ -1881,6 +1939,19 @@ function addToCart(productId) {
         });
     }
     renderCart();
+
+    // A6: Auto-scroll ke item terbaru + highlight
+    const cartContainer = document.getElementById('pos-cart-items');
+    if (cartContainer) {
+        setTimeout(() => {
+            cartContainer.scrollTop = cartContainer.scrollHeight;
+            const lastItem = cartContainer.querySelector('.cart-item:last-child');
+            if (lastItem) {
+                lastItem.classList.add('cart-item-highlight');
+                setTimeout(() => lastItem.classList.remove('cart-item-highlight'), 1000);
+            }
+        }, 50);
+    }
 }
 
 function updateCartQty(productId, delta) {
@@ -1931,6 +2002,7 @@ function renderCart() {
                         ${item.emoji ? item.emoji + ' ' : ''}${item.name}
                         ${item.manual_override ? '<span class="badge-manual-source" style="font-size:0.65rem; margin-left:4px;">✏️ Manual</span>' : (item.sumberHarga === 'pricelist' ? `<span class="badge-pricelist-source" style="font-size:0.65rem; margin-left:4px;">${item.pricelistNama || 'Pricelist'}</span>` : '')}
                         ${(item.cost > 0 && item.price < item.cost) ? '<span class="badge-hpp-warning" style="font-size:0.65rem; margin-left:4px;">⚠️ Bawah HPP</span>' : ''}
+                        ${isAdmin && item.fee > 0 ? `<span class="fee-indicator">Fee: ${rp(item.fee)}</span>` : ''}
                     </div>
                     <div class="cart-item-price-edit" style="display:flex; align-items:center; gap:0.25rem;">
                         <span style="font-size:0.75rem; color:var(--gray-500);">Rp</span>
@@ -1944,10 +2016,11 @@ function renderCart() {
                     <button class="cart-qty-btn" onclick="updateCartQty('${item.id}', 1)">+</button>
                 </div>
                 <div class="cart-item-total">${rp(item.price * item.qty)}</div>
+                ${isAdmin ? `<button class="cart-fee-toggle" onclick="toggleFeeRow('${item.id}')" title="Toggle fee">fee</button>` : ''}
                 <button class="cart-item-remove" onclick="removeFromCart('${item.id}')"><i data-lucide="trash-2"></i></button>
             </div>
             ${isAdmin ? `
-            <div class="cart-item-fee-row">
+            <div class="cart-item-fee-row" id="fee-row-${item.id}" style="display:none;">
                 <span class="cart-item-fee-label">Fee (Rp)</span>
                 <input type="number" min="0" value="${item.fee || 0}" placeholder="0"
                     class="cart-item-fee-input"
@@ -1985,6 +2058,12 @@ function renderCart() {
         }
     };
 
+    // A5: Toggle visibility fee row (hanya admin)
+    window.toggleFeeRow = (id) => {
+        const row = document.getElementById(`fee-row-${id}`);
+        if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+    };
+
     const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
     const discount = 0; // if there is discount logic
     const afterDiscount = subtotal - discount;
@@ -2019,6 +2098,8 @@ document.getElementById('pos-category-tabs')?.addEventListener('click', (e) => {
     if (e.target.classList.contains('pos-category-tab')) {
         document.querySelectorAll('.pos-category-tab').forEach(t => t.classList.remove('active'));
         e.target.classList.add('active');
+        // A6: Auto-scroll chip aktif ke tengah view
+        e.target.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
         renderPOSProducts(document.getElementById('pos-search').value, e.target.dataset.cat);
     }
 });
@@ -2092,12 +2173,13 @@ document.getElementById('btn-checkout')?.addEventListener('click', async () => {
     // Get order date from input; fallback to today (WITA) if empty
     const orderDateInput = document.getElementById('cart-order-date');
     const todayWITA = getTodayWITA();
+    const maxOrderDate = getMaxOrderDateWITA();
     let orderDate = (orderDateInput && orderDateInput.value) ? orderDateInput.value : todayWITA;
     if (orderDateInput && !orderDateInput.value) {
         orderDateInput.value = todayWITA;
     }
-    if (orderDate > todayWITA) {
-        showToast('Tanggal order tidak boleh lebih dari hari ini.', 'warning');
+    if (orderDate > maxOrderDate) {
+        showToast(`Tanggal Order maksimal 7 hari ke depan (sampai ${formatMaxDateDisplay(maxOrderDate)}).`, 'warning');
         if (orderDateInput) orderDateInput.value = todayWITA;
         return;
     }
@@ -2143,12 +2225,14 @@ document.getElementById('btn-checkout')?.addEventListener('click', async () => {
             currentPOSCustomerEffectivePrices = {};
             document.getElementById('pos-customer-id').value = '';
             document.getElementById('pos-customer-search').value = '';
+            const clearBtn = document.getElementById('pos-customer-clear');
+            if (clearBtn) clearBtn.style.display = 'none';
             // Reset Tanggal Order to today
             const resetDateEl = document.getElementById('cart-order-date');
             if (resetDateEl) {
                 const todayStr = getTodayWITA();
                 resetDateEl.value = todayStr;
-                resetDateEl.max = todayStr;
+                resetDateEl.max = getMaxOrderDateWITA();
             }
             const posBadge = document.getElementById('pos-customer-pricelist-badge');
             if (posBadge) posBadge.innerHTML = '';
@@ -2178,15 +2262,975 @@ document.getElementById('btn-checkout')?.addEventListener('click', async () => {
     }
 });
 
+// ─── FITUR PROFORMA INVOICE (BAGIAN B) ─────────────────────────────────────────
+
+// POS: Tombol Cetak Proforma
+document.getElementById('btn-create-proforma')?.addEventListener('click', async () => {
+    if (cart.length === 0) {
+        showToast('Keranjang masih kosong.', 'warning');
+        return;
+    }
+
+    const customerId = document.getElementById('pos-customer-id').value;
+    if (!customerId) {
+        showToast('Silakan pilih pelanggan terlebih dahulu.', 'warning');
+        return;
+    }
+
+    const paymentTypeSelect = document.getElementById('cart-payment-type');
+    const payment_type_id = paymentTypeSelect ? paymentTypeSelect.value : selectedCartPaymentTypeId;
+    if (!payment_type_id) {
+        showToast('Pilih metode pembayaran terlebih dahulu.', 'warning');
+        return;
+    }
+
+    // Tanggal Order proforma (ATURAN UMUM 6)
+    const orderDateInput = document.getElementById('cart-order-date');
+    const todayWITA = getTodayWITA();
+    const maxOrderDate = getMaxOrderDateWITA();
+    let orderDate = (orderDateInput && orderDateInput.value) ? orderDateInput.value : todayWITA;
+    if (orderDateInput && !orderDateInput.value) {
+        orderDateInput.value = todayWITA;
+    }
+    if (orderDate > maxOrderDate) {
+        showToast(`Tanggal Order maksimal 7 hari ke depan (sampai ${formatMaxDateDisplay(maxOrderDate)}).`, 'warning');
+        if (orderDateInput) orderDateInput.value = todayWITA;
+        return;
+    }
+
+    const btn = document.getElementById('btn-create-proforma');
+    const origHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i data-lucide="loader-2" class="spin" style="width:14px;height:14px;"></i> Menyimpan...';
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    const payload = {
+        customer_id: customerId,
+        order_date: orderDate,
+        payment_type_id: payment_type_id,
+        discount: 0,
+        items: cart.map(item => ({
+            id: item.id,
+            product_id: item.id,
+            name: item.name,
+            quantity: item.qty,
+            price: item.price,
+            customer_fee: item.fee || 0,
+            fee_notes: item.feeNotes || ''
+        }))
+    };
+
+    try {
+        const res = await fetch('/api/proformas', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+            const result = await res.json();
+            showToast(`Proforma ${result.proformaNo} berhasil dibuat!`, 'success');
+
+            // Buka print preview proforma di tab baru (pakai invoice-print template)
+            window.open(`invoice-print.html?type=proforma&pk=${result.proformaPk}`, '_blank');
+
+            // Kosongkan keranjang & reset form POS
+            cart = [];
+            currentPOSCustomerEffectivePrices = {};
+            document.getElementById('pos-customer-id').value = '';
+            document.getElementById('pos-customer-search').value = '';
+            const clearBtn = document.getElementById('pos-customer-clear');
+            if (clearBtn) clearBtn.style.display = 'none';
+
+            const resetDateEl = document.getElementById('cart-order-date');
+            if (resetDateEl) {
+                const todayStr = getTodayWITA();
+                resetDateEl.value = todayStr;
+                resetDateEl.max = getMaxOrderDateWITA();
+            }
+            const posBadge = document.getElementById('pos-customer-pricelist-badge');
+            if (posBadge) posBadge.innerHTML = '';
+            selectedCartPaymentTypeId = 'PT-1';
+            if (paymentTypeSelect) paymentTypeSelect.value = 'PT-1';
+
+            renderCart();
+        } else {
+            let errMsg = `Error ${res.status}`;
+            try {
+                const errData = await res.json();
+                if (errData.error) errMsg = errData.error;
+            } catch (_) {}
+            console.error('[Proforma Create] Server error:', res.status, errMsg);
+            showToast(`Gagal membuat proforma: ${errMsg}`, 'error');
+        }
+    } catch (err) {
+        console.error('[Proforma POS] Fetch exception:', err);
+        showToast(`Gagal menghubungi server: ${err.message}`, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+    }
+});
+
+// State & pagination untuk proforma list
+let currentProformasData = [];
+let currentProformaPage = 1;
+
+async function fetchProformas(page = 1) {
+    currentProformaPage = page;
+    if (page !== undefined && paginationState.proformas) paginationState.proformas.page = page;
+    const search = document.getElementById('proforma-search')?.value.trim() || '';
+    const status = document.getElementById('proforma-status-filter')?.value || 'all';
+    const tbody = document.getElementById('proformas-body');
+    if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding: 2rem; color: var(--gray-400);"><i data-lucide="loader-2" class="spin" style="width:20px;height:20px;display:inline-block;"></i> Memuat data...</td></tr>';
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    try {
+        const sumber = document.getElementById('proforma-sumber-filter')?.value || 'all';
+        const queryParams = new URLSearchParams({
+            page: page,
+            limit: PAGE_SIZE,
+            search: search,
+            status: status
+        });
+        if (sumber && sumber !== 'all') queryParams.set('sumber', sumber);
+
+        const res = await fetch(`/api/proformas?${queryParams.toString()}`, {
+            headers: getAuthHeaders()
+        });
+
+        if (!res.ok) {
+            let errMsg = `Error ${res.status}`;
+            try {
+                const errData = await res.json();
+                if (errData.error) errMsg = errData.error;
+            } catch (_) {}
+            console.error('[fetchProformas] Server error:', res.status, errMsg);
+            if (res.status === 401 || res.status === 403) {
+                showToast('Sesi telah berakhir, silakan login kembali.', 'error');
+                return;
+            }
+            throw new Error(errMsg);
+        }
+
+        const data = await res.json();
+        currentProformasData = data.rows || [];
+        if (paginationState.proformas) {
+            paginationState.proformas.total = data.total || 0;
+            paginationState.proformas.totalPages = data.totalPages || 1;
+        }
+        renderProformasTable(data, page);
+    } catch (err) {
+        console.error('[fetchProformas] Error:', err);
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding: 2rem; color: var(--rose-500);">Gagal memuat proforma: ${err.message}</td></tr>`;
+        }
+    }
+}
+
+function renderProformasTable(data, page = 1) {
+    const tbody = document.getElementById('proformas-body');
+    if (!tbody) return;
+
+    if (!data.rows || data.rows.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="8" style="text-align:center; padding: 3rem 1rem; color: var(--gray-400);">
+                    <i data-lucide="file-check" style="width: 42px; height: 42px; color: var(--gray-300); margin-bottom: 0.5rem; display: inline-block;"></i>
+                    <p style="margin: 0; font-size: 0.95rem; font-weight: 600; color: var(--gray-600);">Belum ada proforma</p>
+                    <p style="margin: 4px 0 0; font-size: 0.8rem; color: var(--gray-400);">Buat dokumen proforma penawaran baru dari menu Order / Kasir.</p>
+                </td>
+            </tr>
+        `;
+        renderPagination({
+            containerId: 'pagination-proformas',
+            currentPage: page,
+            totalItems: 0,
+            pageSize: PAGE_SIZE,
+            onPageChange: (p) => fetchProformas(p)
+        });
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+        return;
+    }
+
+    const rowsHtml = data.rows.map(r => {
+        const displaySt = (r.display_status || r.status || '').toLowerCase();
+        let statusClass = 'aktif';
+        let statusLabel = 'Aktif';
+
+        if (displaySt === 'kedaluwarsa') {
+            statusClass = 'kedaluwarsa';
+            statusLabel = 'Kedaluwarsa';
+        } else if (displaySt === 'dikonversi') {
+            statusClass = 'dikonversi';
+            statusLabel = 'Dikonversi';
+        } else if (displaySt === 'dibatalkan') {
+            statusClass = 'dibatalkan';
+            statusLabel = 'Dibatalkan';
+        }
+
+        const dariBadge = r.sumber === 'dari_invoice'
+            ? '<span class="badge-status dari-invoice">Dari Invoice</span>'
+            : '';
+
+        let actionsHtml = `
+            <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem;" title="Cetak Proforma" onclick="printProforma(${r.pk})">
+                <i data-lucide="printer" style="width: 14px; height: 14px; margin: 0;"></i>
+            </button>
+        `;
+
+        if (r.status === 'aktif') {
+            actionsHtml += `
+                <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem;" title="Edit Proforma" onclick="editProforma(${r.pk})">
+                    <i data-lucide="edit-2" style="width: 14px; height: 14px; margin: 0;"></i>
+                </button>
+                <button class="btn-toolbar primary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem;" title="Jadikan Invoice" onclick="openConvertProformaModal(${r.pk})">
+                    Invoice
+                </button>
+                <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem;" title="Perpanjang Masa Berlaku" onclick="openExtendProformaModal(${r.pk}, '${r.proforma_no}', '${r.berlaku_hingga}')">
+                    <i data-lucide="calendar-plus" style="width: 14px; height: 14px; margin: 0;"></i>
+                </button>
+                <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem; color: var(--rose-500); border-color: #fecaca; background: #fee2e2;" title="Batalkan Proforma" onclick="openCancelProformaModal(${r.pk}, '${r.proforma_no}')">
+                    <i data-lucide="x-circle" style="width: 14px; height: 14px; margin: 0;"></i>
+                </button>
+            `;
+        } else if (r.status === 'dikonversi' && r.invoice_id) {
+            actionsHtml += `
+                <a href="#" onclick="viewInvoiceFromProforma('${r.invoice_id}'); return false;" class="btn-toolbar secondary" style="display:inline-flex; align-items:center; gap:2px; font-size:0.75rem; padding: 0.25rem 0.5rem; text-decoration:none; color:var(--blue-600); margin-right: 0.25rem;" title="Lihat Invoice">
+                    <i data-lucide="external-link" style="width:13px;height:13px;margin:0;"></i> ${r.invoice_id}
+                </a>
+            `;
+        }
+
+        return `
+            <tr>
+                <td style="font-weight:600; color: var(--blue-600);">${r.proforma_no}</td>
+                <td>${r.order_date}</td>
+                <td style="font-weight:600;">${r.customer_name || 'Pelanggan Umum'}</td>
+                <td style="font-weight:700;">${rp(r.total)}</td>
+                <td>${r.sumber === 'dari_invoice' ? '-' : (r.berlaku_hingga || '-')}</td>
+                <td>${r.payment_type_name || 'Tunai'}</td>
+                <td><span class="badge-status ${statusClass}">${statusLabel}</span>${dariBadge}</td>
+                <td style="text-align: right; white-space: nowrap;">
+                    ${actionsHtml}
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    tbody.innerHTML = rowsHtml;
+    renderPagination({
+        containerId: 'pagination-proformas',
+        currentPage: page,
+        totalItems: paginationState.proformas ? paginationState.proformas.total : (data.total || 0),
+        pageSize: PAGE_SIZE,
+        onPageChange: (p) => fetchProformas(p)
+    });
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+function printProforma(pk) {
+    window.open(`invoice-print.html?type=proforma&pk=${encodeURIComponent(pk)}`, '_blank');
+}
+
+function viewInvoiceFromProforma(invoiceId) {
+    if (!invoiceId) return;
+    navigateTo('invoices');
+    setTimeout(() => {
+        const s = document.getElementById('invoice-search');
+        if (s) {
+            s.value = invoiceId;
+            renderInvoices();
+        }
+    }, 200);
+}
+
+// ─── Item 3: Mode Edit Proforma ───────────────────────────────────────────────
+
+/**
+ * Masuk ke mode edit proforma: navigasi ke POS, isi keranjang dari data proforma.
+ */
+async function enterProformaEditMode(pk) {
+    try {
+        const res = await fetch(`/api/proformas/${pk}/print-data`, { headers: getAuthHeaders() });
+        if (!res.ok) {
+            let errMsg = `Error ${res.status}`;
+            try { const d = await res.json(); if (d.error) errMsg = d.error; } catch(_) {}
+            showToast(`Gagal memuat data proforma: ${errMsg}`, 'error');
+            return;
+        }
+        const data = await res.json();
+        const pf = data.proforma;
+
+        // Ambil juga items dengan harga snapshot (termasuk fee jika admin)
+        const itemsRes = await fetch(`/api/proformas/${pk}/items`, { headers: getAuthHeaders() });
+        if (!itemsRes.ok) {
+            showToast('Gagal memuat item proforma', 'error');
+            return;
+        }
+        const pfItems = await itemsRes.json();
+
+        // Jika status bukan aktif — beri tahu user
+        if (pf.display_status === 'dikonversi') {
+            showToast('Proforma sudah dikonversi menjadi invoice, tidak bisa diedit.', 'warning');
+            return;
+        }
+        if (pf.display_status === 'dibatalkan') {
+            showToast('Proforma sudah dibatalkan, tidak bisa diedit.', 'warning');
+            return;
+        }
+
+        // Navigasi ke POS dulu
+        navigateTo('pos');
+
+        // Tunggu sebentar agar halaman aktif
+        await new Promise(r => setTimeout(r, 100));
+
+        // Set state
+        posEditMode = true;
+        posEditProformaPk = pk;
+        posEditProformaRevisi = pf.revisi !== undefined ? pf.revisi : 0;
+        posEditCartDirty = false;
+
+        // Isi pelanggan (readonly)
+        const custSearch = document.getElementById('pos-customer-search');
+        const custId = document.getElementById('pos-customer-id');
+        const custClear = document.getElementById('pos-customer-clear');
+        if (custSearch) {
+            custSearch.value = data.customer?.name || '';
+            custSearch.disabled = true;
+            custSearch.style.background = '#f1f5f9';
+        }
+        if (custId) custId.value = pf.customer_id || '';
+        if (custClear) custClear.style.display = 'none';
+
+        // Isi keranjang dari snapshot items
+        cart = pfItems.map(item => ({
+            id: item.product_id,
+            name: item.product_name_snapshot || 'Produk',
+            price: parseFloat(item.price),
+            qty: parseFloat(item.quantity),
+            unit: item.unit_name_snapshot || '-',
+            fee: parseFloat(item.customer_fee || 0),
+            feeNotes: item.fee_notes || '',
+            // Tandai sebagai item snapshot (harga dari proforma, bukan pricelist saat ini)
+            snapshotPrice: true
+        }));
+        currentPOSCustomerEffectivePrices = {};
+
+        // Set tanggal order
+        const orderDateEl = document.getElementById('cart-order-date');
+        if (orderDateEl) {
+            orderDateEl.value = pf.order_date || getTodayWITA();
+            // Tanggal order TIDAK dibatasi max saat edit (sudah divalidasi saat buat)
+            orderDateEl.removeAttribute('max');
+        }
+
+        // Set payment type
+        const payTypeEl = document.getElementById('cart-payment-type');
+        if (payTypeEl && pf.payment_type_id) {
+            // Cari option yang cocok
+            const opts = payTypeEl.options;
+            for (let i = 0; i < opts.length; i++) {
+                if (opts[i].value === String(pf.payment_type_id)) {
+                    payTypeEl.selectedIndex = i;
+                    selectedCartPaymentTypeId = opts[i].value;
+                    break;
+                }
+            }
+        }
+
+        // Tampilkan banner mode edit
+        const banner = document.getElementById('pos-edit-mode-banner');
+        if (banner) {
+            banner.style.display = 'block';
+            const label = document.getElementById('pos-edit-mode-label');
+            if (label) label.textContent = `Mode Edit: ${pf.proforma_no}`;
+        }
+
+        // Sembunyikan tombol normal, tampilkan tombol edit
+        const btnCheckout = document.getElementById('btn-checkout');
+        const btnCreateProforma = document.getElementById('btn-create-proforma');
+        const editActionsRow = document.getElementById('pos-edit-actions-row');
+        if (btnCheckout) btnCheckout.style.display = 'none';
+        if (btnCreateProforma) btnCreateProforma.style.display = 'none';
+        if (editActionsRow) editActionsRow.style.display = 'flex';
+
+        // Render ulang keranjang
+        renderCart();
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+
+        showToast(`Mode edit proforma ${pf.proforma_no}`, 'info');
+    } catch (err) {
+        console.error('[enterProformaEditMode] Error:', err);
+        showToast('Gagal membuka mode edit proforma: ' + err.message, 'error');
+    }
+}
+
+/**
+ * Keluar dari mode edit proforma. confirm = apakah tanya jika ada perubahan.
+ */
+function exitProformaEditMode(confirm = false) {
+    if (confirm && posEditCartDirty) {
+        if (!window.confirm('Ada perubahan yang belum disimpan. Keluar dari mode edit?')) {
+            return;
+        }
+    }
+
+    posEditMode = false;
+    posEditProformaPk = null;
+    posEditProformaRevisi = 0;
+    posEditCartDirty = false;
+
+    // Reset UI
+    const banner = document.getElementById('pos-edit-mode-banner');
+    if (banner) banner.style.display = 'none';
+
+    const btnCheckout = document.getElementById('btn-checkout');
+    const btnCreateProforma = document.getElementById('btn-create-proforma');
+    const editActionsRow = document.getElementById('pos-edit-actions-row');
+    if (btnCheckout) btnCheckout.style.display = '';
+    if (btnCreateProforma) btnCreateProforma.style.display = '';
+    if (editActionsRow) editActionsRow.style.display = 'none';
+
+    // Unlock customer search
+    const custSearch = document.getElementById('pos-customer-search');
+    if (custSearch) {
+        custSearch.disabled = false;
+        custSearch.style.background = '';
+    }
+
+    // Reset tanggal ke max normal
+    const orderDateEl = document.getElementById('cart-order-date');
+    if (orderDateEl) {
+        orderDateEl.max = getMaxOrderDateWITA();
+        orderDateEl.value = getTodayWITA();
+    }
+
+    // Kosongkan keranjang
+    cart = [];
+    currentPOSCustomerEffectivePrices = {};
+    const custId = document.getElementById('pos-customer-id');
+    const custSearchEl = document.getElementById('pos-customer-search');
+    const custClear = document.getElementById('pos-customer-clear');
+    if (custId) custId.value = '';
+    if (custSearchEl) custSearchEl.value = '';
+    if (custClear) custClear.style.display = 'none';
+    const posBadge = document.getElementById('pos-customer-pricelist-badge');
+    if (posBadge) posBadge.innerHTML = '';
+
+    renderCart();
+    navigateTo('proformas');
+}
+
+/**
+ * Simpan perubahan proforma. printAfter = buka tab cetak setelah simpan.
+ */
+async function saveProformaEdit(printAfter = false) {
+    if (!posEditProformaPk) return;
+    if (cart.length === 0) {
+        showToast('Keranjang tidak boleh kosong.', 'warning');
+        return;
+    }
+
+    const orderDateEl = document.getElementById('cart-order-date');
+    const orderDate = orderDateEl ? orderDateEl.value : getTodayWITA();
+
+    const payTypeEl = document.getElementById('cart-payment-type');
+    const paymentTypeId = payTypeEl ? payTypeEl.value : selectedCartPaymentTypeId;
+
+    const payload = {
+        revisi: posEditProformaRevisi,
+        order_date: orderDate,
+        payment_type_id: paymentTypeId,
+        discount: 0,
+        items: cart.map(item => ({
+            product_id: item.id,
+            name: item.name,
+            quantity: item.qty,
+            price: item.price,
+            customer_fee: item.fee || 0,
+            fee_notes: item.feeNotes || ''
+        }))
+    };
+
+    const saveBtns = [
+        document.getElementById('btn-save-proforma-edit'),
+        document.getElementById('btn-save-print-proforma-edit')
+    ].filter(Boolean);
+    saveBtns.forEach(b => { b.disabled = true; });
+
+    try {
+        const res = await fetch(`/api/proformas/${posEditProformaPk}`, {
+            method: 'PUT',
+            headers: getAuthHeaders(),
+            body: JSON.stringify(payload)
+        });
+
+        if (res.status === 409) {
+            const d = await res.json().catch(() => ({}));
+            showToast(`Konflik: ${d.error || 'Proforma sudah diubah oleh pengguna lain, muat ulang.'}`, 'error');
+            saveBtns.forEach(b => { b.disabled = false; });
+            return;
+        }
+
+        if (!res.ok) {
+            let errMsg = `Error ${res.status}`;
+            try { const d = await res.json(); if (d.error) errMsg = d.error; } catch(_) {}
+            showToast(`Gagal menyimpan: ${errMsg}`, 'error');
+            saveBtns.forEach(b => { b.disabled = false; });
+            return;
+        }
+
+        const result = await res.json();
+        showToast(`Proforma ${result.proforma_no || ''} berhasil diperbarui (Rev.${(posEditProformaRevisi || 0) + 1}).`, 'success');
+
+        if (printAfter) {
+            window.open(`invoice-print.html?type=proforma&pk=${posEditProformaPk}`, '_blank');
+        }
+
+        posEditCartDirty = false;
+        exitProformaEditMode(false);
+    } catch (err) {
+        console.error('[saveProformaEdit] Error:', err);
+        showToast('Gagal menghubungi server: ' + err.message, 'error');
+        saveBtns.forEach(b => { b.disabled = false; });
+    }
+}
+
+/**
+ * Entry point dari tombol Edit di tabel proforma.
+ */
+function editProforma(pk) {
+    enterProformaEditMode(pk);
+}
+window.editProforma = editProforma;
+
+// ─── Item 4: Buat Proforma dari Invoice ───────────────────────────────────────
+
+/**
+ * Buka modal konfirmasi buat proforma dari invoice.
+ */
+function openBuatProformaDariInvoice(invoiceId) {
+    document.getElementById('buat-proforma-invoice-id').value = invoiceId;
+    const desc = document.getElementById('buat-proforma-desc');
+    if (desc) desc.textContent = `Buat dokumen proforma dari invoice ${invoiceId}? Proforma ini hanya salinan penawaran dan tidak mengubah stok, piutang, atau kas.`;
+    openModal('modal-buat-proforma-dari-invoice');
+}
+window.openBuatProformaDariInvoice = openBuatProformaDariInvoice;
+
+/**
+ * Konfirmasi dan eksekusi buat proforma dari invoice.
+ */
+async function confirmBuatProformaDariInvoice() {
+    const invoiceId = document.getElementById('buat-proforma-invoice-id').value;
+    if (!invoiceId) return;
+
+    const btn = document.getElementById('btn-confirm-buat-proforma');
+    const origHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i data-lucide="loader-2" class="spin" style="width:13px;height:13px;"></i> Memproses...';
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    try {
+        const res = await fetch(`/api/invoices/${encodeURIComponent(invoiceId)}/proforma`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({})
+        });
+
+        let result;
+        try { result = await res.json(); } catch(_) { result = {}; }
+
+        if (!res.ok) {
+            showToast(`Gagal membuat proforma: ${result.error || 'Terjadi kesalahan'}`, 'error');
+            return;
+        }
+
+        closeModal('modal-buat-proforma-dari-invoice');
+
+        if (result.sudah_ada) {
+            showToast(`Proforma ${result.proforma.proforma_no} sudah ada untuk invoice ini.`, 'info');
+        } else {
+            showToast(`Proforma ${result.proforma.proforma_no} berhasil dibuat!`, 'success');
+        }
+
+        // Update map dan buka print tab
+        INVOICE_PROFORMA_MAP[invoiceId] = result.proforma.pk;
+        window.open(`invoice-print.html?type=proforma&pk=${result.proforma.pk}`, '_blank');
+
+        // Refresh tabel invoice agar tombol berubah
+        await fetchInvoices(paginationState.invoices.page);
+    } catch (err) {
+        console.error('[confirmBuatProformaDariInvoice] Error:', err);
+        showToast('Gagal menghubungi server: ' + err.message, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+    }
+}
+window.confirmBuatProformaDariInvoice = confirmBuatProformaDariInvoice;
+
+/**
+ * Buka cetak proforma yang sudah ada dari invoice.
+ */
+function printProformaDariInvoice(proformaPk) {
+    window.open(`invoice-print.html?type=proforma&pk=${encodeURIComponent(proformaPk)}`, '_blank');
+}
+window.printProformaDariInvoice = printProformaDariInvoice;
+
+// ─── Modal Konversi Proforma ke Invoice ───────────────────────────────────────
+let activeConvertProforma = null;
+
+async function openConvertProformaModal(pk) {
+    try {
+        const modalInfo = document.getElementById('convert-proforma-info');
+        const warningsEl = document.getElementById('convert-proforma-warnings');
+        const orderDateInput = document.getElementById('convert-order-date');
+        const paymentSelect = document.getElementById('convert-payment-type');
+        const confirmBtn = document.getElementById('btn-confirm-convert');
+
+        document.getElementById('convert-proforma-pk').value = pk;
+        if (modalInfo) modalInfo.innerHTML = '<i data-lucide="loader-2" class="spin" style="width:16px;height:16px;display:inline-block;vertical-align:middle;"></i> Memuat detail proforma...';
+        if (warningsEl) warningsEl.innerHTML = '';
+        if (confirmBtn) {
+            confirmBtn.disabled = true;
+            confirmBtn.innerHTML = '<i data-lucide="check-circle"></i> Konfirmasi Jadikan Invoice';
+        }
+
+        // Default Tanggal Order invoice = hari konversi (getTodayWITA)
+        const todayWITA = getTodayWITA();
+        if (orderDateInput) {
+            orderDateInput.value = todayWITA;
+            orderDateInput.max = getMaxOrderDateWITA();
+        }
+
+        // Pastikan ALL_PAYMENT_TYPES tersedia
+        if (!Array.isArray(ALL_PAYMENT_TYPES) || ALL_PAYMENT_TYPES.length === 0) {
+            try {
+                const ptRes = await fetch('/api/master/payment-types', { headers: getAuthHeaders() });
+                if (ptRes.ok) {
+                    ALL_PAYMENT_TYPES = await ptRes.json();
+                    window.paymentTypes = ALL_PAYMENT_TYPES;
+                }
+            } catch (_) {}
+        }
+
+        if (paymentSelect && Array.isArray(ALL_PAYMENT_TYPES) && ALL_PAYMENT_TYPES.length > 0) {
+            paymentSelect.innerHTML = ALL_PAYMENT_TYPES.map(pt => `<option value="${pt.id}">${pt.name}</option>`).join('');
+        }
+
+        openModal('modal-convert-proforma');
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+
+        const res = await fetch(`/api/proformas/${pk}/print-data`, { headers: getAuthHeaders() });
+        if (!res.ok) {
+            let errMsg = `Error ${res.status}`;
+            try {
+                const errData = await res.json();
+                if (errData.error) errMsg = errData.error;
+            } catch (_) {}
+            throw new Error(errMsg);
+        }
+        const data = await res.json();
+        activeConvertProforma = data;
+
+        const pf = data.proforma;
+        const cust = data.customer || { name: 'Pelanggan Umum' };
+
+        if (modalInfo) {
+            modalInfo.innerHTML = `
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                    <span style="font-weight:700; font-size:1rem; color:var(--gray-900);">${pf.proforma_no}</span>
+                    <span style="font-weight:700; color:var(--blue-600);">${rp(pf.total)}</span>
+                </div>
+                <div style="font-size:0.8rem; color:var(--gray-600); line-height:1.4;">
+                    <div>Pelanggan: <b>${cust.name}</b></div>
+                    <div>Tgl Proforma: ${formatDate(pf.order_date)} | Berlaku: ${formatDate(pf.berlaku_hingga)}</div>
+                    <div>Item: ${data.items.length} produk</div>
+                </div>
+            `;
+        }
+
+        // Set matching payment type in select
+        if (paymentSelect && pf.payment_type_name && Array.isArray(ALL_PAYMENT_TYPES)) {
+            const matchPt = ALL_PAYMENT_TYPES.find(p => p.name.toLowerCase() === pf.payment_type_name.toLowerCase());
+            if (matchPt) paymentSelect.value = matchPt.id;
+        }
+
+        // Check warnings:
+        let warningsHtml = '';
+
+        // 1. Peringatan Kedaluwarsa (Soft-lock)
+        if (pf.display_status === 'kedaluwarsa') {
+            warningsHtml += `
+                <div style="background:#fffbeb; border:1px solid #fde68a; color:#92400e; padding:0.6rem 0.75rem; border-radius:6px; font-size:0.78rem; margin-bottom:0.5rem; line-height:1.4;">
+                    <div style="display:flex; align-items:center; gap:4px; font-weight:700;">
+                        <i data-lucide="alert-triangle" style="width:14px;height:14px;"></i> Proforma Telah Kedaluwarsa
+                    </div>
+                    <div>Masa berlaku habis pada <b>${formatDate(pf.berlaku_hingga)}</b>. Anda tetap dapat melanjutkan konversi ke invoice jika disetujui.</div>
+                </div>
+            `;
+        }
+
+        // 2. Cek harga master vs snapshot (Warning harga)
+        if (Array.isArray(PRODUCTS) && PRODUCTS.length > 0) {
+            const priceDiffs = [];
+            data.items.forEach(it => {
+                const master = PRODUCTS.find(p => p.name.toLowerCase() === (it.product_name || '').toLowerCase() || p.id === it.product_id);
+                if (master && Math.abs(parseFloat(master.price || master.sell_price || 0) - parseFloat(it.price || 0)) > 0.001) {
+                    priceDiffs.push({
+                        name: it.product_name,
+                        snapshot: it.price,
+                        current: master.price || master.sell_price
+                    });
+                }
+            });
+
+            if (priceDiffs.length > 0) {
+                const diffList = priceDiffs.map(d => `<li>${d.name}: snapshot <b>${rp(d.snapshot)}</b> (master saat ini: ${rp(d.current)})</li>`).join('');
+                warningsHtml += `
+                    <div style="background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; padding:0.6rem 0.75rem; border-radius:6px; font-size:0.78rem; margin-bottom:0.5rem; line-height:1.4;">
+                        <div style="display:flex; align-items:center; gap:4px; font-weight:700;">
+                            <i data-lucide="info" style="width:14px;height:14px;"></i> Perbedaan Harga Master Terdeteksi
+                        </div>
+                        <ul style="margin:4px 0 0 1rem; padding:0;">${diffList}</ul>
+                        <div style="margin-top:4px; font-style:italic;">Konversi akan tetap menggunakan <b>HARGA SNAPSHOT</b> proforma.</div>
+                    </div>
+                `;
+            }
+        }
+
+        if (warningsEl) warningsEl.innerHTML = warningsHtml;
+        if (confirmBtn) confirmBtn.disabled = false;
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    } catch (err) {
+        console.error('[openConvertProformaModal] Error:', err);
+        const modalInfo = document.getElementById('convert-proforma-info');
+        if (modalInfo) modalInfo.innerHTML = `<span style="color:var(--rose-500);">Gagal memuat proforma: ${err.message}</span>`;
+        openModal('modal-convert-proforma');
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+}
+window.openConvertProformaModal = openConvertProformaModal;
+window.enterProformaEditMode = enterProformaEditMode;
+window.exitProformaEditMode = exitProformaEditMode;
+window.saveProformaEdit = saveProformaEdit;
+
+async function submitConvertProforma() {
+    const pk = document.getElementById('convert-proforma-pk').value;
+    const orderDate = document.getElementById('convert-order-date').value;
+    const paymentType = document.getElementById('convert-payment-type').value;
+    const confirmBtn = document.getElementById('btn-confirm-convert');
+
+    if (!orderDate) {
+        showToast('Pilih Tanggal Order invoice terlebih dahulu.', 'warning');
+        return;
+    }
+
+    const todayWITA = getTodayWITA();
+    const maxOrderDate = getMaxOrderDateWITA();
+    if (orderDate > maxOrderDate) {
+        showToast(`Tanggal Order maksimal 7 hari ke depan (sampai ${formatMaxDateDisplay(maxOrderDate)}).`, 'warning');
+        return;
+    }
+
+    const origText = confirmBtn ? confirmBtn.innerHTML : '';
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<i data-lucide="loader-2" class="spin" style="width:14px;height:14px;"></i> Memproses...';
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    try {
+        const res = await fetch(`/api/proformas/${pk}/convert`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+                order_date: orderDate,
+                payment_type_id: paymentType,
+                force_expired: true
+            })
+        });
+
+        let result = {};
+        try {
+            result = await res.json();
+        } catch (_) {}
+
+        if (res.ok) {
+            closeModal('modal-convert-proforma');
+            showToast(`Sukses! Proforma berhasil dijadikan Invoice: ${result.invoiceId}`, 'success');
+
+            // Refresh data safely without leaking exceptions to outer catch
+            try {
+                const targetPage = (paginationState.proformas && paginationState.proformas.page) || currentProformaPage || 1;
+                fetchProformas(targetPage);
+                if (typeof fetchInvoices === 'function') fetchInvoices();
+                if (typeof fetchProducts === 'function') fetchProducts();
+                if (typeof fetchCashTransactions === 'function') fetchCashTransactions();
+                if (typeof renderDashboard === 'function') renderDashboard();
+            } catch (refreshErr) {
+                console.warn('[submitConvertProforma] Warning refreshing UI data:', refreshErr);
+            }
+
+            // Dialog konfirmasi cetak invoice baru
+            setTimeout(() => {
+                if (confirm(`Invoice ${result.invoiceId} berhasil dibuat!\n\nApakah Anda ingin membuka cetak invoice sekarang?`)) {
+                    window.open(`invoice-print.html?id=${encodeURIComponent(result.invoiceId)}`, '_blank');
+                }
+            }, 300);
+        } else {
+            console.error('[submitConvertProforma] Server error:', res.status, result);
+            // Tampilkan error stok atau alasan lain
+            if (result.stock_errors && Array.isArray(result.stock_errors)) {
+                const stockDetails = result.stock_errors.map(s => `• ${s.product_name}: Butuh ${s.needed}, Tersedia ${s.available}`).join('\n');
+                alert(`Gagal konversi karena stok tidak mencukupi:\n\n${stockDetails}`);
+            } else {
+                showToast('Gagal konversi proforma: ' + (result.error || `Error ${res.status}`), 'error');
+            }
+        }
+    } catch (err) {
+        console.error('[submitConvertProforma] Error:', err);
+        showToast('Gagal menghubungi server: ' + (err.message || 'Koneksi terputus'), 'error');
+    } finally {
+        if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = origText || '<i data-lucide="check-circle"></i> Konfirmasi Jadikan Invoice';
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+    }
+}
+window.submitConvertProforma = submitConvertProforma;
+
+// ─── Modal Perpanjang Masa Berlaku Proforma ───────────────────────────────────
+function openExtendProformaModal(pk, proformaNo, currentBerlaku) {
+    document.getElementById('extend-proforma-pk').value = pk;
+    const desc = document.getElementById('extend-proforma-desc');
+    if (desc) {
+        desc.innerHTML = `Perpanjang masa berlaku untuk <b>${proformaNo}</b>.<br>Masa berlaku saat ini: <b>${formatDate(currentBerlaku)}</b>`;
+    }
+    const input = document.getElementById('extend-berlaku-date');
+    if (input) {
+        input.value = currentBerlaku ? currentBerlaku.split('T')[0] : getTodayWITA();
+        input.min = getTodayWITA();
+    }
+    openModal('modal-extend-proforma');
+}
+
+async function submitExtendProforma() {
+    const pk = document.getElementById('extend-proforma-pk').value;
+    const berlakuHingga = document.getElementById('extend-berlaku-date').value;
+
+    if (!berlakuHingga) {
+        showToast('Pilih tanggal berlaku hingga yang baru.', 'warning');
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/proformas/${pk}/extend`, {
+            method: 'PUT',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ berlaku_hingga: berlakuHingga })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            closeModal('modal-extend-proforma');
+            showToast('Masa berlaku proforma berhasil diperpanjang.', 'success');
+            try {
+                const targetPage = (paginationState.proformas && paginationState.proformas.page) || currentProformaPage || 1;
+                fetchProformas(targetPage);
+            } catch (refreshErr) {
+                console.warn('[submitExtendProforma] Warning refreshing UI data:', refreshErr);
+            }
+        } else {
+            showToast(data.error || 'Gagal memperpanjang masa berlaku.', 'error');
+        }
+    } catch (err) {
+        console.error('[submitExtendProforma] Error:', err);
+        showToast('Gagal menghubungi server: ' + (err.message || 'Koneksi terputus'), 'error');
+    }
+}
+
+// ─── Modal Batalkan Proforma ──────────────────────────────────────────────────
+function openCancelProformaModal(pk, proformaNo) {
+    document.getElementById('cancel-proforma-pk').value = pk;
+    const desc = document.getElementById('cancel-proforma-desc');
+    if (desc) {
+        desc.innerHTML = `Apakah Anda yakin ingin membatalkan proforma <b>${proformaNo}</b>?<br><small style="color:var(--gray-500);">Data proforma akan tetap tersimpan dengan status 'dibatalkan'.</small>`;
+    }
+    const reasonEl = document.getElementById('cancel-proforma-reason');
+    if (reasonEl) reasonEl.value = '';
+    openModal('modal-cancel-proforma');
+}
+
+async function submitCancelProforma() {
+    const pk = document.getElementById('cancel-proforma-pk').value;
+    const alasan = document.getElementById('cancel-proforma-reason')?.value.trim();
+
+    try {
+        const res = await fetch(`/api/proformas/${pk}/cancel`, {
+            method: 'PUT',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ alasan })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            closeModal('modal-cancel-proforma');
+            showToast('Proforma berhasil dibatalkan.', 'success');
+            try {
+                const targetPage = (paginationState.proformas && paginationState.proformas.page) || currentProformaPage || 1;
+                fetchProformas(targetPage);
+            } catch (refreshErr) {
+                console.warn('[submitCancelProforma] Warning refreshing UI data:', refreshErr);
+            }
+        } else {
+            showToast(data.error || 'Gagal membatalkan proforma.', 'error');
+        }
+    } catch (err) {
+        console.error('[submitCancelProforma] Error:', err);
+        showToast('Gagal menghubungi server: ' + (err.message || 'Koneksi terputus'), 'error');
+    }
+}
+window.openExtendProformaModal = openExtendProformaModal;
+window.submitExtendProforma = submitExtendProforma;
+window.openCancelProformaModal = openCancelProformaModal;
+window.submitCancelProforma = submitCancelProforma;
+window.viewInvoiceFromProforma = viewInvoiceFromProforma;
+
 // Populate customer select in POS
 function populateCustomerSelect(filter = '') {
     const dropdown = document.getElementById('pos-customer-dropdown');
     if (!dropdown) return;
 
-    let filtered = CUSTOMERS;
-    if (filter) {
-        const q = filter.toLowerCase();
-        filtered = filtered.filter(c => c.name.toLowerCase().includes(q) || c.type.toLowerCase().includes(q));
+    if (!Array.isArray(CUSTOMERS) || CUSTOMERS.length === 0) {
+        if (typeof fetchCustomers === 'function') fetchCustomers();
+    }
+
+    let filtered = Array.isArray(CUSTOMERS) ? [...CUSTOMERS] : [];
+    if (filter && typeof filter === 'string') {
+        const q = filter.trim().toLowerCase();
+        if (q) {
+            filtered = filtered.filter(c => {
+                const name = (c.name || '').toLowerCase();
+                const type = (c.type || '').toLowerCase();
+                const phone = (c.phone || '').toLowerCase();
+                const id = (c.id || '').toLowerCase();
+                return name.includes(q) || type.includes(q) || phone.includes(q) || id.includes(q);
+            });
+        }
     }
 
     if (filtered.length === 0) {
@@ -2195,18 +3239,21 @@ function populateCustomerSelect(filter = '') {
     }
 
     dropdown.innerHTML = filtered.map(c => `
-        <div class="customer-dropdown-item" data-id="${c.id}" data-name="${c.name}" style="padding: 0.5rem 0.75rem; cursor: pointer; border-bottom: 1px solid var(--gray-100); display: flex; flex-direction: column; transition: background-color 0.2s;">
-            <span style="font-weight: 500; font-size: 0.875rem;">${c.name}</span>
-            <span style="font-size: 0.75rem; color: var(--gray-500);">${c.type} &middot; ${c.phone}</span>
+        <div class="customer-dropdown-item" data-id="${c.id}" data-name="${(c.name || '').replace(/"/g, '&quot;')}" style="padding: 0.55rem 0.85rem; cursor: pointer; border-bottom: 1px solid var(--gray-100); display: flex; flex-direction: column; transition: background-color 0.15s;">
+            <span style="font-weight: 600; font-size: 0.875rem; color: var(--gray-900);">${c.name || 'Pelanggan'}</span>
+            <span style="font-size: 0.72rem; color: var(--gray-500); margin-top: 2px;">${c.type ? c.type + ' &middot; ' : ''}${c.phone || '-'}</span>
         </div>
     `).join('');
 
     // Add click listeners to items
     dropdown.querySelectorAll('.customer-dropdown-item').forEach(item => {
-        item.addEventListener('click', (e) => {
+        item.addEventListener('click', async (e) => {
+            e.stopPropagation();
             const id = e.currentTarget.dataset.id;
-            const name = e.currentTarget.dataset.name;
+            const customer = (CUSTOMERS || []).find(c => String(c.id) === String(id));
+            const name = e.currentTarget.dataset.name || (customer ? customer.name : '');
             const currentCustomerId = document.getElementById('pos-customer-id').value;
+
             // Jika pelanggan sudah dipilih dan berbeda, dan keranjang tidak kosong: minta konfirmasi
             if (currentCustomerId && currentCustomerId !== id && cart.length > 0) {
                 if (!confirm('Mengganti pelanggan akan mengosongkan keranjang karena pricelist mungkin berbeda. Lanjutkan?')) {
@@ -2217,11 +3264,20 @@ function populateCustomerSelect(filter = '') {
                 cart = [];
                 renderCart();
             }
-            document.getElementById('pos-customer-search').value = name;
+
+            const searchInput = document.getElementById('pos-customer-search');
+            if (searchInput) searchInput.value = name;
             document.getElementById('pos-customer-id').value = id;
             dropdown.style.display = 'none';
-            handlePOSCustomerChange(id);
-            // Update product grid (unlock)
+
+            // Tampilkan tombol clear (X)
+            const clearBtn = document.getElementById('pos-customer-clear');
+            if (clearBtn) clearBtn.style.display = 'inline-block';
+
+            // Ambil effective prices pelanggan & update badge
+            await handlePOSCustomerChange(id);
+
+            // Update product grid (unlock produk)
             const activeCat = document.querySelector('.pos-category-tab.active')?.dataset.cat || 'all';
             renderPOSProducts(document.getElementById('pos-search')?.value || '', activeCat);
         });
@@ -2236,24 +3292,38 @@ function populateCustomerSelect(filter = '') {
     });
 }
 
-
-
 // POS Customer Search bindings
-document.addEventListener('DOMContentLoaded', () => {
+function initPOSCustomerSearch() {
     const searchInput = document.getElementById('pos-customer-search');
     const dropdown = document.getElementById('pos-customer-dropdown');
     const toggle = document.getElementById('pos-customer-dropdown-toggle');
+    const clearBtn = document.getElementById('pos-customer-clear');
 
     if (searchInput && dropdown) {
+        searchInput.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (dropdown.style.display !== 'block') {
+                populateCustomerSelect('');
+                dropdown.style.display = 'block';
+                searchInput.select();
+            }
+        });
+
         searchInput.addEventListener('focus', () => {
-            populateCustomerSelect(searchInput.value);
+            populateCustomerSelect('');
             dropdown.style.display = 'block';
+            searchInput.select();
         });
 
         searchInput.addEventListener('input', (e) => {
             populateCustomerSelect(e.target.value);
             dropdown.style.display = 'block';
-            document.getElementById('pos-customer-id').value = '';
+            const curId = document.getElementById('pos-customer-id').value;
+            const curCust = (CUSTOMERS || []).find(c => String(c.id) === String(curId));
+            if (!curCust || curCust.name !== e.target.value) {
+                document.getElementById('pos-customer-id').value = '';
+            }
+            if (clearBtn) clearBtn.style.display = e.target.value ? 'inline-block' : 'none';
         });
 
         toggle?.addEventListener('click', (e) => {
@@ -2261,10 +3331,26 @@ document.addEventListener('DOMContentLoaded', () => {
             if (dropdown.style.display === 'block') {
                 dropdown.style.display = 'none';
             } else {
-                populateCustomerSelect(searchInput.value);
+                populateCustomerSelect('');
                 dropdown.style.display = 'block';
                 searchInput.focus();
             }
+        });
+
+        clearBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (cart.length > 0) {
+                if (!confirm('Menghapus pelanggan akan mengosongkan keranjang. Lanjutkan?')) return;
+                cart = [];
+                renderCart();
+            }
+            searchInput.value = '';
+            document.getElementById('pos-customer-id').value = '';
+            clearBtn.style.display = 'none';
+            dropdown.style.display = 'none';
+            handlePOSCustomerChange('');
+            const activeCat = document.querySelector('.pos-category-tab.active')?.dataset.cat || 'all';
+            renderPOSProducts(document.getElementById('pos-search')?.value || '', activeCat);
         });
 
         document.addEventListener('click', (e) => {
@@ -2273,7 +3359,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initPOSCustomerSearch);
+} else {
+    initPOSCustomerSearch();
+}
 
 // ---------- Tab Filter Bindings ----------
 document.querySelectorAll('.tab-filters').forEach(filterGroup => {
@@ -2317,6 +3409,41 @@ function getTodayWITA() {
         const wita = new Date(now.getTime() + 8 * 60 * 60 * 1000);
         return wita.toISOString().split('T')[0];
     }
+}
+
+/**
+ * Returns the maximum allowed order date (today + 7 days) in YYYY-MM-DD format (WITA).
+ * Masalah 2: user boleh memilih tanggal maju maksimal 7 hari ke depan.
+ */
+function getMaxOrderDateWITA() {
+    try {
+        const now = new Date();
+        // Ambil komponen tanggal hari ini di WITA
+        const wita = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Makassar' }).format(now);
+        // Tambahkan 7 hari sebagai string YYYY-MM-DD (aman dari DST)
+        const d = new Date(wita + 'T00:00:00');
+        d.setDate(d.getDate() + 7);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    } catch (e) {
+        // Fallback: gunakan UTC+8 manual
+        const now = new Date();
+        const wita = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+        wita.setDate(wita.getDate() + 7);
+        return wita.toISOString().split('T')[0];
+    }
+}
+
+/**
+ * Format tanggal maksimum +7 hari ke format DD/MM/YYYY untuk pesan toast.
+ */
+function formatMaxDateDisplay(maxDateStr) {
+    if (!maxDateStr) return '';
+    const parts = maxDateStr.split('-');
+    if (parts.length !== 3) return maxDateStr;
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
 }
 
 function calculateDueDate(paymentTypeName, transactionDateStr) {
@@ -3732,6 +4859,18 @@ async function fetchInvoices(page) {
         renderRecentTransactions();
         refreshCharts();
 
+        // Load INVOICE_PROFORMA_MAP — proforma yang sudah ada dari invoice (Item 4)
+        try {
+            const pfMapRes = await fetch('/api/proformas?sumber=dari_invoice&limit=500&page=1', { headers: getAuthHeaders() });
+            if (pfMapRes.ok) {
+                const pfMapData = await pfMapRes.json();
+                INVOICE_PROFORMA_MAP = {};
+                (pfMapData.rows || []).forEach(pf => {
+                    if (pf.invoice_id) INVOICE_PROFORMA_MAP[pf.invoice_id] = pf.pk;
+                });
+            }
+        } catch(_) { /* silent — map hanya untuk UI hint */ }
+
         // Paginated fetch for invoices table
         if (page !== undefined) paginationState.invoices.page = page;
         const q = document.getElementById('invoice-search')?.value || '';
@@ -3776,6 +4915,11 @@ async function fetchInvoices(page) {
                         ${canEdit && statusLower !== 'batal' && statusLower !== 'cancel' ? `<button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem;" title="Edit Invoice" onclick="openEditInvoiceModal('${inv.id}')">
                             <i data-lucide="edit-2" style="width: 14px; height: 14px; margin: 0;"></i>
                         </button>` : ''}
+                        ${statusLower !== 'batal' && statusLower !== 'cancel' ? (
+                            INVOICE_PROFORMA_MAP[inv.id]
+                            ? `<button class="btn-toolbar secondary" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-right:0.25rem; color:var(--blue-700); border-color:var(--blue-300);" title="Cetak Proforma" onclick="printProformaDariInvoice(${INVOICE_PROFORMA_MAP[inv.id]})"><i data-lucide="file-text" style="width:13px;height:13px;margin:0;"></i></button>`
+                            : `<button class="btn-toolbar secondary" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-right:0.25rem;" title="Buat Proforma" onclick="openBuatProformaDariInvoice('${inv.id}')"><i data-lucide="file-plus" style="width:13px;height:13px;margin:0;"></i></button>`
+                        ) : ''}
                         ${statusLower !== 'lunas' && statusLower !== 'batal' && statusLower !== 'cancel' ? `<button class="btn-toolbar primary" style="padding:0.25rem 0.5rem; font-size:0.75rem;" onclick="openPiutangPaymentModal('${inv.id}', ${sisa})">Bayar</button>` : ''}
                     </td>
                 </tr>`;
@@ -4890,6 +6034,9 @@ async function populateMasterDropdowns() {
         const custCats = await fetchAndFill('/api/master/customer-categories', ['add-customer-type', 'edit-customer-type'], 'id', 'name');
         await fetchAndFill('/api/master/vendor-categories', ['add-vendor-category', 'edit-vendor-category'], 'id', 'name');
         const paymentTypes = await fetchAndFill('/api/master/payment-types', ['cart-payment-type', 'add-purchase-payment-type', 'edit-purchase-payment-type', 'edit-invoice-payment-type', 'payment-method', 'manual-invoice-payment-type'], 'id', 'name');
+        ALL_PAYMENT_TYPES = paymentTypes || [];
+        window.ALL_PAYMENT_TYPES = ALL_PAYMENT_TYPES;
+        window.paymentTypes = ALL_PAYMENT_TYPES;
 
         // Populate Payment Type Filter in Invoices Page (Requirement 5)
         const invPayFilter = document.getElementById('invoice-payment-type-filter');
@@ -4903,20 +6050,21 @@ async function populateMasterDropdowns() {
         const cartOrderDateEl = document.getElementById('cart-order-date');
         if (cartOrderDateEl) {
             const curToday = getTodayWITA();
-            cartOrderDateEl.max = curToday;
+            const curMax = getMaxOrderDateWITA();
+            cartOrderDateEl.max = curMax;
             if (!cartOrderDateEl.value) {
                 cartOrderDateEl.value = curToday;
             }
             if (!cartOrderDateEl.dataset.initialized) {
                 cartOrderDateEl.dataset.initialized = 'true';
                 cartOrderDateEl.addEventListener('change', () => {
-                    const todayStr = getTodayWITA();
-                    cartOrderDateEl.max = todayStr;
+                    const maxDate = getMaxOrderDateWITA();
+                    cartOrderDateEl.max = maxDate;
                     if (!cartOrderDateEl.value) {
-                        cartOrderDateEl.value = todayStr;
-                    } else if (cartOrderDateEl.value > todayStr) {
-                        showToast('Tanggal order tidak boleh lebih dari hari ini.', 'warning');
-                        cartOrderDateEl.value = todayStr;
+                        cartOrderDateEl.value = getTodayWITA();
+                    } else if (cartOrderDateEl.value > maxDate) {
+                        showToast(`Tanggal Order maksimal 7 hari ke depan (sampai ${formatMaxDateDisplay(maxDate)}).`, 'warning');
+                        cartOrderDateEl.value = getTodayWITA();
                     }
                 });
                 cartOrderDateEl.addEventListener('blur', () => {

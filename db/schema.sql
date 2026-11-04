@@ -1,32 +1,33 @@
 -- =============================================
 -- SupplierPro Database Schema (MySQL)
+-- Updated: Proforma Invoice & Collation Harmonized
 -- =============================================
 
 -- Master Tables
 CREATE TABLE IF NOT EXISTS product_categories (
   id VARCHAR(255) PRIMARY KEY,
   name VARCHAR(255) NOT NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS product_units (
   id VARCHAR(255) PRIMARY KEY,
   name VARCHAR(255) NOT NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS customer_categories (
   id VARCHAR(255) PRIMARY KEY,
   name VARCHAR(255) NOT NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS vendor_categories (
   id VARCHAR(255) PRIMARY KEY,
   name VARCHAR(255) NOT NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS payment_types (
   id VARCHAR(255) PRIMARY KEY,
   name VARCHAR(255) NOT NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Core Tables
 CREATE TABLE IF NOT EXISTS users (
@@ -37,7 +38,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash VARCHAR(255) NOT NULL,
   role VARCHAR(50) DEFAULT 'kasir',
   active TINYINT(1) DEFAULT 1
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS products (
   id VARCHAR(255) PRIMARY KEY,
@@ -52,7 +53,7 @@ CREATE TABLE IF NOT EXISTS products (
   unit_id VARCHAR(255),
   FOREIGN KEY (category_id) REFERENCES product_categories(id) ON DELETE SET NULL,
   FOREIGN KEY (unit_id) REFERENCES product_units(id) ON DELETE SET NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS pricelists (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -62,7 +63,7 @@ CREATE TABLE IF NOT EXISTS pricelists (
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS pricelist_items (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -75,7 +76,7 @@ CREATE TABLE IF NOT EXISTS pricelist_items (
   KEY idx_pricelist_items_product (product_id),
   CONSTRAINT fk_pli_pricelist FOREIGN KEY (pricelist_id) REFERENCES pricelists(id) ON DELETE CASCADE,
   CONSTRAINT fk_pli_product   FOREIGN KEY (product_id)   REFERENCES products(id)   ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS customers (
   id VARCHAR(255) PRIMARY KEY,
@@ -95,7 +96,7 @@ CREATE TABLE IF NOT EXISTS customers (
   no_hp_2 VARCHAR(30) DEFAULT NULL,
   FOREIGN KEY (customer_category_id) REFERENCES customer_categories(id) ON DELETE SET NULL,
   FOREIGN KEY (pricelist_id) REFERENCES pricelists(id) ON DELETE SET NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS vendors (
   id VARCHAR(255) PRIMARY KEY,
@@ -109,7 +110,7 @@ CREATE TABLE IF NOT EXISTS vendors (
   nomor_rek VARCHAR(255),
   pemilik_rek VARCHAR(255),
   FOREIGN KEY (vendor_category_id) REFERENCES vendor_categories(id) ON DELETE SET NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS stock_adjustments (
   id VARCHAR(255) PRIMARY KEY,
@@ -122,7 +123,7 @@ CREATE TABLE IF NOT EXISTS stock_adjustments (
   FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
   CHECK (type IN ('IN', 'OUT'))
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS sales_invoices (
   id VARCHAR(255) PRIMARY KEY,
@@ -143,7 +144,7 @@ CREATE TABLE IF NOT EXISTS sales_invoices (
   FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
   FOREIGN KEY (payment_type_id) REFERENCES payment_types(id) ON DELETE SET NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS invoice_items (
   id VARCHAR(255) PRIMARY KEY,
@@ -156,7 +157,7 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   fee_notes TEXT,
   FOREIGN KEY (invoice_id) REFERENCES sales_invoices(id) ON DELETE CASCADE,
   FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS purchase_orders (
   id VARCHAR(255) PRIMARY KEY,
@@ -175,7 +176,7 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE SET NULL,
   FOREIGN KEY (payment_type_id) REFERENCES payment_types(id) ON DELETE SET NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS purchase_order_items (
   id VARCHAR(255) PRIMARY KEY,
@@ -185,7 +186,7 @@ CREATE TABLE IF NOT EXISTS purchase_order_items (
   cost DECIMAL(20,4) NOT NULL,
   FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
   FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS cash_transactions (
   id VARCHAR(255) PRIMARY KEY,
@@ -205,17 +206,17 @@ CREATE TABLE IF NOT EXISTS cash_transactions (
   FOREIGN KEY (payment_type_id) REFERENCES payment_types(id) ON DELETE SET NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
   CHECK (type IN ('IN', 'OUT'))
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS invoice_counters (
   year INT NOT NULL PRIMARY KEY,
   last_number INT NOT NULL DEFAULT 0
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS settings (
   `key` VARCHAR(255) PRIMARY KEY,
   value TEXT
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS cash_categories (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -223,12 +224,12 @@ CREATE TABLE IF NOT EXISTS cash_categories (
   type VARCHAR(10) DEFAULT 'BOTH',
   is_system TINYINT(1) DEFAULT 0,
   CHECK (type IN ('IN', 'OUT', 'BOTH'))
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS payment_counters (
   year INT NOT NULL PRIMARY KEY,
   last_number INT NOT NULL DEFAULT 0
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS sales_invoice_payments (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -253,5 +254,66 @@ CREATE TABLE IF NOT EXISTS sales_invoice_payments (
   FOREIGN KEY (void_by) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (cash_transaction_id) REFERENCES cash_transactions(id) ON DELETE SET NULL,
   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- =============================================
+-- Proforma Tables
+-- =============================================
+
+CREATE TABLE IF NOT EXISTS proforma_counters (
+  year INT NOT NULL PRIMARY KEY,
+  last_number INT NOT NULL DEFAULT 0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS proformas (
+  pk INT AUTO_INCREMENT PRIMARY KEY,
+  proforma_no VARCHAR(20) NOT NULL UNIQUE,
+  customer_id VARCHAR(255) DEFAULT NULL,
+  order_date DATE NOT NULL,
+  berlaku_hingga DATE NOT NULL,
+  payment_type_id VARCHAR(255) DEFAULT NULL,
+  subtotal DECIMAL(20,4) DEFAULT 0,
+  discount DECIMAL(20,4) DEFAULT 0,
+  ppn_rate DECIMAL(5,2) DEFAULT 0,
+  ppn_amount DECIMAL(20,4) DEFAULT 0,
+  ppn_enabled TINYINT(1) DEFAULT 0,
+  total DECIMAL(20,4) DEFAULT 0,
+  status VARCHAR(20) NOT NULL DEFAULT 'aktif',
+  revisi INT NOT NULL DEFAULT 0,
+  diubah_pada DATETIME NULL,
+  diubah_oleh INT(11) DEFAULT NULL,
+  sumber ENUM('manual','dari_invoice') NOT NULL DEFAULT 'manual',
+  alasan_pembatalan TEXT DEFAULT NULL,
+  user_id INT(11) DEFAULT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  invoice_id VARCHAR(255) DEFAULT NULL,
+  INDEX idx_proforma_customer (customer_id),
+  INDEX idx_proforma_status (status),
+  INDEX idx_proforma_order_date (order_date),
+  INDEX idx_proforma_berlaku (berlaku_hingga),
+  UNIQUE KEY uk_proforma_invoice_id (invoice_id),
+  FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+  FOREIGN KEY (payment_type_id) REFERENCES payment_types(id) ON DELETE SET NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (diubah_oleh) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (invoice_id) REFERENCES sales_invoices(id) ON DELETE SET NULL,
+  CHECK (status IN ('aktif', 'dikonversi', 'dibatalkan'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS proforma_items (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  proforma_pk INT NOT NULL,
+  product_id VARCHAR(255) DEFAULT NULL,
+  product_name_snapshot VARCHAR(255) NOT NULL,
+  unit_name_snapshot VARCHAR(50) DEFAULT '-',
+  quantity DECIMAL(20,4) NOT NULL,
+  price DECIMAL(20,4) NOT NULL,
+  subtotal_item DECIMAL(20,4) NOT NULL,
+  customer_fee DECIMAL(20,4) DEFAULT 0,
+  fee_notes TEXT DEFAULT NULL,
+  cost_price_snapshot DECIMAL(20,4) DEFAULT 0,
+  FOREIGN KEY (proforma_pk) REFERENCES proformas(pk) ON DELETE CASCADE,
+  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,
+  INDEX idx_proforma_items_pk (proforma_pk),
+  INDEX idx_proforma_items_product (product_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

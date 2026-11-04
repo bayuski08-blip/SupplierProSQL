@@ -1,5 +1,6 @@
 -- =============================================
 -- Seed Data untuk SupplierPro (MySQL)
+-- Updated: Master Categories & Proforma Settings
 -- =============================================
 
 -- Master Data
@@ -7,7 +8,15 @@ INSERT IGNORE INTO product_categories (id, name) VALUES
   ('PC-1', 'Minuman'), 
   ('PC-2', 'Makanan'), 
   ('PC-3', 'Sembako'), 
-  ('PC-4', 'Lainnya');
+  ('PC-4', 'Lainnya'),
+  ('PC-5', 'Dairy'),
+  ('PC-6', 'Frozen'),
+  ('PC-7', 'Fruits'),
+  ('PC-8', 'Groceries'),
+  ('PC-9', 'Herbs'),
+  ('PC-10', 'Nuts'),
+  ('PC-11', 'Pasta'),
+  ('PC-12', 'Non Food');
 
 INSERT IGNORE INTO product_units (id, name) VALUES 
   ('PU-1', 'pcs'), 
@@ -188,5 +197,8 @@ INSERT IGNORE INTO settings (`key`, value) VALUES
   ('prefix_purchase', 'PO-{YYYY}-{MM}-'),
   ('prefix_sales', 'INV-{YYYY}-{MM}-'),
   ('prefix_vendor', 'V'),
+  ('prefix_payment', 'PAY-{YYYY}-{MM}-'),
+  ('prefix_pricelist', 'PL'),
+  ('proforma_berlaku_hari', '7'),
   ('ppn_enabled', 'true'),
   ('pajak_default', '11');

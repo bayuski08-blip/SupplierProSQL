@@ -129,7 +129,8 @@ const mysqlPool = mysql.createPool({
   database: urlParsed.pathname.replace('/', ''),
   waitForConnections: true,
   connectionLimit: 10,
-  timezone: '+08:00'  // WITA (UTC+8) — ensures DATE() functions align with Indonesian business time
+  timezone: '+08:00', // WITA (UTC+8) — ensures DATE() functions align with Indonesian business time
+  dateStrings: true   // Returns DATE/DATETIME columns as pure strings, eliminating UTC timezone shift on Linux/Hostinger servers
 });
 
 /**

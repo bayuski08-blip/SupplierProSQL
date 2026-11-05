@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS customers (
   name VARCHAR(255) NOT NULL,
   customer_category_id VARCHAR(255),
   pricelist_id INT DEFAULT NULL,
+  tipe_pembayaran_id VARCHAR(255) DEFAULT NULL,
   phone VARCHAR(255),
   city VARCHAR(255),
   address TEXT,
@@ -95,7 +96,8 @@ CREATE TABLE IF NOT EXISTS customers (
   email VARCHAR(255) DEFAULT NULL,
   no_hp_2 VARCHAR(30) DEFAULT NULL,
   FOREIGN KEY (customer_category_id) REFERENCES customer_categories(id) ON DELETE SET NULL,
-  FOREIGN KEY (pricelist_id) REFERENCES pricelists(id) ON DELETE SET NULL
+  FOREIGN KEY (pricelist_id) REFERENCES pricelists(id) ON DELETE SET NULL,
+  FOREIGN KEY (tipe_pembayaran_id) REFERENCES payment_types(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS vendors (

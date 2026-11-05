@@ -325,6 +325,24 @@ pool.query(`
   }
 })();
 
+// Auto-migrate: ensure customers.tipe_pembayaran_id exists with FK to payment_types
+(async () => {
+  try {
+    const [cols] = await mysqlPool.query("SHOW COLUMNS FROM customers LIKE 'tipe_pembayaran_id'");
+    if (!cols || cols.length === 0) {
+      await mysqlPool.query(`
+        ALTER TABLE customers
+        ADD COLUMN tipe_pembayaran_id VARCHAR(255) NULL DEFAULT NULL AFTER pricelist_id,
+        ADD CONSTRAINT fk_customers_tipe_pembayaran
+          FOREIGN KEY (tipe_pembayaran_id) REFERENCES payment_types(id) ON DELETE SET NULL
+      `);
+      console.log('[Startup] Column tipe_pembayaran_id added to customers table.');
+    }
+  } catch (err) {
+    console.error('[Startup] Failed to check/migrate customers.tipe_pembayaran_id:', err.message);
+  }
+})();
+
 // Seed/upgrade cash_categories to the canonical defaults (MySQL-compatible)
 (async () => {
   // MySQL: UNIQUE constraint already defined in schema — no pg_constraint check needed
@@ -1277,15 +1295,19 @@ app.post('/api/stock-adjust', authenticateToken, authorizeRoles('admin', 'gudang
 const CUSTOMER_SELECT_SQL = `
   SELECT
     c.*,
+    c.tipe_pembayaran_id AS payment_type_id,
     cc.name AS category_name,
     pl.nama AS pricelist_name,
     pl.kode AS pricelist_kode,
+    pt.name AS tipe_pembayaran_name,
+    pt.name AS payment_type_name,
     COALESCE(SUM(CASE WHEN si.status NOT IN ('Batal', 'Cancel', 'Dibatalkan') THEN si.total ELSE 0 END), 0) AS total_belanja,
     COALESCE(SUM(CASE WHEN si.status NOT IN ('Lunas','Batal','Cancel','Dibatalkan') THEN si.total - si.paid_amount ELSE 0 END), 0) AS total_piutang_berjalan,
     c.credit_lmt - COALESCE(SUM(CASE WHEN si.status NOT IN ('Lunas','Batal','Cancel','Dibatalkan') THEN si.total - si.paid_amount ELSE 0 END), 0) AS sisa_limit_piutang
   FROM customers c
   LEFT JOIN customer_categories cc ON c.customer_category_id = cc.id
   LEFT JOIN pricelists pl ON c.pricelist_id = pl.id
+  LEFT JOIN payment_types pt ON c.tipe_pembayaran_id = pt.id
   LEFT JOIN sales_invoices si ON si.customer_id = c.id
 `;
 
@@ -1328,7 +1350,7 @@ app.get('/api/customers', authenticateToken, authorizeRoles('admin', 'kasir', 'f
 
       const dataSql = CUSTOMER_SELECT_SQL + `
         ${whereClause}
-        GROUP BY c.id, cc.name, pl.nama, pl.kode
+        GROUP BY c.id, cc.name, pl.nama, pl.kode, pt.name
         ORDER BY c.name ASC, c.id ASC
         LIMIT ? OFFSET ?
       `;
@@ -1349,7 +1371,7 @@ app.get('/api/customers', authenticateToken, authorizeRoles('admin', 'kasir', 'f
     const result = await pool.query(
       CUSTOMER_SELECT_SQL + `
       ${whereClause}
-      GROUP BY c.id, cc.name, pl.nama, pl.kode
+      GROUP BY c.id, cc.name, pl.nama, pl.kode, pt.name
       ORDER BY c.name ASC, c.id ASC
     `, params);
     res.json(result.rows);
@@ -1365,7 +1387,7 @@ app.get('/api/customers/search', authenticateToken, authorizeRoles('admin', 'kas
     const result = await pool.query(
       CUSTOMER_SELECT_SQL +
       ` WHERE (c.name LIKE ? OR c.phone LIKE ? OR c.id LIKE ?)
-        GROUP BY c.id, cc.name, pl.nama, pl.kode
+        GROUP BY c.id, cc.name, pl.nama, pl.kode, pt.name
         ORDER BY c.name ASC
         LIMIT 20`,
       [pattern, pattern, pattern]
@@ -1380,7 +1402,7 @@ app.get('/api/customers/:id', authenticateToken, authorizeRoles('admin', 'kasir'
   const { id } = req.params;
   try {
     const result = await pool.query(
-      CUSTOMER_SELECT_SQL + ' WHERE c.id = $1 GROUP BY c.id, cc.name, pl.nama, pl.kode',
+      CUSTOMER_SELECT_SQL + ' WHERE c.id = $1 GROUP BY c.id, cc.name, pl.nama, pl.kode, pt.name',
       [id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Pelanggan tidak ditemukan' });
@@ -1391,7 +1413,7 @@ app.get('/api/customers/:id', authenticateToken, authorizeRoles('admin', 'kasir'
 });
 
 app.post('/api/customers', authenticateToken, authorizeRoles('admin', 'kasir', 'owner'), async (req, res) => {
-  const { name, customer_category_id, pricelist_id, phone, city, address, credit_lmt, ktp, npwp, npwp_name, npwp_address, nib, email, no_hp_2 } = req.body;
+  const { name, customer_category_id, pricelist_id, tipe_pembayaran_id, payment_type_id, phone, city, address, credit_lmt, ktp, npwp, npwp_name, npwp_address, nib, email, no_hp_2 } = req.body;
 
   // Validasi backend
   if (!name || !name.trim()) return res.status(400).json({ error: 'Nama pelanggan wajib diisi' });
@@ -1406,12 +1428,21 @@ app.post('/api/customers', authenticateToken, authorizeRoles('admin', 'kasir', '
     }
   }
 
-  const insertQuery = 'INSERT INTO customers (id, name, customer_category_id, pricelist_id, phone, city, address, credit_lmt, ktp, npwp, npwp_name, npwp_address, nib, email, no_hp_2) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)';
+  const pTypeIdRaw = (tipe_pembayaran_id !== undefined ? tipe_pembayaran_id : payment_type_id);
+  const pTypeId = (pTypeIdRaw !== undefined && pTypeIdRaw !== null && String(pTypeIdRaw).trim() !== '') ? String(pTypeIdRaw).trim() : null;
+  if (pTypeId) {
+    const ptCheck = await pool.query('SELECT id FROM payment_types WHERE id = ?', [pTypeId]);
+    if (ptCheck.rows.length === 0) {
+      return res.status(400).json({ error: 'Tipe pembayaran tidak ditemukan di master data' });
+    }
+  }
+
+  const insertQuery = 'INSERT INTO customers (id, name, customer_category_id, pricelist_id, tipe_pembayaran_id, phone, city, address, credit_lmt, ktp, npwp, npwp_name, npwp_address, nib, email, no_hp_2) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)';
   try {
     const prefix = await getSetting('prefix_customer', 'C');
     const id = await generateNextId(pool, 'customers', prefix);
-    await pool.query(insertQuery, [id, name.trim(), customer_category_id || null, plId, phone, city, address, credit_lmt || 0, ktp || null, npwp || null, npwp_name || null, npwp_address || null, nib || null, email || null, no_hp_2 || null]);
-    res.json({ success: true, id });
+    await pool.query(insertQuery, [id, name.trim(), customer_category_id || null, plId, pTypeId, phone, city, address, credit_lmt || 0, ktp || null, npwp || null, npwp_name || null, npwp_address || null, nib || null, email || null, no_hp_2 || null]);
+    res.json({ success: true, id, tipe_pembayaran_id: pTypeId });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -1419,7 +1450,7 @@ app.post('/api/customers', authenticateToken, authorizeRoles('admin', 'kasir', '
 
 app.put('/api/customers/:id', authenticateToken, authorizeRoles('admin', 'kasir', 'owner'), async (req, res) => {
   const { id } = req.params;
-  const { name, customer_category_id, pricelist_id, phone, city, address, credit_lmt, ktp, npwp, npwp_name, npwp_address, nib, email, no_hp_2 } = req.body;
+  const { name, customer_category_id, pricelist_id, tipe_pembayaran_id, payment_type_id, phone, city, address, credit_lmt, ktp, npwp, npwp_name, npwp_address, nib, email, no_hp_2 } = req.body;
 
   // Validasi backend
   if (!name || !name.trim()) return res.status(400).json({ error: 'Nama pelanggan wajib diisi' });
@@ -1434,13 +1465,22 @@ app.put('/api/customers/:id', authenticateToken, authorizeRoles('admin', 'kasir'
     }
   }
 
-  const updateQuery = 'UPDATE customers SET name = $1, customer_category_id = $2, pricelist_id = $3, phone = $4, city = $5, address = $6, credit_lmt = $7, ktp = $8, npwp = $9, npwp_name = $10, npwp_address = $11, nib = $12, email = $13, no_hp_2 = $14 WHERE id = $15';
+  const pTypeIdRaw = (tipe_pembayaran_id !== undefined ? tipe_pembayaran_id : payment_type_id);
+  const pTypeId = (pTypeIdRaw !== undefined && pTypeIdRaw !== null && String(pTypeIdRaw).trim() !== '') ? String(pTypeIdRaw).trim() : null;
+  if (pTypeId) {
+    const ptCheck = await pool.query('SELECT id FROM payment_types WHERE id = ?', [pTypeId]);
+    if (ptCheck.rows.length === 0) {
+      return res.status(400).json({ error: 'Tipe pembayaran tidak ditemukan di master data' });
+    }
+  }
+
+  const updateQuery = 'UPDATE customers SET name = $1, customer_category_id = $2, pricelist_id = $3, tipe_pembayaran_id = $4, phone = $5, city = $6, address = $7, credit_lmt = $8, ktp = $9, npwp = $10, npwp_name = $11, npwp_address = $12, nib = $13, email = $14, no_hp_2 = $15 WHERE id = $16';
   try {
-    const result = await pool.query(updateQuery, [name.trim(), customer_category_id || null, plId, phone, city, address, credit_lmt || 0, ktp || null, npwp || null, npwp_name || null, npwp_address || null, nib || null, email || null, no_hp_2 || null, id]);
+    const result = await pool.query(updateQuery, [name.trim(), customer_category_id || null, plId, pTypeId, phone, city, address, credit_lmt || 0, ktp || null, npwp || null, npwp_name || null, npwp_address || null, nib || null, email || null, no_hp_2 || null, id]);
     if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Pelanggan tidak ditemukan' });
     }
-    res.json({ success: true, message: 'Pelanggan berhasil diperbarui' });
+    res.json({ success: true, message: 'Pelanggan berhasil diperbarui', tipe_pembayaran_id: pTypeId });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

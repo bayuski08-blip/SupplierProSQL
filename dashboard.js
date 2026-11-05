@@ -887,6 +887,11 @@ function _renderCustomersLocal_UNUSED(filter = '', type = '') {
                     ${c.pricelistName ? `<div style="margin-top:0.2rem;"><span class="badge-pricelist-source" style="font-size:0.65rem; padding:0.1rem 0.35rem;">${c.pricelistName}</span></div>` : ''}
                 </td>
                 <td><span class="badge-status aman">${c.type}</span></td>
+                <td>
+                    ${(c.tipePembayaranName || c.tipe_pembayaran_name)
+                        ? `<span class="badge-status" style="background:var(--slate-100);color:var(--slate-700);font-size:0.75rem;">${c.tipePembayaranName || c.tipe_pembayaran_name}</span>`
+                        : `<span style="color:var(--slate-400);font-size:0.75rem;font-style:italic;">Belum diatur (Kredit 30 Hari)</span>`}
+                </td>
                 <td>${c.city}</td>
                 <td>${c.phone}</td>
                 <td style="font-weight:700;">${rp(c.creditLimit)}</td>
@@ -3274,6 +3279,9 @@ function populateCustomerSelect(filter = '') {
             const clearBtn = document.getElementById('pos-customer-clear');
             if (clearBtn) clearBtn.style.display = 'inline-block';
 
+            // Set default payment type pelanggan di kasir / order (desktop & mobile)
+            applyCustomerPaymentTypeDefault(customer || id);
+
             // Ambil effective prices pelanggan & update badge
             await handlePOSCustomerChange(id);
 
@@ -3349,6 +3357,7 @@ function initPOSCustomerSearch() {
             clearBtn.style.display = 'none';
             dropdown.style.display = 'none';
             handlePOSCustomerChange('');
+            applyCustomerPaymentTypeDefault(null);
             const activeCat = document.querySelector('.pos-category-tab.active')?.dataset.cat || 'all';
             renderPOSProducts(document.getElementById('pos-search')?.value || '', activeCat);
         });
@@ -3883,6 +3892,12 @@ async function fetchCustomers(page) {
             pricelistId: c.pricelist_id || null,
             pricelistName: c.pricelist_nama || c.pricelist_name || '',
             pricelistKode: c.pricelist_kode || '',
+            tipePembayaranId: c.tipe_pembayaran_id || c.payment_type_id || null,
+            tipePembayaranName: c.tipe_pembayaran_name || c.payment_type_name || '',
+            tipe_pembayaran_id: c.tipe_pembayaran_id || c.payment_type_id || null,
+            payment_type_id: c.tipe_pembayaran_id || c.payment_type_id || null,
+            tipe_pembayaran_name: c.tipe_pembayaran_name || c.payment_type_name || '',
+            payment_type_name: c.tipe_pembayaran_name || c.payment_type_name || '',
             color: 'blue'
         });
 
@@ -3940,6 +3955,7 @@ async function fetchCustomers(page) {
                             <div class="entity-name">${c.name}</div>
                             <div class="entity-type">${c.type} &bull; ${c.city}</div>
                             ${c.pricelistName ? `<div style="margin-top:0.25rem;"><span class="badge-pricelist-source" style="font-size:0.7rem; padding:0.15rem 0.4rem;">${c.pricelistName}</span></div>` : ''}
+                            ${(c.tipePembayaranName || c.tipe_pembayaran_name) ? `<div style="margin-top:0.2rem;"><span class="badge-status" style="font-size:0.68rem; padding:0.1rem 0.35rem; background:var(--slate-100); color:var(--slate-700);">${c.tipePembayaranName || c.tipe_pembayaran_name}</span></div>` : ''}
                         </div>
                     </div>
                     <div class="entity-details">
@@ -3988,6 +4004,11 @@ async function fetchCustomers(page) {
                         ${c.pricelistName ? `<div style="margin-top:0.2rem;"><span class="badge-pricelist-source" style="font-size:0.65rem; padding:0.1rem 0.35rem;">${c.pricelistName}</span></div>` : ''}
                     </td>
                     <td><span class="badge-status aman">${c.type}</span></td>
+                    <td>
+                        ${(c.tipePembayaranName || c.tipe_pembayaran_name)
+                            ? `<span class="badge-status" style="background:var(--slate-100);color:var(--slate-700);font-size:0.75rem;">${c.tipePembayaranName || c.tipe_pembayaran_name}</span>`
+                            : `<span style="color:var(--slate-400);font-size:0.75rem;font-style:italic;">Belum diatur (Kredit 30 Hari)</span>`}
+                    </td>
                     <td>${c.city}</td>
                     <td>${c.phone}</td>
                     <td style="font-weight:700;">${rp(c.creditLimit)}</td>
@@ -4057,7 +4078,8 @@ async function saveCustomer(isEdit) {
         nib: document.getElementById(`${prefix}-customer-nib`)?.value.trim() || null,
         email: email || null,
         no_hp_2: document.getElementById(`${prefix}-customer-no-hp-2`)?.value.trim() || null,
-        pricelist_id: document.getElementById(`${prefix}-customer-pricelist`)?.value ? parseInt(document.getElementById(`${prefix}-customer-pricelist`).value) : null
+        pricelist_id: document.getElementById(`${prefix}-customer-pricelist`)?.value ? parseInt(document.getElementById(`${prefix}-customer-pricelist`).value) : null,
+        tipe_pembayaran_id: document.getElementById(`${prefix}-customer-payment-type`)?.value || null
     };
 
     const url = isEdit ? `/api/customers/${id}` : '/api/customers';
@@ -4094,6 +4116,7 @@ function openAddCustomerModal() {
     const typeEl = document.getElementById('add-customer-type');
     if (typeEl) typeEl.selectedIndex = 0;
     populateCustomerPricelistDropdown('add-customer-pricelist', '');
+    populateCustomerPaymentTypeDropdown('add-customer-payment-type', '');
     openModal('modal-add-customer');
 }
 
@@ -4125,6 +4148,7 @@ function openEditCustomerModal(id) {
     const nibEl = document.getElementById('edit-customer-nib');
     if (nibEl) nibEl.value = c.nib || '';
     populateCustomerPricelistDropdown('edit-customer-pricelist', c.pricelistId);
+    populateCustomerPaymentTypeDropdown('edit-customer-payment-type', c.tipePembayaranId || c.tipe_pembayaran_id || c.payment_type_id || '');
     openModal('modal-edit-customer');
 }
 
@@ -4168,6 +4192,10 @@ function openCustomerDetail(id) {
     const plDetailEl = document.getElementById('detail-customer-pricelist');
     if (plDetailEl) {
         plDetailEl.textContent = c.pricelistName ? `${c.pricelistName} (${c.pricelistKode || '-'})` : 'Harga Standar (Master)';
+    }
+    const ptDetailEl = document.getElementById('detail-customer-payment-type');
+    if (ptDetailEl) {
+        ptDetailEl.textContent = c.tipePembayaranName || c.tipe_pembayaran_name || '— Belum diatur (default Kredit 30 Hari) —';
     }
 
     const sisa = c.sisaLimitPiutang ?? c.remainingLimit;
@@ -6660,6 +6688,24 @@ function populateManualInvoiceCustomerSelect(filter = '') {
             document.getElementById('manual-invoice-customer-search').value = name;
             document.getElementById('manual-invoice-customer').value = id;
             dropdown.style.display = 'none';
+
+            // Set default payment type pelanggan untuk invoice manual
+            const cust = (CUSTOMERS || []).find(c => String(c.id) === String(id));
+            let targetPtId = null;
+            if (cust && (cust.tipe_pembayaran_id || cust.payment_type_id || cust.tipePembayaranId)) {
+                targetPtId = cust.tipe_pembayaran_id || cust.payment_type_id || cust.tipePembayaranId;
+            } else {
+                const types = Array.isArray(ALL_PAYMENT_TYPES) ? ALL_PAYMENT_TYPES : [];
+                const found30 = types.find(p => (p.name || '').trim().toLowerCase() === 'kredit 30 hari')
+                    || types.find(p => (p.name || '').toLowerCase().includes('kredit 30'))
+                    || types.find(p => (p.name || '').toLowerCase().startsWith('kredit'));
+                if (found30) targetPtId = found30.id;
+            }
+            const miPaySelect = document.getElementById('manual-invoice-payment-type');
+            if (miPaySelect && targetPtId) {
+                miPaySelect.value = targetPtId;
+                miPaySelect.dispatchEvent(new Event('change'));
+            }
         });
 
         item.addEventListener('mouseenter', () => {
@@ -6833,10 +6879,10 @@ function downloadImportTemplate() {
         ];
         filename = "sample_produk.xlsx";
     } else if (currentImportSection === 'pelanggan') {
-        headers = ["Nama", "Tipe", "Telepon", "Kota", "Alamat", "Limit Piutang"];
+        headers = ["Nama", "Tipe", "Telepon", "Kota", "Alamat", "Limit Piutang", "Tipe Pembayaran"];
         rows = [
-            ["Toko Berkah Jaya", "Reseller", "089696469991", "Kota Denpasar", "Jl. Sunia Negara No. 33", 10000000],
-            ["Warung Sari Rasa", "Warung", "085936103383", "Denpasar", "Jl. Sunia Negara No. 33 Pemogan", 2000000]
+            ["Toko Berkah Jaya", "Reseller", "089696469991", "Kota Denpasar", "Jl. Sunia Negara No. 33", 10000000, "Kredit 30 Hari"],
+            ["Warung Sari Rasa", "Warung", "085936103383", "Denpasar", "Jl. Sunia Negara No. 33 Pemogan", 2000000, "Tunai"]
         ];
         filename = "sample_pelanggan.xlsx";
     } else if (currentImportSection === 'vendor') {
@@ -7250,9 +7296,14 @@ async function executeImport(rows) {
             cats.forEach(c => categoriesMap[c.name.toLowerCase().trim()] = c.id);
             units.forEach(u => unitsMap[u.name.toLowerCase().trim()] = u.id);
         } else if (currentImportSection === 'pelanggan') {
-            const catsRes = await fetch('/api/master/customer-categories', { headers: getAuthHeaders() });
+            const [catsRes, ptsRes] = await Promise.all([
+                fetch('/api/master/customer-categories', { headers: getAuthHeaders() }),
+                fetch('/api/master/payment-types', { headers: getAuthHeaders() })
+            ]);
             const cats = await catsRes.json();
+            const pts = await ptsRes.json();
             cats.forEach(c => categoriesMap[c.name.toLowerCase().trim()] = c.id);
+            pts.forEach(p => paymentTypesMap[p.name.toLowerCase().trim()] = p.id);
         } else if (currentImportSection === 'vendor') {
             const catsRes = await fetch('/api/master/vendor-categories', { headers: getAuthHeaders() });
             const cats = await catsRes.json();
@@ -7354,6 +7405,11 @@ async function executeImport(rows) {
                     const city = row['Kota'] || '';
                     const address = row['Alamat'] || '';
                     const limit = parseFloat(row['Limit Piutang']) || 0;
+                    const ptRaw = row['Tipe Pembayaran'] || row['tipe_pembayaran'] || row['Payment Type'] || '';
+                    let tipe_pembayaran_id = null;
+                    if (ptRaw && typeof ptRaw === 'string') {
+                        tipe_pembayaran_id = paymentTypesMap[ptRaw.toLowerCase().trim()] || null;
+                    }
 
                     if (!name) throw new Error("Nama pelanggan kosong");
 
@@ -7376,7 +7432,7 @@ async function executeImport(rows) {
                         method: 'POST',
                         headers: getAuthHeaders(),
                         body: JSON.stringify({
-                            name, customer_category_id, phone, city, address, credit_lmt: limit
+                            name, customer_category_id, tipe_pembayaran_id, phone, city, address, credit_lmt: limit
                         })
                     });
                     if (!postRes.ok) {
@@ -7843,6 +7899,67 @@ function populateCustomerPricelistDropdown(selectId, selectedId) {
             `<option value="${pl.id}" ${String(pl.id) === String(selectedId) ? 'selected' : ''}>${pl.nama} (${pl.kode})</option>`
         ).join('');
 }
+
+// ── Helper: populate payment type dropdown in customer modals ───────────────
+function populateCustomerPaymentTypeDropdown(selectId, selectedId) {
+    const el = document.getElementById(selectId);
+    if (!el) return;
+    const types = Array.isArray(ALL_PAYMENT_TYPES) ? ALL_PAYMENT_TYPES : [];
+    el.innerHTML = '<option value="">— Belum diatur (default Kredit 30 Hari) —</option>' +
+        types.map(pt =>
+            `<option value="${pt.id}" ${String(pt.id) === String(selectedId) ? 'selected' : ''}>${pt.name}</option>`
+        ).join('');
+}
+window.populateCustomerPaymentTypeDropdown = populateCustomerPaymentTypeDropdown;
+
+// ── Helper: apply default payment type per customer in POS / Kasir ──────────
+function applyCustomerPaymentTypeDefault(customerOrId) {
+    const cust = (typeof customerOrId === 'object' && customerOrId !== null)
+        ? customerOrId
+        : (CUSTOMERS || []).find(c => String(c.id) === String(customerOrId));
+
+    let targetPaymentTypeId = null;
+    if (cust && (cust.tipe_pembayaran_id || cust.payment_type_id || cust.tipePembayaranId)) {
+        targetPaymentTypeId = cust.tipe_pembayaran_id || cust.payment_type_id || cust.tipePembayaranId;
+    } else {
+        // Fallback default "Kredit 30 Hari": cari record master berdasarkan NAMA (bukan hardcode ID).
+        const types = Array.isArray(ALL_PAYMENT_TYPES) ? ALL_PAYMENT_TYPES : [];
+        const found30 = types.find(p => (p.name || '').trim().toLowerCase() === 'kredit 30 hari')
+            || types.find(p => (p.name || '').toLowerCase().includes('kredit 30'))
+            || types.find(p => (p.name || '').toLowerCase().startsWith('kredit'));
+        if (found30) {
+            targetPaymentTypeId = found30.id;
+        } else {
+            // Cek langsung dari opsi select jika ALL_PAYMENT_TYPES belum siap
+            const paySelect = document.getElementById('cart-payment-type');
+            if (paySelect) {
+                for (let i = 0; i < paySelect.options.length; i++) {
+                    if (paySelect.options[i].text.toLowerCase().includes('kredit 30')) {
+                        targetPaymentTypeId = paySelect.options[i].value;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    const paySelect = document.getElementById('cart-payment-type');
+    if (paySelect && targetPaymentTypeId) {
+        let exists = false;
+        for (let i = 0; i < paySelect.options.length; i++) {
+            if (paySelect.options[i].value === String(targetPaymentTypeId)) {
+                exists = true;
+                break;
+            }
+        }
+        if (exists) {
+            paySelect.value = targetPaymentTypeId;
+            selectedCartPaymentTypeId = targetPaymentTypeId;
+            paySelect.dispatchEvent(new Event('change'));
+        }
+    }
+}
+window.applyCustomerPaymentTypeDefault = applyCustomerPaymentTypeDefault;
 
 // ── handlePOSCustomerChange – fetch effective prices when customer changes ──
 async function handlePOSCustomerChange(customerId) {

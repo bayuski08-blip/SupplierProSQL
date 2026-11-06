@@ -62,8 +62,30 @@ function formatDate(ds) {
 }
 
 /**
+ * Add N days to a YYYY-MM-DD string without Date timezone issues.
+ * Returns DD/MM/YYYY string.
+ */
+function addDaysToDateStr(dateStr, days) {
+    if (!dateStr || dateStr === '-') return '-';
+    const clean = String(dateStr).split('T')[0].split(' ')[0];
+    const parts = clean.split('-');
+    if (parts.length < 3) return '-';
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10) - 1;
+    const d = parseInt(parts[2], 10);
+    // Use UTC to avoid DST shift
+    const ms = Date.UTC(y, m, d + days);
+    const dt = new Date(ms);
+    const ry = dt.getUTCFullYear();
+    const rm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+    const rd = String(dt.getUTCDate()).padStart(2, '0');
+    return `${rd}/${rm}/${ry}`;
+}
+
+/**
  * Deterministic pagination algorithm for Epson LQ-590 continuous form (24.13 x 13.97 cm).
- * Distributes items across pages respecting height capacities:
+ * Layout "Opsi C": header lebih ringkas (kiri: logo+perusahaan, kanan: customer saja),
+ * info invoice di satu baris teks, tanda tangan lebih pendek → kapasitas naik.
  * - C_SINGLE: max items if invoice fits entirely on 1 page (includes full header, totals & signatures)
  * - C_P1: max items on Page 1 of multi-page (full header + items + "Bersambung", no totals/signatures)
  * - C_MID: max items on intermediate page (compact header + items + "Bersambung")
@@ -71,8 +93,8 @@ function formatDate(ds) {
  * Guarantees every page, especially the last page, has at least 1 item alongside totals.
  */
 function paginateItems(items, config = {}) {
-    const C_SINGLE = config.C_SINGLE || 9;
-    const C_P1 = config.C_P1 || 12;
+    const C_SINGLE = config.C_SINGLE || 10;
+    const C_P1 = config.C_P1 || 13;
     const C_MID = config.C_MID || 16;
     const C_LAST = config.C_LAST || 12;
 
@@ -126,14 +148,38 @@ function renderInvoice(data, ppnEnabled, isProforma = false) {
     const revisiSuffix = (isProforma && inv.revisi && Number(inv.revisi) > 0) ? ` (Rev. ${inv.revisi})` : '';
     const invoiceIdDisplay = `${invoiceId}${revisiSuffix}`;
     const invoiceDateStr = formatDate(isProforma ? inv.order_date : inv.date);
-    const invoiceDueDateStr = formatDate(inv.due_date);
     const berlakuHinggaStr = formatDate(inv.berlaku_hingga);
     const paymentTypeName = inv.payment_type_name || 'Tunai';
-    const isTempo = !isProforma && paymentTypeName.toLowerCase().includes('tempo');
+
+    // Hitung jatuh tempo: tampilkan hanya jika tipe kredit (ada "hari" dalam nama)
+    // Untuk invoice: ambil dari due_date yg sudah dihitung server
+    // Untuk proforma: hitung dari order_date + hari kredit (kalau ada)
+    let dueDateDisplay = '–';
+    if (!isProforma) {
+        // Invoice: due_date sudah ada di data dari server (saat Kredit)
+        const rawDue = inv.due_date;
+        if (rawDue && rawDue !== '-') {
+            dueDateDisplay = formatDate(rawDue);
+        } else {
+            // Fallback: hitung dari nama payment type jika berformat "Kredit X Hari"
+            const kredMatch = paymentTypeName.match(/kredit\s+(\d+)\s+hari/i);
+            if (kredMatch && kredMatch[1]) {
+                const rawDate = isProforma ? inv.order_date : inv.date;
+                dueDateDisplay = addDaysToDateStr(String(rawDate).split('T')[0], parseInt(kredMatch[1], 10));
+            }
+        }
+    } else {
+        // Proforma: cek jika syarat pembayaran kredit
+        const kredMatch = paymentTypeName.match(/kredit\s+(\d+)\s+hari/i);
+        if (kredMatch && kredMatch[1]) {
+            const rawDate = inv.order_date;
+            dueDateDisplay = addDaysToDateStr(String(rawDate || '').split('T')[0], parseInt(kredMatch[1], 10));
+        }
+    }
 
     const pages = paginateItems(items, {
-        C_SINGLE: 9,
-        C_P1: 12,
+        C_SINGLE: 10,
+        C_P1: 13,
         C_MID: 16,
         C_LAST: 12
     });
@@ -152,93 +198,83 @@ function renderInvoice(data, ppnEnabled, isProforma = false) {
         const isFirstPage = (pageNum === 1);
         const isLastPage = (pageNum === totalPages);
 
-        // 1. Header
+        // ─── 1. HEADER ───────────────────────────────────────────────────────
         let headerHtml = '';
         if (isFirstPage) {
-            // Full header
+            // Logo diperkecil ~15% dari versi lama (max-height: 80px → 68px)
             const logoHtml = comp.logo
-                ? `<img src="${comp.logo}" style="max-height: 80px; max-width: 100%; display: block; margin: 0 auto;">`
-                : '';
-
-            const dueDateRowHtml = isTempo ? `
-                <tr id="print-row-due-date">
-                    <td style="font-weight: bold; padding: 0.12rem 0;">Jatuh Tempo</td>
-                    <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${invoiceDueDateStr}</span></td>
-                </tr>` : '';
-
-            const berlakuRowHtml = (isProforma && inv.sumber !== 'dari_invoice') ? `
-                <tr>
-                    <td style="font-weight: bold; padding: 0.12rem 0;">Berlaku Hingga</td>
-                    <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${berlakuHinggaStr}</span></td>
-                </tr>` : '';
-
-            const refInvoiceRowHtml = (isProforma && inv.invoice_id) ? `
-                <tr>
-                    <td style="font-weight: bold; padding: 0.12rem 0;">Ref. Invoice</td>
-                    <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${inv.invoice_id}</span></td>
-                </tr>` : '';
+                ? `<img src="${comp.logo}" style="max-height: 68px; max-width: 100%; display: block; margin: 0 auto;">`
+                : `<div style="width:60px;height:60px;border:1.5pt solid #000;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:9pt;color:#000;margin:0 auto;text-align:center;line-height:1.2;">${(storeName.match(/\b\w/g)||[]).slice(0,2).join('').toUpperCase()}</div>`;
 
             const proformaBadge = isProforma ? `
-                <div style="text-align:center; margin-bottom: 4px;">
-                    <span style="text-align:center; font-size:13pt; font-weight:bold; letter-spacing:1px; color:#000; border:2px solid #000; display:inline-block; padding:1px 10px; margin-bottom:4px;">PROFORMA INVOICE</span>
+                <div style="text-align:center; margin-bottom: 3pt;">
+                    <span style="text-align:center; font-size:11pt; font-weight:bold; letter-spacing:1px; color:#000; border:2pt solid #000; display:inline-block; padding:1pt 8pt;">PROFORMA INVOICE</span>
                 </div>` : '';
 
-            headerHtml = `
-            <div style="display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 0.4rem;">
-                <!-- Kiri: Logo -->
-                <div style="flex: 0 0 15%; text-align: center;">
+            // Blok kiri: logo + perusahaan (flex, sejajar vertikal)
+            const leftBlockHtml = `
+            <div style="flex: 0 0 55%; display: flex; align-items: flex-start; gap: 8pt;">
+                <div style="flex-shrink: 0; width: 68pt; display: flex; align-items: center;">
                     ${logoHtml}
                 </div>
-                <!-- Tengah: Toko & Alamat -->
-                <div class="invoice-header-info" style="flex: 0 0 45%;">
+                <div class="invoice-header-info" style="flex: 1; min-width: 0;">
                     ${proformaBadge}
-                    <h2 style="margin: 0 0 0.25rem 0; font-size: 2.6rem; color: #000; font-weight: bold; line-height: 1.1; word-break: break-word;">${storeName}</h2>
-                    <table style="border: none; border-collapse: collapse; margin-bottom: 0;">
+                    <div style="font-size: 15pt; font-weight: bold; color: #000; line-height: 1.1; margin-bottom: 2pt; word-break: break-word;">${storeName}</div>
+                    <table style="border: none; border-collapse: collapse;">
                         <tr>
-                            <td style="font-weight: bold; padding: 0.1rem 0.5rem 0.1rem 0; white-space: nowrap; vertical-align: top;">Alamat</td>
-                            <td style="vertical-align: top; padding: 0.1rem 0;">: <span>${comp.address || '-'}</span></td>
+                            <td style="font-weight: bold; padding: 0.5pt 4pt 0.5pt 0; white-space: nowrap; vertical-align: top; font-size: 8.5pt;">Alamat</td>
+                            <td style="vertical-align: top; padding: 0.5pt 0; font-size: 8.5pt;">: <span>${comp.address || '-'}</span></td>
                         </tr>
                         <tr>
-                            <td style="font-weight: bold; padding: 0.1rem 0.5rem 0.1rem 0; white-space: nowrap;">Email</td>
-                            <td style="padding: 0.1rem 0;">: <span>${comp.email || '-'}</span></td>
+                            <td style="font-weight: bold; padding: 0.5pt 4pt 0.5pt 0; white-space: nowrap; font-size: 8.5pt;">Email</td>
+                            <td style="padding: 0.5pt 0; font-size: 8.5pt;">: <span>${comp.email || '-'}</span></td>
                         </tr>
                         <tr>
-                            <td style="font-weight: bold; padding: 0.1rem 0.5rem 0.1rem 0; white-space: nowrap;">Tlp</td>
-                            <td style="padding: 0.1rem 0;">: <span>${comp.phone || '-'}</span></td>
-                        </tr>
-                    </table>
-                </div>
-                <!-- Kanan: Customer & Info Invoice -->
-                <div class="invoice-header-info" style="flex: 0 0 40%; padding-top: 0.25rem;">
-                    <table style="border: none; width: 100%; border-collapse: collapse;">
-                        <tr>
-                            <td style="font-weight: bold; padding: 0.12rem 0; width: ${isProforma ? '130px' : '110px'};">Nama Customer</td>
-                            <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${customerName}</span></td>
-                        </tr>
-                        <tr>
-                            <td style="font-weight: bold; padding: 0.12rem 0;">Alamat Customer</td>
-                            <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${customer.address || '-'}</span></td>
-                        </tr>
-                        <tr>
-                            <td style="font-weight: bold; padding: 0.12rem 0;">Tanggal</td>
-                            <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${invoiceDateStr}</span></td>
-                        </tr>
-                        <tr>
-                            <td style="font-weight: bold; padding: 0.12rem 0;">${isProforma ? 'No. Proforma' : 'No. Invoice'}</td>
-                            <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${invoiceIdDisplay}</span></td>
-                        </tr>
-                        ${refInvoiceRowHtml}
-                        ${dueDateRowHtml}
-                        ${berlakuRowHtml}
-                        <tr>
-                            <td style="font-weight: bold; padding: 0.12rem 0;">${isProforma ? 'Syarat Pembayaran' : 'Payment'}</td>
-                            <td style="padding: 0.12rem 0;">: <span style="display: inline-block; width: calc(100% - 15px); border-bottom: 1px solid #000; min-height: 1rem;">${paymentTypeName}</span></td>
+                            <td style="font-weight: bold; padding: 0.5pt 4pt 0.5pt 0; white-space: nowrap; font-size: 8.5pt;">Tlp</td>
+                            <td style="padding: 0.5pt 0; font-size: 8.5pt;">: <span>${comp.phone || '-'}</span></td>
                         </tr>
                     </table>
                 </div>
             </div>`;
+
+            // Blok kanan: nama customer + alamat saja (maks 2 baris)
+            // Proforma tambah baris "Berlaku Hingga" dan "Ref. Invoice"
+            const berlakuRowHtml = (isProforma && inv.sumber !== 'dari_invoice') ? `
+                <tr>
+                    <td style="font-weight: bold; padding: 0.5pt 4pt 0.5pt 0; white-space: nowrap; font-size: 8.5pt;">Berlaku Hingga</td>
+                    <td style="padding: 0.5pt 0; font-size: 8.5pt;">: ${berlakuHinggaStr}</td>
+                </tr>` : '';
+
+            const refInvoiceRowHtml = (isProforma && inv.invoice_id) ? `
+                <tr>
+                    <td style="font-weight: bold; padding: 0.5pt 4pt 0.5pt 0; white-space: nowrap; font-size: 8.5pt;">Ref. Invoice</td>
+                    <td style="padding: 0.5pt 0; font-size: 8.5pt;">: ${inv.invoice_id}</td>
+                </tr>` : '';
+
+            const rightBlockHtml = `
+            <div class="invoice-header-info" style="flex: 0 0 44%; padding-top: 2pt;">
+                <table style="border: none; width: 100%; border-collapse: collapse;">
+                    <tr>
+                        <td style="font-weight: bold; padding: 0.5pt 4pt 0.5pt 0; white-space: nowrap; font-size: 8.5pt; width: 100pt;">Nama Customer</td>
+                        <td style="padding: 0.5pt 0; font-size: 8.5pt; word-break: break-word;">: ${customerName}</td>
+                    </tr>
+                    <tr>
+                        <td style="font-weight: bold; padding: 0.5pt 4pt 0.5pt 0; white-space: nowrap; vertical-align: top; font-size: 8.5pt;">Alamat Customer</td>
+                        <td style="padding: 0.5pt 0; font-size: 8.5pt; vertical-align: top; word-break: break-word; max-width: 160pt; overflow: hidden;">${customer.address || '-'}</td>
+                    </tr>
+                    ${berlakuRowHtml}
+                    ${refInvoiceRowHtml}
+                </table>
+            </div>`;
+
+            headerHtml = `
+            <div style="display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 3pt; border-bottom: 1.5pt solid #000; padding-bottom: 4pt;">
+                ${leftBlockHtml}
+                ${rightBlockHtml}
+            </div>`;
+
         } else {
-            // Continuation pages: compact header strip + continuation line
+            // Halaman lanjutan: compact header strip
             headerHtml = `
             <div class="invoice-compact-header-wrap">
                 <div class="invoice-compact-strip">
@@ -250,13 +286,30 @@ function renderInvoice(data, ppnEnabled, isProforma = false) {
             </div>`;
         }
 
-        // 2. Table rows
+        // ─── 2. BARIS INFO INVOICE (hanya halaman pertama) ───────────────────
+        let infoRowHtml = '';
+        if (isFirstPage) {
+            // Satu baris teks: tanpa tabel, tanpa kotak, tanpa garis, tanpa background
+            // Jatuh Tempo selalu ada (slot tetap); tampilkan "–" jika bukan kredit
+            const labelStyle = 'font-weight: bold;';
+            const sepStyle = 'margin-right: 14pt;';
+            infoRowHtml = `
+            <div style="font-size: 8.5pt; color: #000; margin-bottom: 3pt; line-height: 1.4;">
+                <span style="${labelStyle}">No. ${isProforma ? 'Proforma' : 'Invoice'}</span> : ${invoiceIdDisplay}<span style="${sepStyle}"></span>
+                &nbsp;&nbsp;&nbsp;&nbsp;<span style="${labelStyle}">Tanggal</span> : ${invoiceDateStr}<span style="${sepStyle}"></span>
+                &nbsp;&nbsp;&nbsp;&nbsp;<span style="${labelStyle}">${isProforma ? 'Syarat Pembayaran' : 'Payment'}</span> : ${paymentTypeName}<span style="${sepStyle}"></span>
+                &nbsp;&nbsp;&nbsp;&nbsp;<span style="${labelStyle}">Jatuh Tempo</span> : ${dueDateDisplay}
+            </div>`;
+        }
+
+        // ─── 3. BARIS TABEL PRODUK ───────────────────────────────────────────
         const rowsHtml = pageItems.map(it => {
             const rowNo = globalItemNo++;
+            const productName = it.product_name || '-';
             return `
             <tr>
                 <td style="text-align: center;">${rowNo}</td>
-                <td style="text-align: left;">${it.product_name || '-'}</td>
+                <td style="text-align: left; white-space: normal; word-break: break-word; font-size: 8pt; line-height: 1.25;">${productName}</td>
                 <td style="text-align: center;">${it.unit_name || '-'}</td>
                 <td style="text-align: center;">${it.quantity}</td>
                 <td style="text-align: right;">${rp(it.price).replace('Rp', '').trim()}</td>
@@ -264,7 +317,7 @@ function renderInvoice(data, ppnEnabled, isProforma = false) {
             </tr>`;
         }).join('');
 
-        // 3. "Bersambung" notice (only on pages that are not last)
+        // ─── 4. "Bersambung" (bukan halaman terakhir) ────────────────────────
         let bersambungHtml = '';
         if (!isLastPage) {
             bersambungHtml = `
@@ -273,94 +326,120 @@ function renderInvoice(data, ppnEnabled, isProforma = false) {
             </div>`;
         }
 
-        // 4. Bottom block (signatures + totals ONLY on last page)
+        // ─── 5. FOOTER BAWAH (tanda tangan + total — hanya halaman terakhir) ─
         let bottomHtml = '';
         if (isLastPage) {
-            const taxRowHtml = ppnEnabled ? `
+            // --- Komponen total ---
+            const subtotal = parseFloat(inv.subtotal || 0);
+            const diskon = parseFloat(inv.discount || 0);
+            const taxAmt = ppnEnabled ? parseFloat(inv.tax || inv.ppn_amount || 0) : 0;
+            const hasExtras = diskon > 0 || (ppnEnabled && taxAmt > 0);
+
+            // SUB TOTAL hanya tampil kalau ada komponen lain (diskon / ppn)
+            const subTotalRowHtml = hasExtras ? `
                 <tr>
-                    <td style="padding: 0.15rem 0; font-weight: bold;">TAX ${isProforma && inv.ppn_rate ? `(${inv.ppn_rate}%)` : ''}</td>
-                    <td style="text-align: right; padding-left: 0.5rem; white-space: nowrap;">${rp(inv.tax || inv.ppn_amount).replace('Rp', '').trim()}</td>
+                    <td style="padding: 1.5pt 0; font-weight: bold; font-size: 8.5pt;">SUB TOTAL</td>
+                    <td style="text-align: right; padding-left: 6pt; white-space: nowrap; font-size: 8.5pt;">${rp(subtotal).replace('Rp', '').trim()}</td>
                 </tr>` : '';
 
+            const diskonRowHtml = diskon > 0 ? `
+                <tr>
+                    <td style="padding: 1.5pt 0; font-weight: bold; font-size: 8.5pt;">DISKON</td>
+                    <td style="text-align: right; padding-left: 6pt; white-space: nowrap; font-size: 8.5pt;">(${rp(diskon).replace('Rp', '').trim()})</td>
+                </tr>` : '';
+
+            const taxRowHtml = (ppnEnabled && taxAmt > 0) ? `
+                <tr>
+                    <td style="padding: 1.5pt 0; font-weight: bold; font-size: 8.5pt;">TAX${isProforma && inv.ppn_rate ? ` (${inv.ppn_rate}%)` : ''}</td>
+                    <td style="text-align: right; padding-left: 6pt; white-space: nowrap; font-size: 8.5pt;">${rp(taxAmt).replace('Rp', '').trim()}</td>
+                </tr>` : '';
+
+            // Grand total TANPA garis di atasnya
+            const grandTotalHtml = `
+                <tr>
+                    <td style="padding: 2pt 0 1.5pt; font-weight: bold; font-size: 10pt;">GRAND TOTAL</td>
+                    <td style="text-align: right; font-weight: bold; font-size: 10pt; padding-left: 6pt; white-space: nowrap;">${rp(inv.total).replace('Rp', '').trim()}</td>
+                </tr>`;
+
+            // Tanda tangan: Proforma = Hormat kami + Customer, Invoice = Regards + Driver + Customer
+            // Ruang tanda tangan dikurangi ~30% (margin-bottom: 2.5rem → 1.75rem, ≈ 1.2in → 0.84in)
             const signaturesHtml = isProforma ? `
-                <div class="invoice-signatures" style="display: flex; gap: 2rem; font-size: 0.875rem;">
+                <div class="invoice-signatures" style="display: flex; gap: 2rem; font-size: 8.5pt;">
                     <div style="text-align: center;">
-                        <div style="margin-bottom: 2.5rem;">Hormat kami,</div>
+                        <div style="margin-bottom: 1.75rem;">Hormat kami,</div>
                         <div>(__________________)</div>
                     </div>
                     <div style="text-align: center;">
-                        <div style="margin-bottom: 2.5rem;">Customer,</div>
+                        <div style="margin-bottom: 1.75rem;">Customer,</div>
                         <div>(__________________)</div>
                     </div>
                 </div>
             ` : `
-                <div class="invoice-signatures" style="display: flex; gap: 2rem; font-size: 0.875rem;">
+                <div class="invoice-signatures" style="display: flex; gap: 1.5rem; font-size: 8.5pt;">
                     <div style="text-align: center;">
-                        <div style="margin-bottom: 2.5rem;">Regards,</div>
+                        <div style="margin-bottom: 1.75rem;">Regards,</div>
                         <div>(__________________)</div>
                     </div>
                     <div style="text-align: center;">
-                        <div style="margin-bottom: 2.5rem;">Driver,</div>
+                        <div style="margin-bottom: 1.75rem;">Driver,</div>
                         <div>(__________________)</div>
                     </div>
                     <div style="text-align: center;">
-                        <div style="margin-bottom: 2.5rem;">Customer,</div>
+                        <div style="margin-bottom: 1.75rem;">Customer,</div>
                         <div>(__________________)</div>
                     </div>
                 </div>
             `;
 
             const footerNoteHtml = isProforma ? `
-                <div style="font-size: 7.5pt; font-style: italic; color: #444; text-align: center; margin-top: 0.4rem; border-top: 1px dashed #aaa; padding-top: 3px;">
+                <div style="font-size: 7.5pt; font-style: italic; color: #444; text-align: center; margin-top: 3pt; border-top: 1pt dashed #aaa; padding-top: 2pt;">
                     Dokumen ini bukan bukti penagihan atau pembayaran.
                 </div>
             ` : '';
 
             bottomHtml = `
-            <div class="invoice-bottom" style="display: flex; justify-content: space-between; align-items: flex-start; color: #000; margin-top: 0.35rem;">
+            <div class="invoice-bottom" style="display: flex; justify-content: space-between; align-items: flex-end; color: #000; margin-top: 4pt;">
                 <!-- Signatures -->
                 ${signaturesHtml}
 
-                <!-- Totals -->
-                <div class="invoice-totals" style="min-width: 210px; max-width: 230px; flex-shrink: 0; font-size: 0.875rem;">
+                <!-- Totals (kanan) -->
+                <div class="invoice-totals" style="min-width: 190pt; max-width: 210pt; flex-shrink: 0; font-size: 8.5pt; align-self: flex-end;">
                     <table style="width: 100%; border-collapse: collapse; border: none;">
-                        <tr>
-                            <td style="padding: 0.15rem 0; font-weight: bold;">SUB TOTAL</td>
-                            <td style="text-align: right; padding-left: 0.5rem; white-space: nowrap;">${rp(inv.subtotal).replace('Rp', '').trim()}</td>
-                        </tr>
-                        ${inv.discount > 0 ? `<tr><td style="padding:0.15rem 0;font-weight:bold;">DISKON</td><td style="text-align:right;padding-left:0.5rem;white-space:nowrap;">(${rp(inv.discount).replace('Rp','').trim()})</td></tr>` : ''}
+                        ${subTotalRowHtml}
+                        ${diskonRowHtml}
                         ${taxRowHtml}
-                        <tr>
-                            <td style="padding: 0.35rem 0; font-weight: bold; font-size: 1rem; border-top: 2px solid #000;">GRAND TOTAL</td>
-                            <td style="text-align: right; font-weight: bold; font-size: 1rem; border-top: 2px solid #000; padding-left: 0.5rem; white-space: nowrap;">${rp(inv.total).replace('Rp', '').trim()}</td>
-                        </tr>
+                        ${grandTotalHtml}
                     </table>
                 </div>
             </div>
             ${footerNoteHtml}`;
         }
 
-        // 5. Footer
+        // ─── 6. FOOTER HALAMAN (nomor halaman) ───────────────────────────────
+        // Nomor invoice dihapus dari pojok kiri bawah (sudah ada di baris info)
+        // Halaman tunggal: tidak tampilkan "Hal. 1 dari 1"
         const footerRight = isSinglePage ? '' : `Hal. ${pageNum} dari ${totalPages}`;
-        const footerHtml = `
+        const footerLeft = isSinglePage ? '' : invoiceId;
+        const footerHtml = (footerLeft || footerRight) ? `
         <div class="invoice-page-footer">
-            <div>${invoiceId}</div>
+            <div>${footerLeft}</div>
             <div>${footerRight}</div>
-        </div>`;
+        </div>` : '';
 
-        // Assemble page
+        // ─── 7. RAKIT HALAMAN ─────────────────────────────────────────────────
         htmlOutput += `
         <div class="invoice-page ${isLastPage ? 'is-last-page' : ''}">
             ${headerHtml}
+            ${infoRowHtml}
             <table class="invoice-items-table">
                 <thead>
                     <tr>
-                        <th style="text-align: center; width: 5%;">No.</th>
-                        <th style="text-align: left; width: 36%;">Produk</th>
-                        <th style="text-align: center; width: 12%;">Satuan</th>
-                        <th style="text-align: center; width: 8%;">Qty</th>
-                        <th style="text-align: right; width: 19%;">Harga</th>
-                        <th style="text-align: right; width: 20%;">Total</th>
+                        <th style="text-align: center; width: 4%;">No.</th>
+                        <th style="text-align: left; width: 44%;">Produk</th>
+                        <th style="text-align: center; width: 10%;">Satuan</th>
+                        <th style="text-align: center; width: 7%;">Qty</th>
+                        <th style="text-align: right; width: 17%;">Harga</th>
+                        <th style="text-align: right; width: 18%;">Total</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -451,5 +530,5 @@ if (typeof document !== 'undefined') {
 
 // Export functions for unit testing in node
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { rp, formatDate, paginateItems, renderInvoice };
+    module.exports = { rp, formatDate, addDaysToDateStr, paginateItems, renderInvoice };
 }

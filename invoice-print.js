@@ -17,7 +17,7 @@ function getAuthHeaders() {
 function showToast(message, type = 'success') {
     const toastContainer = document.getElementById('toast-container');
     if (!toastContainer) return;
-    
+
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
     toast.style.background = type === 'error' ? '#ef4444' : (type === 'success' ? '#10b981' : '#3b82f6');
@@ -26,16 +26,16 @@ function showToast(message, type = 'success') {
     toast.style.borderRadius = '0.5rem';
     toast.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
     toast.style.marginBottom = '0.5rem';
-    
+
     let icon = 'info';
     if (type === 'success') icon = 'check-circle';
     if (type === 'error') icon = 'alert-circle';
-    
+
     toast.innerHTML = `<div style="display: flex; align-items: center; gap: 0.5rem;"><i data-lucide="${icon}"></i> <span>${message}</span></div>`;
     toastContainer.appendChild(toast);
-    
+
     if (typeof lucide !== 'undefined') lucide.createIcons();
-    
+
     setTimeout(() => {
         toast.style.opacity = '0';
         toast.style.transition = 'opacity 0.3s ease';
@@ -204,7 +204,7 @@ function renderInvoice(data, ppnEnabled, isProforma = false) {
             // Logo diperkecil ~15% dari versi lama (max-height: 80px → 68px)
             const logoHtml = comp.logo
                 ? `<img src="${comp.logo}" style="max-height: 68px; max-width: 100%; display: block; margin: 0 auto;">`
-                : `<div style="width:60px;height:60px;border:1.5pt solid #000;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:9pt;color:#000;margin:0 auto;text-align:center;line-height:1.2;">${(storeName.match(/\b\w/g)||[]).slice(0,2).join('').toUpperCase()}</div>`;
+                : `<div style="width:60px;height:60px;border:1.5pt solid #000;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:9pt;color:#000;margin:0 auto;text-align:center;line-height:1.2;">${(storeName.match(/\b\w/g) || []).slice(0, 2).join('').toUpperCase()}</div>`;
 
             const proformaBadge = isProforma ? `
                 <div style="text-align:center; margin-bottom: 3pt;">
@@ -259,7 +259,7 @@ function renderInvoice(data, ppnEnabled, isProforma = false) {
                         <td style="padding: 0.5pt 0; font-size: 8.5pt; word-break: break-word;">: ${customerName}</td>
                     </tr>
                     <tr>
-                        <td style="font-weight: bold; padding: 0.5pt 4pt 0.5pt 0; white-space: nowrap; vertical-align: top; font-size: 8.5pt;">Alamat Customer</td>
+                        <td style="font-weight: bold; padding: 0.5pt 4pt 0.5pt 0; white-space: nowrap; vertical-align: top; font-size: 8.5pt;">Alamat Customer : </td>
                         <td style="padding: 0.5pt 0; font-size: 8.5pt; vertical-align: top; word-break: break-word; max-width: 160pt; overflow: hidden;">${customer.address || '-'}</td>
                     </tr>
                     ${berlakuRowHtml}
@@ -490,7 +490,7 @@ if (typeof document !== 'undefined') {
                 try {
                     const errJson = await res.json();
                     if (errJson.error) errDetail = errJson.error;
-                } catch(_) {}
+                } catch (_) { }
                 throw new Error(errDetail);
             }
             const data = await res.json();
@@ -512,7 +512,7 @@ if (typeof document !== 'undefined') {
                         const settingsData = await settingsRes.json();
                         ppnEnabled = settingsData.ppn_enabled !== 'false' && settingsData.ppn_enabled !== false;
                     }
-                } catch(e) {}
+                } catch (e) { }
             }
 
             renderInvoice(data, ppnEnabled, isProforma);

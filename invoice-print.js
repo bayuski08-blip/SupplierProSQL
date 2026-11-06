@@ -259,8 +259,8 @@ function renderInvoice(data, ppnEnabled, isProforma = false) {
                         <td style="padding: 0.5pt 0; font-size: 8.5pt; word-break: break-word;">: ${customerName}</td>
                     </tr>
                     <tr>
-                        <td style="font-weight: bold; padding: 0.5pt 4pt 0.5pt 0; white-space: nowrap; vertical-align: top; font-size: 8.5pt;">Alamat Customer : </td>
-                        <td style="padding: 0.5pt 0; font-size: 8.5pt; vertical-align: top; word-break: break-word; max-width: 160pt; overflow: hidden;">${customer.address || '-'}</td>
+                        <td style="font-weight: bold; padding: 0.5pt 4pt 0.5pt 0; white-space: nowrap; vertical-align: top; font-size: 8.5pt;">Alamat Customer</td>
+                        <td style="padding: 0.5pt 0; font-size: 8.5pt; vertical-align: top; word-break: break-word; max-width: 160pt; overflow: hidden;">: ${customer.address || '-'}</td>
                     </tr>
                     ${berlakuRowHtml}
                     ${refInvoiceRowHtml}

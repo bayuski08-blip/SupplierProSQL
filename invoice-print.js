@@ -298,7 +298,6 @@ function renderInvoice(data, ppnEnabled, isProforma = false) {
                 <span style="${labelStyle}">No. ${isProforma ? 'Proforma' : 'Invoice'}</span> : ${invoiceIdDisplay}<span style="${sepStyle}"></span>
                 &nbsp;&nbsp;&nbsp;&nbsp;<span style="${labelStyle}">Tanggal</span> : ${invoiceDateStr}<span style="${sepStyle}"></span>
                 &nbsp;&nbsp;&nbsp;&nbsp;<span style="${labelStyle}">${isProforma ? 'Syarat Pembayaran' : 'Payment'}</span> : ${paymentTypeName}<span style="${sepStyle}"></span>
-                &nbsp;&nbsp;&nbsp;&nbsp;<span style="${labelStyle}">Jatuh Tempo</span> : ${dueDateDisplay}
             </div>`;
         }
 

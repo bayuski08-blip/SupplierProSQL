@@ -2361,6 +2361,7 @@ document.getElementById('btn-create-proforma')?.addEventListener('click', async 
             if (paymentTypeSelect) paymentTypeSelect.value = 'PT-1';
 
             renderCart();
+            if (typeof fetchProformas === 'function') fetchProformas();
         } else {
             let errMsg = `Error ${res.status}`;
             try {
@@ -3082,11 +3083,11 @@ async function submitConvertProforma() {
             // Refresh data safely without leaking exceptions to outer catch
             try {
                 const targetPage = (paginationState.proformas && paginationState.proformas.page) || currentProformaPage || 1;
-                fetchProformas(targetPage);
-                if (typeof fetchInvoices === 'function') fetchInvoices();
-                if (typeof fetchProducts === 'function') fetchProducts();
-                if (typeof fetchCashTransactions === 'function') fetchCashTransactions();
-                if (typeof renderDashboard === 'function') renderDashboard();
+                await fetchProformas(targetPage);
+                if (typeof fetchInvoices === 'function') await fetchInvoices();
+                if (typeof fetchProducts === 'function') await fetchProducts();
+                if (typeof fetchCashTransactions === 'function') await fetchCashTransactions();
+                if (typeof renderDashboard === 'function') await renderDashboard();
             } catch (refreshErr) {
                 console.warn('[submitConvertProforma] Warning refreshing UI data:', refreshErr);
             }
@@ -3156,7 +3157,7 @@ async function submitExtendProforma() {
             showToast('Masa berlaku proforma berhasil diperpanjang.', 'success');
             try {
                 const targetPage = (paginationState.proformas && paginationState.proformas.page) || currentProformaPage || 1;
-                fetchProformas(targetPage);
+                await fetchProformas(targetPage);
             } catch (refreshErr) {
                 console.warn('[submitExtendProforma] Warning refreshing UI data:', refreshErr);
             }
@@ -3197,7 +3198,7 @@ async function submitCancelProforma() {
             showToast('Proforma berhasil dibatalkan.', 'success');
             try {
                 const targetPage = (paginationState.proformas && paginationState.proformas.page) || currentProformaPage || 1;
-                fetchProformas(targetPage);
+                await fetchProformas(targetPage);
             } catch (refreshErr) {
                 console.warn('[submitCancelProforma] Warning refreshing UI data:', refreshErr);
             }
@@ -3371,9 +3372,13 @@ function initPOSCustomerSearch() {
 }
 
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initPOSCustomerSearch);
+    document.addEventListener('DOMContentLoaded', () => {
+        initPOSCustomerSearch();
+        initPoProductSearch();
+    });
 } else {
     initPOSCustomerSearch();
+    initPoProductSearch();
 }
 
 // ---------- Tab Filter Bindings ----------
@@ -3642,7 +3647,9 @@ async function init() {
 // ---------- API Integrations ----------
 const getAuthHeaders = () => ({
     'Authorization': 'Bearer ' + localStorage.getItem('token'),
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache'
 });
 
 async function fetchProducts(page) {
@@ -3768,6 +3775,7 @@ async function saveProduct(isEdit) {
             closeModal(`modal-${isEdit ? 'edit' : 'add'}-product`);
             showToast(isEdit ? 'Produk berhasil diperbarui!' : 'Produk berhasil ditambahkan!', 'success');
             await fetchProducts();
+            if (typeof renderPOSProducts === 'function') renderPOSProducts();
         } else {
             const err = await res.json();
             showToast('Error: ' + (err.error || 'Gagal menyimpan produk'), 'error');
@@ -3843,6 +3851,7 @@ async function submitStockOpname() {
             showToast('Stok berhasil disesuaikan!', 'success');
             stockOpnameProductId = null;
             await fetchProducts();
+            if (typeof renderPOSProducts === 'function') renderPOSProducts();
         } else {
             const err = await res.json();
             showToast('Gagal: ' + (err.error || 'Terjadi kesalahan'), 'error');
@@ -3861,12 +3870,16 @@ async function deleteProduct(id) {
             headers: getAuthHeaders()
         });
         if (res.ok) {
-            fetchProducts();
+            showToast('Produk berhasil dihapus!', 'success');
+            await fetchProducts();
+            if (typeof renderPOSProducts === 'function') renderPOSProducts();
         } else {
-            alert('Gagal menghapus produk');
+            const err = await res.json().catch(() => ({}));
+            showToast('Gagal menghapus produk: ' + (err.error || 'Terjadi kesalahan'), 'error');
         }
     } catch (err) {
         console.error(err);
+        showToast('Gagal menghapus produk', 'error');
     }
 }
 
@@ -4094,7 +4107,7 @@ async function saveCustomer(isEdit) {
         if (res.ok) {
             closeModal(`modal-${isEdit ? 'edit' : 'add'}-customer`);
             showToast(isEdit ? 'Pelanggan berhasil diperbarui!' : 'Pelanggan berhasil ditambahkan!', 'success');
-            fetchCustomers();
+            await fetchCustomers();
         } else {
             const err = await res.json();
             showToast('Error: ' + (err.error || 'Gagal menyimpan'), 'error');
@@ -4256,7 +4269,7 @@ async function deleteCustomer(id) {
         });
         if (res.ok) {
             showToast('Pelanggan berhasil dihapus!', 'success');
-            fetchCustomers();
+            await fetchCustomers();
         } else {
             showToast('Gagal menghapus pelanggan', 'error');
         }
@@ -4406,14 +4419,15 @@ async function saveVendor(isEdit) {
         });
         if (res.ok) {
             closeModal(`modal-${isEdit ? 'edit' : 'add'}-vendor`);
-            fetchVendors();
+            showToast(isEdit ? 'Vendor berhasil diperbarui!' : 'Vendor berhasil ditambahkan!', 'success');
+            await fetchVendors();
         } else {
-            const err = await res.json();
-            alert('Error: ' + err.error);
+            const err = await res.json().catch(() => ({}));
+            showToast('Error: ' + (err.error || 'Gagal menyimpan vendor'), 'error');
         }
     } catch (err) {
         console.error(err);
-        alert('Gagal menyimpan vendor');
+        showToast('Gagal menyimpan vendor', 'error');
     }
 }
 
@@ -4451,12 +4465,15 @@ async function deleteVendor(id) {
             headers: getAuthHeaders()
         });
         if (res.ok) {
-            fetchVendors();
+            showToast('Vendor berhasil dihapus!', 'success');
+            await fetchVendors();
         } else {
-            alert('Gagal menghapus vendor');
+            const err = await res.json().catch(() => ({}));
+            showToast('Gagal menghapus vendor: ' + (err.error || 'Terjadi kesalahan'), 'error');
         }
     } catch (err) {
         console.error(err);
+        showToast('Gagal menghapus vendor', 'error');
     }
 }
 
@@ -4532,8 +4549,39 @@ async function fetchPurchases(page) {
 }
 
 let addPurchaseItems = [];
+let poSearchDebounceTimer = null;
+let poSearchActiveIndex = 0;
+let poCurrentMatches = [];
 
-function renderAddPurchaseItems() {
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function highlightMatch(text, query) {
+    if (!query || !text) return escapeHtml(text || '');
+    const lowerText = text.toLowerCase();
+    const lowerQ = query.toLowerCase();
+    let result = '';
+    let startIndex = 0;
+    let index = lowerText.indexOf(lowerQ, startIndex);
+    
+    while (index !== -1) {
+        result += escapeHtml(text.substring(startIndex, index));
+        result += `<mark class="po-search-highlight">${escapeHtml(text.substring(index, index + query.length))}</mark>`;
+        startIndex = index + query.length;
+        index = lowerText.indexOf(lowerQ, startIndex);
+    }
+    result += escapeHtml(text.substring(startIndex));
+    return result;
+}
+
+function renderAddPurchaseItems(highlightProductId = null) {
     const container = document.getElementById('add-purchase-items-container');
     if (!container) return;
 
@@ -4541,30 +4589,37 @@ function renderAddPurchaseItems() {
     let subtotal = 0;
 
     addPurchaseItems.forEach((item, index) => {
-        const product = PRODUCTS.find(p => p.id === item.product_id) || { name: item.product_id, unit: 'pcs' };
+        const product = PRODUCTS.find(p => String(p.id) === String(item.product_id)) || { name: item.product_id, unit: 'pcs' };
         const itemTotal = (parseFloat(item.quantity) || 0) * (parseFloat(item.price) || 0);
         subtotal += itemTotal;
 
+        const isHighlighted = highlightProductId && String(item.product_id) === String(highlightProductId);
         const tr = document.createElement('tr');
+        if (isHighlighted) {
+            tr.className = 'po-row-highlight';
+            setTimeout(() => tr.classList.remove('po-row-highlight'), 1500);
+        }
+        tr.dataset.productId = item.product_id;
+
         tr.innerHTML = `
-            <td style="padding: 0.5rem;">
-                <div style="font-weight: 500; color: var(--gray-900);">${product.name}</div>
+            <td style="padding: 0.5rem 0.75rem;">
+                <div style="font-weight: 500; color: var(--gray-900);">${escapeHtml(product.name)}</div>
             </td>
             <td style="padding: 0.5rem; text-align: center; white-space: nowrap;">
-                <input type="number" min="1" value="${item.quantity}" onchange="updateAddPurchaseItemQty(${index}, this.value)" style="width: 60px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: center;">
-                <span style="font-size: 0.8rem; color: var(--gray-500); margin-left: 0.25rem;">${product.unit || 'pcs'}</span>
+                <input type="number" min="1" value="${item.quantity}" oninput="updateAddPurchaseItemQty(${index}, this.value)" onchange="updateAddPurchaseItemQty(${index}, this.value)" style="width: 60px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: center;">
+                <span style="font-size: 0.8rem; color: var(--gray-500); margin-left: 0.25rem;">${escapeHtml(product.unit || 'pcs')}</span>
             </td>
             <td style="padding: 0.5rem; text-align: right;">
                 <div style="display:flex; align-items:center; justify-content:flex-end; gap:0.25rem;">
                     <span style="font-size:0.75rem; color:var(--gray-500);">Rp</span>
-                    <input type="number" value="${item.price}" onchange="updateAddPurchaseItemPrice(${index}, this.value)" style="width: 80px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: right;">
+                    <input type="number" value="${item.price}" oninput="updateAddPurchaseItemPrice(${index}, this.value)" onchange="updateAddPurchaseItemPrice(${index}, this.value)" style="width: 80px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: right;">
                 </div>
             </td>
             <td style="padding: 0.5rem; text-align: right; font-weight: 600; color: var(--gray-900);">
                 ${rp(itemTotal)}
             </td>
             <td style="padding: 0.5rem; text-align: center;">
-                <button type="button" onclick="removeAddPurchaseItem(${index})" style="color: var(--rose-500); background: none; border: none; cursor: pointer; padding: 0.25rem;">
+                <button type="button" onclick="removeAddPurchaseItem(${index})" title="Hapus item" style="color: var(--rose-500); background: none; border: none; cursor: pointer; padding: 0.25rem; display: inline-flex; align-items: center; justify-content: center;">
                     <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
                 </button>
             </td>
@@ -4573,25 +4628,23 @@ function renderAddPurchaseItems() {
     });
 
     if (addPurchaseItems.length === 0) {
-        container.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 1rem; color: var(--gray-500);">Belum ada item.</td></tr>`;
+        container.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 1.25rem 1rem; color: var(--gray-400); font-size: 0.875rem;">Belum ada item.</td></tr>`;
     }
 
-    document.getElementById('add-purchase-subtotal-display').textContent = rp(subtotal);
-    document.getElementById('add-purchase-total-display').textContent = rp(subtotal);
+    const subtotalEl = document.getElementById('add-purchase-subtotal-display');
+    const totalEl = document.getElementById('add-purchase-total-display');
+    if (subtotalEl) subtotalEl.textContent = rp(subtotal);
+    if (totalEl) totalEl.textContent = rp(subtotal);
 
     if (typeof lucide !== 'undefined') lucide.createIcons();
+    positionPoDropdown();
 }
 
-window.addAddPurchaseItem = () => {
-    const select = document.getElementById('add-purchase-product-select');
-    if (!select || !select.value) return;
-
-    const prod = PRODUCTS.find(p => p.id === select.value);
+function addProductToPo(prod) {
     if (!prod) return;
-
-    const existing = addPurchaseItems.find(i => i.product_id === prod.id);
+    const existing = addPurchaseItems.find(i => String(i.product_id) === String(prod.id));
     if (existing) {
-        existing.quantity += 1;
+        existing.quantity = (parseInt(existing.quantity) || 0) + 1;
     } else {
         addPurchaseItems.push({
             product_id: prod.id,
@@ -4599,7 +4652,195 @@ window.addAddPurchaseItem = () => {
             price: prod.cost || prod.price || 0
         });
     }
-    renderAddPurchaseItems();
+    renderAddPurchaseItems(prod.id);
+
+    const searchInput = document.getElementById('add-purchase-product-search');
+    if (searchInput) {
+        searchInput.value = '';
+        searchInput.focus();
+    }
+    closePoDropdown();
+}
+
+function positionPoDropdown() {
+    const input = document.getElementById('add-purchase-product-search');
+    const dropdown = document.getElementById('add-purchase-product-dropdown');
+    const modal = document.querySelector('#modal-add-purchase .modal');
+    if (!input || !dropdown || dropdown.style.display === 'none' || !modal) return;
+
+    const inputRect = input.getBoundingClientRect();
+    const modalRect = modal.getBoundingClientRect();
+
+    const top = inputRect.bottom - modalRect.top + modal.scrollTop + 4;
+    const left = inputRect.left - modalRect.left + modal.scrollLeft;
+    const maxW = Math.min(360, window.innerWidth - 32);
+
+    dropdown.style.top = `${top}px`;
+    dropdown.style.left = `${Math.max(8, left)}px`;
+    dropdown.style.width = `${Math.min(inputRect.width || 360, maxW)}px`;
+}
+
+function closePoDropdown() {
+    const dropdown = document.getElementById('add-purchase-product-dropdown');
+    if (dropdown) {
+        dropdown.style.display = 'none';
+        dropdown.innerHTML = '';
+    }
+    poCurrentMatches = [];
+    poSearchActiveIndex = 0;
+}
+
+function renderPoDropdown(keyword) {
+    const dropdown = document.getElementById('add-purchase-product-dropdown');
+    if (!dropdown) return;
+
+    const q = (keyword || '').trim().toLowerCase();
+    if (!q) {
+        closePoDropdown();
+        return;
+    }
+
+    const productList = Array.isArray(PRODUCTS) ? PRODUCTS : [];
+    poCurrentMatches = productList.filter(p => (p.name || '').toLowerCase().includes(q));
+
+    if (poCurrentMatches.length === 0) {
+        dropdown.innerHTML = `<div class="po-dropdown-empty">Produk tidak ditemukan</div>`;
+        dropdown.style.display = 'block';
+        positionPoDropdown();
+        return;
+    }
+
+    const displayed = poCurrentMatches.slice(0, 8);
+    poSearchActiveIndex = 0;
+
+    let itemsHtml = displayed.map((p, idx) => {
+        const highlightedName = highlightMatch(p.name, q);
+        const buyPrice = p.cost || p.price || 0;
+        const metaText = `Stok ${p.stock ?? 0} · ${rp(buyPrice)}`;
+        const selectedClass = idx === poSearchActiveIndex ? 'po-item-selected' : '';
+
+        return `
+            <div class="po-dropdown-item ${selectedClass}" data-index="${idx}" data-product-id="${escapeHtml(p.id)}">
+                <div class="po-item-name" style="font-size: 0.85rem; font-weight: 500; color: var(--gray-800); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    ${highlightedName}
+                </div>
+                <div class="po-item-meta" style="font-size: 0.78rem; color: var(--gray-500); white-space: nowrap; margin-left: 0.5rem;">
+                    ${escapeHtml(metaText)}
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    const countText = `${poCurrentMatches.length} hasil · ↑↓ pilih · Enter tambah`;
+    dropdown.innerHTML = `
+        <div class="po-dropdown-list">
+            ${itemsHtml}
+        </div>
+        <div class="po-dropdown-footer">
+            ${countText}
+        </div>
+    `;
+
+    dropdown.querySelectorAll('.po-dropdown-item').forEach(el => {
+        el.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            const prodId = el.dataset.productId;
+            const prod = productList.find(p => String(p.id) === String(prodId));
+            if (prod) addProductToPo(prod);
+        });
+    });
+
+    dropdown.style.display = 'block';
+    positionPoDropdown();
+}
+
+function updatePoDropdownSelection() {
+    const dropdown = document.getElementById('add-purchase-product-dropdown');
+    if (!dropdown || dropdown.style.display === 'none') return;
+
+    const items = dropdown.querySelectorAll('.po-dropdown-item');
+    items.forEach((item, idx) => {
+        if (idx === poSearchActiveIndex) {
+            item.classList.add('po-item-selected');
+            item.scrollIntoView({ block: 'nearest' });
+        } else {
+            item.classList.remove('po-item-selected');
+        }
+    });
+}
+
+function initPoProductSearch() {
+    const input = document.getElementById('add-purchase-product-search');
+    const dropdown = document.getElementById('add-purchase-product-dropdown');
+    const modal = document.querySelector('#modal-add-purchase .modal');
+    if (!input || !dropdown) return;
+
+    if (input.dataset.poSearchInitialized === 'true') return;
+    input.dataset.poSearchInitialized = 'true';
+
+    input.addEventListener('input', (e) => {
+        clearTimeout(poSearchDebounceTimer);
+        const val = e.target.value;
+        poSearchDebounceTimer = setTimeout(() => {
+            renderPoDropdown(val);
+        }, 150);
+    });
+
+    input.addEventListener('keydown', (e) => {
+        if (dropdown.style.display !== 'block' || poCurrentMatches.length === 0) {
+            if (e.key === 'Enter') e.preventDefault();
+            return;
+        }
+
+        const displayedCount = Math.min(poCurrentMatches.length, 8);
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            poSearchActiveIndex = (poSearchActiveIndex + 1) % displayedCount;
+            updatePoDropdownSelection();
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            poSearchActiveIndex = (poSearchActiveIndex - 1 + displayedCount) % displayedCount;
+            updatePoDropdownSelection();
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            const selectedProd = poCurrentMatches[poSearchActiveIndex];
+            if (selectedProd) {
+                addProductToPo(selectedProd);
+            }
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            closePoDropdown();
+        }
+    });
+
+    if (modal) {
+        modal.addEventListener('scroll', () => {
+            if (dropdown.style.display === 'block') positionPoDropdown();
+        });
+    }
+    window.addEventListener('resize', () => {
+        if (dropdown.style.display === 'block') positionPoDropdown();
+    });
+
+    document.addEventListener('click', (e) => {
+        const searchContainer = document.querySelector('.po-search-container');
+        if (!searchContainer || !dropdown) return;
+        if (!searchContainer.contains(e.target) && !dropdown.contains(e.target)) {
+            closePoDropdown();
+        }
+    });
+}
+
+window.addAddPurchaseItem = (prodId) => {
+    let targetId = prodId;
+    if (!targetId) {
+        const select = document.getElementById('add-purchase-product-select');
+        targetId = select?.value;
+    }
+    if (!targetId) return;
+    const prod = PRODUCTS.find(p => String(p.id) === String(targetId));
+    if (prod) addProductToPo(prod);
 };
 
 window.removeAddPurchaseItem = (index) => {
@@ -4626,24 +4867,25 @@ function openAddPurchaseModal() {
     const dateEl = document.getElementById('add-purchase-date');
     const paidEl = document.getElementById('add-purchase-paid');
     const ptEl = document.getElementById('add-purchase-payment-type');
-    const selectEl = document.getElementById('add-purchase-product-select');
+    const searchInput = document.getElementById('add-purchase-product-search');
 
     if (vendorEl) vendorEl.selectedIndex = 0;
     if (dateEl) dateEl.value = new Date().toISOString().split('T')[0];
     if (paidEl) paidEl.value = '';
     if (ptEl) ptEl.selectedIndex = 0;
+    if (searchInput) searchInput.value = '';
 
-    // Populate product select if not populated yet
-    if (selectEl && selectEl.options.length <= 1) {
-        const productOptions = PRODUCTS.map(p => `<option value="${p.id}">${p.name} (Stok: ${p.stock})</option>`).join('');
-        selectEl.innerHTML = `<option value="" disabled selected>Pilih Produk...</option>${productOptions}`;
-    }
-
+    closePoDropdown();
+    initPoProductSearch();
     onPurchasePaymentTypeChange('add');
 
     addPurchaseItems = [];
     renderAddPurchaseItems();
     openModal('modal-add-purchase');
+
+    setTimeout(() => {
+        if (searchInput) searchInput.focus();
+    }, 150);
 }
 
 let editPurchaseItems = [];
@@ -4963,7 +5205,7 @@ async function fetchInvoices(page) {
         });
 
         // Also refresh piutang
-        if (typeof fetchPiutang === 'function') fetchPiutang(paginationState.piutang.page);
+        if (typeof fetchPiutang === 'function') await fetchPiutang(paginationState.piutang.page);
 
         if (typeof lucide !== 'undefined') lucide.createIcons();
     } catch (err) {
@@ -5233,15 +5475,43 @@ async function openEditInvoiceModal(id) {
         return;
     }
 
+    // Cek role — kasir tidak bisa ubah status/tipe pembayaran
+    const role = (localStorage.getItem('role') || '').toLowerCase();
+    const canChangeStatusOrType = role === 'admin' || role === 'finance';
+
     document.getElementById('edit-invoice-id').value = inv.id;
     document.getElementById('edit-invoice-number-display').value = inv.id;
     document.getElementById('edit-invoice-date').value = inv.date ? String(inv.date).split('T')[0].split(' ')[0] : '';
     document.getElementById('edit-invoice-customer-display').value = inv.customer || '';
 
+    // Status dropdown
     const statusEl = document.getElementById('edit-invoice-status');
     if (statusEl) {
-        const statusLower = (inv.status || '').toLowerCase();
-        statusEl.value = statusLower === 'lunas' ? 'lunas' : (statusLower === 'sebagian' ? 'sebagian' : 'belum');
+        const sl = (inv.status || '').toLowerCase();
+        statusEl.value = sl === 'lunas' ? 'lunas' : (sl === 'sebagian' ? 'sebagian' : 'belum');
+        statusEl.disabled = !canChangeStatusOrType;
+    }
+
+    // Tipe Pembayaran dropdown — diisi dari master (sudah dimuat di init)
+    const ptEl = document.getElementById('edit-invoice-payment-type');
+    if (ptEl) {
+        if (Array.isArray(ALL_PAYMENT_TYPES) && ALL_PAYMENT_TYPES.length > 0) {
+            ptEl.innerHTML = ALL_PAYMENT_TYPES.map(pt =>
+                `<option value="${pt.id}">${pt.name}</option>`
+            ).join('');
+        } else {
+            // Fallback: muat ulang dari API
+            try {
+                const r = await fetch('/api/master/payment-types', { headers: getAuthHeaders() });
+                if (r.ok) {
+                    const pts = await r.json();
+                    ptEl.innerHTML = pts.map(pt => `<option value="${pt.id}">${pt.name}</option>`).join('');
+                }
+            } catch (_) {}
+        }
+        // Set nilai awal = tipe pembayaran saat ini
+        ptEl.value = inv.paymentTypeId || 'PT-1';
+        ptEl.disabled = !canChangeStatusOrType;
     }
 
     // Populate product select
@@ -5279,7 +5549,11 @@ async function saveInvoiceEdits() {
     if (!id) return;
 
     const date = document.getElementById('edit-invoice-date').value;
-    const status = document.getElementById('edit-invoice-status').value;
+    const statusVal = document.getElementById('edit-invoice-status').value;  // 'lunas' | 'belum' | 'sebagian'
+
+    // Ambil tipe pembayaran dari dropdown baru
+    const paymentTypeEl = document.getElementById('edit-invoice-payment-type');
+    const paymentTypeId = paymentTypeEl ? paymentTypeEl.value : null;
 
     const inv = INVOICES.find(x => x.id === id);
     const customer_id = inv ? inv.customerId : null;
@@ -5296,22 +5570,30 @@ async function saveInvoiceEdits() {
         return;
     }
 
+    // Hitung due_date baru berdasarkan tipe pembayaran baru
+    const selectedPtEl = document.getElementById('edit-invoice-payment-type');
+    const selectedPtName = selectedPtEl ? (selectedPtEl.options[selectedPtEl.selectedIndex]?.text || '') : '';
+    const newDueDate = calculateDueDate(selectedPtName, date);
+
     pendingSaveInvoicePayload = {
         id,
         date,
-        status,
+        requested_status: statusVal,   // ← dikirim ke backend untuk sinkronisasi
         customer_id,
         total: newTotal,
         paid_amount: paidAmount,
-        payment_type_id: inv ? inv.paymentTypeId : 'PT-1',
+        payment_type_id: paymentTypeId || (inv ? inv.paymentTypeId : 'PT-1'),
+        due_date: newDueDate || undefined,
         items: editInvoiceItems
     };
 
-    // If invoice already has active payments, trigger the soft-lock confirmation modal
+    // Jika invoice sudah ada cicilan aktif, tampilkan soft-lock modal peringatan
     if (paidAmount > 0) {
         const statsEl = document.getElementById('confirm-edit-invoice-stats');
         if (statsEl) {
             const sisaBaru = Math.max(0, newTotal - paidAmount);
+            const ptNameDisplay = selectedPtName || (inv ? inv.type : '-');
+            const statusDisplay = statusVal === 'lunas' ? '✅ Lunas' : (statusVal === 'sebagian' ? '⚠️ Sebagian' : '❌ Belum Lunas');
             statsEl.innerHTML = `
                 <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
                     <span>Total Baru:</span> <b>${rp(newTotal)}</b>
@@ -5319,8 +5601,14 @@ async function saveInvoiceEdits() {
                 <div style="display: flex; justify-content: space-between; margin-bottom: 6px; color: var(--emerald-600);">
                     <span>Total Pembayaran Diterima:</span> <b>${rp(paidAmount)}</b>
                 </div>
-                <div style="display: flex; justify-content: space-between; color: ${sisaBaru > 0 ? 'var(--rose-600)' : 'var(--emerald-600)'};">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 6px; color: ${sisaBaru > 0 ? 'var(--rose-600)' : 'var(--emerald-600)'};">
                     <span>Sisa Tagihan Baru:</span> <b>${rp(sisaBaru)}</b>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                    <span>Tipe Pembayaran:</span> <b>${ptNameDisplay}</b>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                    <span>Status Baru:</span> <b>${statusDisplay}</b>
                 </div>
             `;
         }
@@ -5344,19 +5632,22 @@ async function executeSaveInvoiceEdits() {
         if (res.ok) {
             closeModal('modal-edit-invoice');
             showToast('Invoice berhasil diperbarui!', 'success');
+            // Muat ulang daftar invoice dan piutang tanpa full page reload
             await fetchInvoices();
             await fetchProducts(); // stock changed
+            if (typeof fetchPiutang === 'function') await fetchPiutang();
+            if (typeof fetchDashboardSummary === 'function') await fetchDashboardSummary();
         } else {
             let errMsg = 'Gagal menyimpan invoice';
             try {
                 const errData = await res.json();
                 if (errData.error) errMsg = errData.error;
             } catch (e) {
-                if (res.status === 401 || res.status === 403) errMsg = 'Sesi habis, silakan login ulang.';
+                if (res.status === 401 || res.status === 403) errMsg = 'Sesi habis atau tidak memiliki izin. Silakan login ulang.';
                 else errMsg = `Error ${res.status} dari server.`;
             }
             showToast('Error: ' + errMsg, 'error');
-            if (res.status === 401 || res.status === 403) setTimeout(() => window.location.reload(), 1500);
+            if (res.status === 401) setTimeout(() => window.location.reload(), 1500);
         }
     } catch (err) {
         console.error(err);
@@ -5441,6 +5732,7 @@ async function confirmCancelPurchase() {
             showToast('PO berhasil dibatalkan. Stok telah dikembalikan.', 'success');
             await fetchPurchases();
             await fetchProducts();
+            if (typeof renderHutang === 'function') renderHutang();
         } else {
             const err = await res.json();
             showToast('Gagal: ' + (err.error || 'Terjadi kesalahan'), 'error');
@@ -5594,7 +5886,7 @@ async function saveCashTransaction() {
         if (res.ok) {
             closeModal('modal-add-cash');
             showToast('Transaksi kas berhasil disimpan!', 'success');
-            fetchCashTransactions();
+            await fetchCashTransactions();
         } else {
             const err = await res.json();
             showToast('Error: ' + err.error, 'error');
@@ -5638,7 +5930,7 @@ async function saveCashTransactionEdit() {
         if (res.ok) {
             closeModal('modal-edit-cash');
             showToast('Transaksi berhasil diperbarui!', 'success');
-            fetchCashTransactions();
+            await fetchCashTransactions();
         } else {
             const err = await res.json();
             showToast('Error: ' + err.error, 'error');
@@ -5657,9 +5949,9 @@ async function cancelCashTransaction(id) {
         });
         if (res.ok) {
             showToast('Transaksi berhasil dibatalkan!', 'success');
-            fetchCashTransactions();
-            fetchInvoices();
-            fetchPurchases();
+            await fetchCashTransactions();
+            await fetchInvoices();
+            await fetchPurchases();
         } else {
             const err = await res.json();
             showToast('Error: ' + err.error, 'error');
@@ -6012,14 +6304,15 @@ async function saveStaff() {
         });
         if (res.ok) {
             closeModal('modal-add-staff');
-            fetchUsers();
+            showToast('Data staff berhasil disimpan!', 'success');
+            await fetchUsers();
         } else {
-            const err = await res.json();
-            alert('Error: ' + err.error);
+            const err = await res.json().catch(() => ({}));
+            showToast('Error: ' + (err.error || 'Gagal menyimpan staff'), 'error');
         }
     } catch (err) {
         console.error(err);
-        alert('Gagal menyimpan staff');
+        showToast('Gagal menyimpan staff', 'error');
     }
 }
 
@@ -6031,13 +6324,15 @@ async function deleteStaff(id) {
             headers: getAuthHeaders()
         });
         if (res.ok) {
-            fetchUsers();
+            showToast('Staff berhasil dihapus!', 'success');
+            await fetchUsers();
         } else {
-            const err = await res.json();
-            alert('Gagal menghapus: ' + err.error);
+            const err = await res.json().catch(() => ({}));
+            showToast('Gagal menghapus: ' + (err.error || 'Terjadi kesalahan'), 'error');
         }
     } catch (err) {
         console.error(err);
+        showToast('Gagal menghapus staff', 'error');
     }
 }
 
@@ -6061,7 +6356,7 @@ async function populateMasterDropdowns() {
         await fetchAndFill('/api/master/product-units', ['add-product-unit', 'edit-product-unit'], 'id', 'name');
         const custCats = await fetchAndFill('/api/master/customer-categories', ['add-customer-type', 'edit-customer-type'], 'id', 'name');
         await fetchAndFill('/api/master/vendor-categories', ['add-vendor-category', 'edit-vendor-category'], 'id', 'name');
-        const paymentTypes = await fetchAndFill('/api/master/payment-types', ['cart-payment-type', 'add-purchase-payment-type', 'edit-purchase-payment-type', 'edit-invoice-payment-type', 'payment-method', 'manual-invoice-payment-type'], 'id', 'name');
+        const paymentTypes = await fetchAndFill('/api/master/payment-types', ['cart-payment-type', 'add-purchase-payment-type', 'edit-purchase-payment-type', 'edit-invoice-payment-type', 'payment-method', 'manual-invoice-payment-type', 'edit-invoice-payment-type'], 'id', 'name');
         ALL_PAYMENT_TYPES = paymentTypes || [];
         window.ALL_PAYMENT_TYPES = ALL_PAYMENT_TYPES;
         window.paymentTypes = ALL_PAYMENT_TYPES;
@@ -6308,13 +6603,14 @@ async function saveMasterData() {
         const result = await res.json();
         if (result.success) {
             closeModal('modal-master-data');
-            fetchMasterData();
-            populateMasterDropdowns(); // refresh all dropdowns after master change
+            showToast('Master data berhasil disimpan!', 'success');
+            await fetchMasterData();
+            await populateMasterDropdowns(); // refresh all dropdowns after master change
         } else {
-            alert('Gagal menyimpan: ' + (result.error || 'Error tidak diketahui'));
+            showToast('Gagal menyimpan: ' + (result.error || 'Error tidak diketahui'), 'error');
         }
     } catch (err) {
-        alert('Error: ' + err.message);
+        showToast('Error: ' + err.message, 'error');
     }
 }
 
@@ -6336,12 +6632,14 @@ async function confirmDeleteMaster() {
         closeModal('modal-delete-master');
         if (result.success) {
             masterDataToDelete = null;
-            fetchMasterData();
+            showToast('Master data berhasil dihapus!', 'success');
+            await fetchMasterData();
+            await populateMasterDropdowns();
         } else {
-            alert('Gagal menghapus: ' + (result.error || 'Error tidak diketahui'));
+            showToast('Gagal menghapus: ' + (result.error || 'Error tidak diketahui'), 'error');
         }
     } catch (err) {
-        alert('Error: ' + err.message);
+        showToast('Error: ' + err.message, 'error');
     }
 }
 
@@ -6575,6 +6873,7 @@ async function savePrefixSettings() {
         });
         if (res.ok) {
             showToast('Pengaturan prefix penomoran berhasil disimpan!', 'success');
+            await loadPrefixSettings();
         } else {
             const err = await res.json();
             showToast('Gagal menyimpan prefix: ' + (err.error || 'Terjadi kesalahan'), 'error');
@@ -6622,7 +6921,8 @@ async function saveManualInvoice() {
                 dropdown.style.display = 'none';
                 dropdown.innerHTML = '';
             }
-            fetchInvoices();
+            await fetchInvoices();
+            if (typeof fetchPiutang === 'function') await fetchPiutang();
         } else {
             const err = await res.json();
             alert('Gagal: ' + err.error);
@@ -7582,21 +7882,23 @@ function showImportError(msg) {
     if (errList) errList.innerText = msg;
 }
 
-function closeImportAndRefresh() {
+async function closeImportAndRefresh() {
     closeImportModal();
     // Refresh table data
     if (currentImportSection === 'produk') {
-        fetchProducts();
+        await fetchProducts();
+        if (typeof renderPOSProducts === 'function') renderPOSProducts();
     } else if (currentImportSection === 'pelanggan') {
-        fetchCustomers();
+        await fetchCustomers();
     } else if (currentImportSection === 'vendor') {
-        fetchVendors();
+        await fetchVendors();
     } else if (currentImportSection === 'pembelian') {
-        fetchPurchases();
+        await fetchPurchases();
+        if (typeof renderHutang === 'function') renderHutang();
     } else if (currentImportSection === 'invoice') {
-        if (typeof fetchInvoices === 'function') fetchInvoices();
-        if (typeof fetchPiutang === 'function') fetchPiutang();
-        if (typeof fetchDashboardData === 'function') fetchDashboardData();
+        if (typeof fetchInvoices === 'function') await fetchInvoices();
+        if (typeof fetchPiutang === 'function') await fetchPiutang();
+        if (typeof fetchDashboardSummary === 'function') await fetchDashboardSummary();
     }
 }
 
@@ -7714,6 +8016,7 @@ async function saveCompanyProfile(e) {
         });
         if (!res.ok) throw new Error('Failed to save settings');
         showToast('Profil bisnis berhasil disimpan', 'success');
+        if (typeof loadCompanyProfile === 'function') await loadCompanyProfile();
     } catch (err) {
         console.error(err);
         showToast('Gagal menyimpan profil bisnis', 'error');
@@ -9143,6 +9446,7 @@ async function executeDeleteOutstandingInvoice() {
             showToast('Invoice outstanding berhasil dihapus', 'success');
             selectedPiutangIds.delete(String(id));
             await fetchPiutang();
+            if (typeof fetchInvoices === 'function') await fetchInvoices();
         } else {
             showToast('Gagal menghapus: ' + (data.error || 'Terjadi kesalahan'), 'error');
         }

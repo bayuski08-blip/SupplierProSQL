@@ -144,6 +144,7 @@ function renderInvoice(data, ppnEnabled, isProforma = false) {
 
     const storeName = comp.name || 'Nama Bisnis';
     const customerName = customer.name || 'Pelanggan Umum';
+    const customerPhone = (customer.phone && String(customer.phone).trim() !== '') ? customer.phone : '-';
     const invoiceId = isProforma ? (inv.proforma_no || '-') : (inv.id || '-');
     const revisiSuffix = (isProforma && inv.revisi && Number(inv.revisi) > 0) ? ` (Rev. ${inv.revisi})` : '';
     const invoiceIdDisplay = `${invoiceId}${revisiSuffix}`;
@@ -261,6 +262,10 @@ function renderInvoice(data, ppnEnabled, isProforma = false) {
                     <tr>
                         <td style="font-weight: bold; padding: 0.5pt 4pt 0.5pt 0; white-space: nowrap; vertical-align: top; font-size: 8.5pt;">Alamat Customer</td>
                         <td style="padding: 0.5pt 0; font-size: 8.5pt; vertical-align: top; word-break: break-word; max-width: 160pt; overflow: hidden;">: ${customer.address || '-'}</td>
+                    </tr>
+                    <tr>
+                        <td style="font-weight: bold; padding: 0.5pt 4pt 0.5pt 0; white-space: nowrap; font-size: 8.5pt;">WhatsApp / Telepon</td>
+                        <td style="padding: 0.5pt 0; font-size: 8.5pt; word-break: break-word;">: ${customerPhone}</td>
                     </tr>
                     ${berlakuRowHtml}
                     ${refInvoiceRowHtml}

@@ -92,6 +92,22 @@ const formatDateStr = (val) => {
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// ─── Anti-Cache Middleware untuk seluruh rute API ─────────────────────────────
+// Nonaktifkan ETag agar Express tidak menghasilkan weak etag yang memicu respons 304
+app.set('etag', false);
+
+// Mencegah LiteSpeed Web Server (Hostinger), reverse proxy, dan browser meng-cache data API
+app.use('/api', (req, res, next) => {
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+    'Surrogate-Control': 'no-store',
+    'X-LiteSpeed-Cache-Control': 'no-cache, no-store'
+  });
+  next();
+});
+
 // ─── Landing page gate — must be BEFORE express.static ────────────────────────
 // Intercepts requests to the root landing page (/ or /index.html) and
 // redirects to /login when the admin has disabled the landing demo page.
@@ -2192,7 +2208,9 @@ app.get('/api/invoices/:id/print-data', authenticateToken, async (req, res) => {
     const { id } = req.params;
     
     const invRes = await pool.query(`
-      SELECT si.*, c.name as customer_name, c.address as customer_address, pt.name as payment_type_name
+      SELECT si.*, c.name as customer_name, c.address as customer_address,
+             c.phone as customer_phone, c.no_hp_2 as customer_no_hp_2,
+             pt.name as payment_type_name
       FROM sales_invoices si
       LEFT JOIN customers c ON si.customer_id = c.id
       LEFT JOIN payment_types pt ON si.payment_type_id = pt.id
@@ -2232,6 +2250,10 @@ app.get('/api/invoices/:id/print-data', authenticateToken, async (req, res) => {
     const recalculatedTax = ppnEnabled ? Math.round((subtotal - diskon) * (pajakDefault / 100)) : 0;
     const recalculatedTotal = subtotal - diskon + recalculatedTax;
     
+    const phone1 = invoiceRow.customer_phone ? String(invoiceRow.customer_phone).trim() : '';
+    const phone2 = invoiceRow.customer_no_hp_2 ? String(invoiceRow.customer_no_hp_2).trim() : '';
+    const chosenPhone = (phone1 && phone1 !== '-') ? phone1 : ((phone2 && phone2 !== '-') ? phone2 : (phone1 || '-'));
+
     res.json({
       invoice: {
         id: invoiceRow.id,
@@ -2245,7 +2267,8 @@ app.get('/api/invoices/:id/print-data', authenticateToken, async (req, res) => {
       },
       customer: {
         name: invoiceRow.customer_name || 'Pelanggan Umum',
-        address: invoiceRow.customer_address || ''
+        address: invoiceRow.customer_address || '',
+        phone: chosenPhone
       },
       items: itemsRes.rows.map(item => ({
         product_name: item.product_name,
@@ -4728,11 +4751,163 @@ app.put('/api/purchases/:id/cancel', authenticateToken, authorizeRoles('admin', 
 });
 
 // --- Sales Invoices Extra CRUD ---
-app.put('/api/invoices/:id', authenticateToken, authorizeRoles('admin', 'kasir'), async (req, res) => {
+
+/**
+ * syncInvoicePaymentState — Fungsi terpusat sinkronisasi status invoice & kas.
+ * Dipanggil dari PUT /api/invoices/:id dalam satu transaksi yang sudah berjalan.
+ *
+ * Aturan sinkronisasi (semua berjalan dalam transaksi client yang diberikan):
+ *   - Tunai/Transfer (instant): status Lunas, kas IN 'Penjualan', piutang nihil.
+ *   - Kredit (non-instant)   : status Belum Lunas/Sebagian, piutang terbuka.
+ *   - Lunas → Belum Lunas    : kas di-reversal (cancelled), paid_amount = 0.
+ *   - Belum Lunas → Lunas    : kas baru 'Penjualan' dicatat, paid_amount = total.
+ *   - Kredit X → Kredit Y    : due_date dihitung ulang, sisa piutang tetap.
+ *   - Total berubah           : paid_amount & status direcalculate dari pembayaran aktif.
+ *
+ * @param {object} opts
+ * @param {object} opts.client          - mysql2 connection (sudah dalam BEGIN)
+ * @param {object} opts.currentInv      - baris lama dari sales_invoices
+ * @param {string} opts.invId
+ * @param {string} opts.invDate         - tanggal invoice (YYYY-MM-DD)
+ * @param {string} opts.newPType        - payment_type_id baru
+ * @param {number} opts.finalTotal      - total invoice setelah recalculate
+ * @param {number} opts.totalActivePaid - SUM amount dari sales_invoice_payments aktif
+ * @param {number} opts.activePayCount  - jumlah cicilan aktif
+ * @param {string} opts.requestedStatus - 'lunas' | 'belum' | 'sebagian' (dari frontend)
+ * @param {number} opts.userId
+ * @returns {{ status, effectivePaid, paidDate, newDueDate }}
+ */
+async function syncInvoicePaymentState({
+  client, currentInv, invId, invDate, newPType,
+  finalTotal, totalActivePaid, activePayCount,
+  requestedStatus, userId
+}) {
+  const instant = await isInstantPayment(newPType);
+  const oldInstant = await isInstantPayment(currentInv.payment_type_id || 'PT-1');
+
+  // Ambil nama tipe pembayaran baru untuk isi method kas
+  const ptNameRes = await client.query('SELECT name FROM payment_types WHERE id = ?', [newPType]);
+  const ptName = ptNameRes.rows[0]?.name || 'Transfer Bank';
+
+  // Hitung due_date baru untuk tipe kredit
+  let newDueDate = null;
+  if (!instant) {
+    const match = ptName.match(/(kredit|credit)\s+(\d+)\s+hari/i);
+    if (match && match[2]) {
+      const days = parseInt(match[2], 10);
+      const parts = invDate.split('-');
+      if (parts.length === 3) {
+        const dt = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10) + days);
+        newDueDate = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+      }
+    }
+  }
+
+  let effectivePaid = 0;
+  let status = 'Belum Lunas';
+  let paidDate = null;
+
+  // ── Kasus A: Ada cicilan aktif (soft-lock sebelumnya sudah konfirmasi) ──
+  if (activePayCount > 0) {
+    effectivePaid = totalActivePaid;
+    const sisa = Math.max(0, finalTotal - totalActivePaid);
+
+    if (instant) {
+      // Kredit → Tunai/Transfer: tutup piutang, lunas
+      // Batalkan semua kas cicilan lama
+      await client.query(
+        `UPDATE cash_transactions SET status = 'cancelled' WHERE invoice_id = ? AND (status IS NULL OR status = 'active')`,
+        [invId]
+      );
+      await client.query(
+        `UPDATE sales_invoice_payments SET status = 'void', void_reason = 'Tipe pembayaran diubah ke Tunai/Transfer', void_by = ?, void_at = NOW() WHERE invoice_id = ? AND status = 'active'`,
+        [userId, invId]
+      );
+      effectivePaid = finalTotal;
+      status = 'Lunas';
+      paidDate = invDate;
+      // Buat kas baru: Penjualan
+      const ctPrefix = await getSetting('prefix_cash_transaction', 'CT');
+      const ctId = await generateNextId(client, 'cash_transactions', ctPrefix);
+      await client.query(
+        'INSERT INTO cash_transactions (id, date, type, category, description, amount, method, invoice_id, payment_type_id, user_id, status) VALUES (?, ?, \'IN\', \'Penjualan\', ?, ?, ?, ?, ?, ?, \'active\')',
+        [ctId, invDate, `Pembayaran INV ${invId} (Ubah ke ${ptName})`, finalTotal, ptName, invId, newPType, userId]
+      );
+    } else {
+      // Kredit tetap kredit: recalculate dari cicilan aktif
+      status = sisa <= 0 ? 'Lunas' : (totalActivePaid > 0 ? 'Sebagian' : 'Belum Lunas');
+      paidDate = status === 'Lunas' ? (currentInv.paid_date || invDate) : null;
+    }
+
+  // ── Kasus B: Tidak ada cicilan aktif ──
+  } else {
+    const normalizedReq = (requestedStatus || '').toLowerCase();
+
+    if (instant) {
+      // Tunai/Transfer: selalu Lunas, kas Penjualan
+      effectivePaid = finalTotal;
+      status = 'Lunas';
+      paidDate = invDate;
+
+      // Hapus kas lama, buat baru
+      await client.query(
+        `UPDATE cash_transactions SET status = 'cancelled' WHERE invoice_id = ? AND (status IS NULL OR status = 'active')`,
+        [invId]
+      );
+      const ctPrefix = await getSetting('prefix_cash_transaction', 'CT');
+      const ctId = await generateNextId(client, 'cash_transactions', ctPrefix);
+      await client.query(
+        'INSERT INTO cash_transactions (id, date, type, category, description, amount, method, invoice_id, payment_type_id, user_id, status) VALUES (?, ?, \'IN\', \'Penjualan\', ?, ?, ?, ?, ?, ?, \'active\')',
+        [ctId, invDate, `Pembayaran INV ${invId} (Edit)`, finalTotal, ptName, invId, newPType, userId]
+      );
+
+    } else if (normalizedReq === 'lunas') {
+      // User ingin Lunas, tipe Kredit tapi tidak ada cicilan → catat Lunas manual
+      effectivePaid = finalTotal;
+      status = 'Lunas';
+      paidDate = invDate;
+
+      await client.query(
+        `UPDATE cash_transactions SET status = 'cancelled' WHERE invoice_id = ? AND (status IS NULL OR status = 'active')`,
+        [invId]
+      );
+      const ctPrefix = await getSetting('prefix_cash_transaction', 'CT');
+      const ctId = await generateNextId(client, 'cash_transactions', ctPrefix);
+      await client.query(
+        'INSERT INTO cash_transactions (id, date, type, category, description, amount, method, invoice_id, payment_type_id, user_id, status) VALUES (?, ?, \'IN\', \'Pelunasan Piutang\', ?, ?, ?, ?, ?, ?, \'active\')',
+        [ctId, invDate, `Pelunasan INV ${invId} (Edit)`, finalTotal, ptName, invId, newPType, userId]
+      );
+
+    } else {
+      // Belum Lunas (kredit): batalkan kas lama, piutang terbuka
+      effectivePaid = 0;
+      status = 'Belum Lunas';
+      paidDate = null;
+
+      await client.query(
+        `UPDATE cash_transactions SET status = 'cancelled' WHERE invoice_id = ? AND (status IS NULL OR status = 'active')`,
+        [invId]
+      );
+    }
+  }
+
+  return { status, effectivePaid, paidDate, newDueDate };
+}
+
+app.put('/api/invoices/:id', authenticateToken, authorizeRoles('admin', 'kasir', 'finance'), async (req, res) => {
   const invId = req.params.id;
-  const { customer_id, customerId, date, paid, paid_amount, payment_type_id, due_date, items, discount, diskon } = req.body;
+  const {
+    customer_id, customerId, date,
+    paid, paid_amount, payment_type_id,
+    due_date, items, discount, diskon,
+    requested_status   // ← field baru: 'lunas' | 'belum' | 'sebagian'
+  } = req.body;
   const custId = customer_id || customerId;
   const pType = payment_type_id || 'PT-1';
+
+  // Validasi role untuk operasi sensitif: kasir tidak bisa ubah status/tipe
+  const callerRole = (req.user.role || '').toLowerCase();
+  const canChangeStatusOrType = callerRole === 'admin' || callerRole === 'finance';
 
   // Masalah 2: Validasi batas tanggal order maksimal +7 hari ke depan pada Edit Invoice
   if (date) {
@@ -4755,9 +4930,20 @@ app.put('/api/invoices/:id', authenticateToken, authorizeRoles('admin', 'kasir')
     }
     const currentInv = invCheck.rows[0];
     const invDate = (date && String(date).trim()) ? formatDateStr(date) : (formatDateStr(currentInv.date) || getTodayWITA());
+
     if (currentInv.status === 'Cancel' || currentInv.status === 'Batal') {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Invoice yang sudah dibatalkan tidak dapat diedit' });
+    }
+
+    // Jika kasir mencoba mengubah tipe pembayaran atau status → tolak
+    if (!canChangeStatusOrType) {
+      const pTypeUnchanged = !payment_type_id || payment_type_id === currentInv.payment_type_id;
+      const statusUnchanged = !requested_status;
+      if (!pTypeUnchanged || !statusUnchanged) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'Hanya administrator dan finance yang dapat mengubah tipe pembayaran atau status invoice.' });
+      }
     }
 
     // 1. Recalculate subtotal, tax, and finalTotal from items
@@ -4789,7 +4975,7 @@ app.put('/api/invoices/:id', authenticateToken, authorizeRoles('admin', 'kasir')
     const totalActivePaid = parseFloat(activePayRes.rows[0].total_active || 0);
     const activePaymentCount = parseInt(activePayRes.rows[0].count || 0);
 
-    // Rule: Edit yang membuat total invoice lebih kecil dari total pembayaran aktif ditolak dengan pesan jelas
+    // Rule: Edit yang membuat total invoice lebih kecil dari total pembayaran aktif ditolak
     if (totalActivePaid > 0 && finalTotal < totalActivePaid) {
       await client.query('ROLLBACK');
       return res.status(400).json({
@@ -4797,24 +4983,32 @@ app.put('/api/invoices/:id', authenticateToken, authorizeRoles('admin', 'kasir')
       });
     }
 
-    // 3. Determine status & effective paid
-    const instant = await isInstantPayment(pType);
-    let effectivePaid = 0;
-    let status = 'Belum Lunas';
+    // 3. Sinkronisasi status, tipe pembayaran, dan kas secara terpusat
+    const { status, effectivePaid, paidDate, newDueDate } = await syncInvoicePaymentState({
+      client,
+      currentInv,
+      invId,
+      invDate,
+      newPType: pType,
+      finalTotal,
+      totalActivePaid,
+      activePayCount: activePaymentCount,
+      requestedStatus: requested_status || (canChangeStatusOrType ? null : null),
+      userId: req.user.id
+    });
 
-    if (activePaymentCount > 0) {
-      effectivePaid = totalActivePaid;
-      const sisa = Math.max(0, finalTotal - totalActivePaid);
-      status = sisa <= 0 ? 'Lunas' : (totalActivePaid > 0 ? 'Sebagian' : 'Belum Lunas');
+    // Tentukan due_date final:
+    // - Jika frontend kirim due_date eksplisit → pakai itu
+    // - Jika tipe kredit → pakai yang dihitung syncInvoicePaymentState
+    // - Jika tipe tunai → null
+    let finalDueDate;
+    if (due_date !== undefined) {
+      finalDueDate = due_date;
+    } else if (newDueDate) {
+      finalDueDate = newDueDate;
     } else {
-      const finalPaid = parseFloat(paid || paid_amount || 0);
-      effectivePaid = instant ? finalTotal : finalPaid;
-      status = instant ? 'Lunas'
-        : (effectivePaid >= finalTotal ? 'Lunas'
-          : (effectivePaid > 0 ? 'Sebagian' : 'Belum Lunas'));
+      finalDueDate = currentInv.due_date ? formatDateStr(currentInv.due_date) : null;
     }
-
-    const paidDate = status === 'Lunas' ? (currentInv.paid_date || invDate) : null;
 
     // 4. Stock adjustment via DELTA (Hanya untuk invoice yang bukan import outstanding)
     if (!currentInv.is_outstanding_import) {
@@ -4881,32 +5075,14 @@ app.put('/api/invoices/:id', authenticateToken, authorizeRoles('admin', 'kasir')
       }
     }
 
-    if (due_date !== undefined) {
-      await client.query('UPDATE sales_invoices SET date = ?, customer_id = ?, subtotal = ?, discount = ?, tax = ?, total = ?, paid_amount = ?, status = ?, payment_type_id = ?, due_date = ?, paid_date = ? WHERE id = ?', [invDate, custId, subtotal, finalDiskon, taxAmount, finalTotal, effectivePaid, status, pType, due_date, paidDate, invId]);
-    } else {
-      await client.query('UPDATE sales_invoices SET date = ?, customer_id = ?, subtotal = ?, discount = ?, tax = ?, total = ?, paid_amount = ?, status = ?, payment_type_id = ?, paid_date = ? WHERE id = ?', [invDate, custId, subtotal, finalDiskon, taxAmount, finalTotal, effectivePaid, status, pType, paidDate, invId]);
-    }
-
-    // Cash transactions handling:
-    // If invoice has active payments in sales_invoice_payments, PRESERVE their cash transactions!
-    if (activePaymentCount > 0) {
-      // Do not touch active payment cash transactions
-    } else {
-      // For instant / non-installment invoices, delete and re-insert
-      await client.query('DELETE FROM cash_transactions WHERE invoice_id = ? AND invoice_id IS NOT NULL AND (status IS NULL OR status = \'active\')', [invId]);
-      if (effectivePaid > 0) {
-        const ctPrefix = await getSetting('prefix_cash_transaction', 'CT');
-        const ctId = await generateNextId(client, 'cash_transactions', ctPrefix);
-        const ptNameRes = await client.query('SELECT name FROM payment_types WHERE id = ?', [pType]);
-        const methodEdit = ptNameRes.rows[0]?.name || 'Transfer Bank';
-        const userId = req.user.id;
-        const cashCategory = status === 'Lunas' ? 'Penjualan' : 'Pelunasan Piutang';
-        await client.query('INSERT INTO cash_transactions (id, date, type, category, description, amount, method, invoice_id, payment_type_id, user_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [ctId, invDate, 'IN', cashCategory, `Pembayaran INV ${invId} (Edit)`, effectivePaid, methodEdit, invId, pType, userId, 'active']);
-      }
-    }
+    // 5. Update sales_invoices
+    await client.query(
+      'UPDATE sales_invoices SET date = ?, customer_id = ?, subtotal = ?, discount = ?, tax = ?, total = ?, paid_amount = ?, status = ?, payment_type_id = ?, due_date = ?, paid_date = ? WHERE id = ?',
+      [invDate, custId, subtotal, finalDiskon, taxAmount, finalTotal, effectivePaid, status, pType, finalDueDate, paidDate, invId]
+    );
 
     await client.query('COMMIT');
-    res.json({ success: true });
+    res.json({ success: true, status, effectivePaid, paidDate, due_date: finalDueDate });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(400).json({ error: err.message });
@@ -5824,6 +6000,7 @@ app.get('/api/proformas/:pk/print-data', authenticateToken, async (req, res) => 
 
     const pfRes = await pool.query(
       `SELECT p.*, c.name AS customer_name, c.address AS customer_address,
+              c.phone AS customer_phone, c.no_hp_2 AS customer_no_hp_2,
               pt.name AS payment_type_name,
               CASE
                 WHEN p.status = 'aktif' AND p.berlaku_hingga < ? THEN 'kedaluwarsa'
@@ -5856,6 +6033,10 @@ app.get('/api/proformas/:pk/print-data', authenticateToken, async (req, res) => 
       if (r.key.startsWith('company_')) company[r.key.replace('company_', '')] = r.value;
     });
 
+    const pfPhone1 = pf.customer_phone ? String(pf.customer_phone).trim() : '';
+    const pfPhone2 = pf.customer_no_hp_2 ? String(pf.customer_no_hp_2).trim() : '';
+    const pfChosenPhone = (pfPhone1 && pfPhone1 !== '-') ? pfPhone1 : ((pfPhone2 && pfPhone2 !== '-') ? pfPhone2 : (pfPhone1 || '-'));
+
     res.json({
       proforma: {
         pk: pf.pk,
@@ -5879,7 +6060,8 @@ app.get('/api/proformas/:pk/print-data', authenticateToken, async (req, res) => 
       },
       customer: {
         name: pf.customer_name || 'Pelanggan Umum',
-        address: pf.customer_address || ''
+        address: pf.customer_address || '',
+        phone: pfChosenPhone
       },
       // Items: NO fee fields (not exposed regardless of role — fee tidak tampil di cetakan proforma)
       items: itemsRes.rows.map(item => ({

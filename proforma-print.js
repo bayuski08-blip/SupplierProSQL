@@ -88,6 +88,7 @@ function renderProforma(data) {
 
     const storeName = comp.name || 'Nama Bisnis';
     const customerName = customer.name || 'Pelanggan Umum';
+    const customerPhone = (customer.phone && String(customer.phone).trim() !== '') ? customer.phone : '-';
     const proformaNo = pf.proforma_no || '-';
     // Tanggal = order_date yang tersimpan di DB (BUKAN tanggal cetak hari ini)
     const proformaDateStr = formatDate(pf.order_date);
@@ -152,6 +153,10 @@ function renderProforma(data) {
                         <tr>
                             <td style="font-weight: bold; padding: 0.12rem 0;">Alamat Customer</td>
                             <td style="padding: 0.12rem 0;">: <span style="display:inline-block; width:calc(100% - 15px); border-bottom:1px solid #000; min-height:1rem;">${customer.address || '-'}</span></td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: bold; padding: 0.12rem 0;">WhatsApp / Telepon</td>
+                            <td style="padding: 0.12rem 0;">: <span style="display:inline-block; width:calc(100% - 15px); border-bottom:1px solid #000; min-height:1rem;">${customerPhone}</span></td>
                         </tr>
                         <tr>
                             <td style="font-weight: bold; padding: 0.12rem 0;">Tanggal</td>

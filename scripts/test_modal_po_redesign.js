@@ -38,7 +38,7 @@ async function runTestSuite() {
 
     // 1.2 Layout baris 1 & 2
     const modalAddPoHtml = html.substring(html.indexOf('id="modal-add-purchase"'), html.indexOf('id="modal-edit-purchase"'));
-    
+
     const row1HasNoPo = modalAddPoHtml.includes('No. PO (Otomatis)');
     const row1HasDate = modalAddPoHtml.includes('id="add-purchase-date"');
     assert('Baris 1 berisi No. PO dan Tanggal', row1HasNoPo && row1HasDate);
@@ -113,8 +113,8 @@ async function runTestSuite() {
             innerHTML: '',
             textContent: '',
             value: '',
-            focus: () => {},
-            addEventListener: () => {},
+            focus: () => { },
+            addEventListener: () => { },
             closest: () => ({ getBoundingClientRect: () => ({ top: 0, left: 0, width: 800, height: 600 }), scrollTop: 0, scrollLeft: 0 }),
             getBoundingClientRect: () => ({ top: 100, bottom: 135, left: 50, right: 410, width: 360, height: 35 }),
             querySelectorAll: () => []
@@ -123,9 +123,9 @@ async function runTestSuite() {
     };
 
     ['add-purchase-items-container', 'add-purchase-subtotal-display', 'add-purchase-total-display',
-     'add-purchase-product-search', 'add-purchase-product-dropdown'].forEach(id => {
-        elements[id] = mockElement();
-    });
+        'add-purchase-product-search', 'add-purchase-product-dropdown'].forEach(id => {
+            elements[id] = mockElement();
+        });
 
     const sandbox = {
         document: {
@@ -133,15 +133,15 @@ async function runTestSuite() {
             createElement: (tag) => mockElement(tag),
             querySelector: (sel) => mockElement(),
             querySelectorAll: () => [],
-            addEventListener: () => {}
+            addEventListener: () => { }
         },
         window: {
             innerWidth: 1024,
-            addEventListener: () => {}
+            addEventListener: () => { }
         },
-        lucide: { createIcons: () => {} },
+        lucide: { createIcons: () => { } },
         setTimeout: (fn) => fn(),
-        clearTimeout: () => {}
+        clearTimeout: () => { }
     };
 
     const evalScript = `
@@ -154,7 +154,7 @@ async function runTestSuite() {
     // Test highlightMatch
     const highlighted = sandbox.highlightMatch('Kecap Manis Bango 550ml', 'bango');
     assert('highlightMatch menghasilkan mark class="po-search-highlight"', highlighted.includes('<mark class="po-search-highlight">Bango</mark>'));
-    
+
     const highlightedMid = sandbox.highlightMatch('Beras Pandan Wangi 5kg', 'dan');
     assert('highlightMatch mencocokkan di bagian tengah kata', highlightedMid.includes('Pan<mark class="po-search-highlight">dan</mark>'));
 
@@ -192,7 +192,7 @@ async function runTestSuite() {
     console.log('\n--- TEST 4: Verifikasi Penambahan Item & Mencegah Duplikasi ---');
     // ----------------------------------------------------
     sandbox.addPurchaseItems = [];
-    
+
     // Add product 1 first time
     sandbox.addProductToPo(mockProducts[0]);
     assert('Menambah produk pertama berhasil (panjang item = 1)', sandbox.addPurchaseItems.length === 1);

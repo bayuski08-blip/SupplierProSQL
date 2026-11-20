@@ -55,7 +55,7 @@
                         <i data-lucide="users"></i> Pelanggan
                     </div>
                     <div class="nav-item" data-page="pricelists" id="nav-pricelists">
-                        <i data-lucide="tags"></i> Pricelist
+                        <i data-lucide="tags"></i> Special Price
                     </div>
                     <div class="nav-item" data-page="vendors" id="nav-vendors">
                         <i data-lucide="truck"></i> Vendor
@@ -183,7 +183,7 @@
                     </div>
 
                     <!-- Charts Row -->
-                    <div class="dashboard-grid-2">
+                    <div class="dashboard-grid-2" id="dashboard-charts-row">
                         <div class="dash-card">
                             <div class="dash-card-header">
                                 <span class="dash-card-title">Penjualan 7 Hari Terakhir</span>
@@ -214,8 +214,8 @@
                     </div>
 
                     <!-- Recent Transactions & Low Stock -->
-                    <div class="dashboard-grid-2">
-                        <div class="dash-card">
+                    <div class="dashboard-grid-2" id="dashboard-bottom-grid">
+                        <div class="dash-card" id="dash-card-recent-transactions">
                             <div class="dash-card-header">
                                 <span class="dash-card-title">Transaksi Terbaru</span>
                                 <button class="dash-card-action" onclick="navigateTo('invoices')">Lihat Semua</button>
@@ -226,7 +226,7 @@
                                         <tr>
                                             <th>Invoice</th>
                                             <th>Pelanggan</th>
-                                            <th>Total</th>
+                                            <th id="th-recent-tx-total">Total</th>
                                             <th>Status</th>
                                         </tr>
                                     </thead>
@@ -237,12 +237,12 @@
                             </div>
                         </div>
 
-                        <div class="dash-card">
+                        <div class="dash-card" id="dash-card-low-stock">
                             <div class="dash-card-header">
                                 <span class="dash-card-title">Stok Menipis</span>
                                 <button class="dash-card-action" onclick="navigateTo('products')">Kelola Stok</button>
                             </div>
-                            <div class="dash-card-body" style="padding: 0;">
+                            <div class="dash-card-body" id="low-stock-frame" style="padding: 0; max-height: 290px; overflow-y: auto;">
                                 <table class="data-table" id="low-stock-table">
                                     <thead>
                                         <tr>
@@ -308,7 +308,7 @@
                                     <label style="margin: 0; font-weight: 600;">Pelanggan</label>
                                     <span id="pos-customer-pricelist-badge" style="display: none; font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 999px; background: #e0f2fe; color: #0369a1; font-weight: 600; align-items: center; gap: 4px;">
                                         <i data-lucide="tag" style="width: 10px; height: 10px;"></i>
-                                        <span id="pos-customer-pricelist-name">Pricelist</span>
+                                        <span id="pos-customer-pricelist-name">Special Price</span>
                                     </span>
                                 </div>
                                 <div class="customer-search-wrapper" style="position: relative;">
@@ -414,6 +414,11 @@
                             </div>
                             <select class="filter-select" id="product-category-filter">
                                 <!-- Filled by JS -->
+                            </select>
+                            <select class="filter-select" id="product-status-filter" onchange="onProductStatusFilterChange()">
+                                <option value="active">Status: Aktif</option>
+                                <option value="inactive">Status: Nonaktif</option>
+                                <option value="all">Status: Semua</option>
                             </select>
                         </div>
                         <div class="page-toolbar-right">
@@ -1233,7 +1238,7 @@
                                         placeholder {YYYY}, {YY}, {MM}</span>
                                 </div>
                                 <div class="form-group">
-                                    <label>Prefix Daftar Harga (Pricelist)</label>
+                                    <label>Prefix Special Price</label>
                                     <input type="text" id="settings-prefix-pricelist" class="form-input"
                                         placeholder="Contoh: PL">
                                     <span class="help-text" style="font-size:0.75rem; color:var(--gray-400);">Dukung
@@ -1513,16 +1518,16 @@
                 </section>
 
                 <!-- ============================================================
-                 PAGE: PRICELIST (Admin / Owner Only)
+                 PAGE: SPECIAL PRICE (Admin / Owner Only)
                  ============================================================ -->
                 <section class="page-section" id="page-pricelists">
-                    <!-- VIEW 1: DAFTAR PRICELIST -->
+                    <!-- VIEW 1: DAFTAR SPECIAL PRICE -->
                     <div id="pricelists-list-view">
                         <div class="page-toolbar">
                             <div class="page-toolbar-left">
                                 <div class="toolbar-search">
                                     <i data-lucide="search"></i>
-                                    <input type="text" placeholder="Cari pricelist..." id="pricelist-search">
+                                    <input type="text" placeholder="Cari special price..." id="pricelist-search">
                                 </div>
                                 <select class="filter-select" id="pricelist-status-filter">
                                     <option value="all">Semua Status</option>
@@ -1532,7 +1537,7 @@
                             </div>
                             <div class="page-toolbar-right">
                                 <button class="btn-toolbar primary" onclick="openCreatePricelistModal()">
-                                    <i data-lucide="plus-circle"></i> Buat Pricelist Baru
+                                    <i data-lucide="plus-circle"></i> Buat Special Price Baru
                                 </button>
                             </div>
                         </div>
@@ -1542,7 +1547,7 @@
                                 <thead>
                                     <tr>
                                         <th>Kode</th>
-                                        <th>Nama Pricelist</th>
+                                        <th>Nama Special Price</th>
                                         <th>Keterangan</th>
                                         <th style="text-align: center;">Jumlah Produk</th>
                                         <th style="text-align: center;">Pelanggan Pemakai</th>
@@ -1554,7 +1559,7 @@
                                     <tr>
                                         <td colspan="7" style="text-align: center; padding: 2.5rem; color: var(--gray-400);">
                                             <i data-lucide="loader" class="spin" style="width: 24px; height: 24px; margin-bottom: 0.5rem; display: inline-block;"></i>
-                                            <div>Memuat daftar pricelist...</div>
+                                            <div>Memuat daftar special price...</div>
                                         </td>
                                     </tr>
                                 </tbody>
@@ -1562,7 +1567,7 @@
                         </div>
                     </div>
 
-                    <!-- VIEW 2: DETAIL & KELOLA ITEM PRICELIST -->
+                    <!-- VIEW 2: DETAIL & KELOLA ITEM SPECIAL PRICE -->
                     <div id="pricelists-detail-view" style="display: none;">
                         <!-- Detail Header -->
                         <div style="background: white; border-radius: 0.75rem; border: 1px solid var(--gray-200); padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
@@ -1619,7 +1624,7 @@
                             <div class="page-toolbar-left">
                                 <div class="toolbar-search">
                                     <i data-lucide="search"></i>
-                                    <input type="text" placeholder="Cari item di pricelist..." id="detail-pl-search" oninput="filterPricelistItems()">
+                                    <input type="text" placeholder="Cari item di special price..." id="detail-pl-search" oninput="filterPricelistItems()">
                                 </div>
                             </div>
                             <div class="page-toolbar-right" style="display: flex; gap: 0.5rem; align-items: center;">
@@ -1643,7 +1648,7 @@
                                         <th>Satuan</th>
                                         <th style="text-align: right;">Harga Master</th>
                                         <th style="text-align: right;" id="th-pl-hpp">HPP</th>
-                                        <th style="text-align: right; width: 170px;">Harga Pricelist (Rp)</th>
+                                        <th style="text-align: right; width: 170px;">Harga Special Price (Rp)</th>
                                         <th style="text-align: right;">Selisih (Rp & %)</th>
                                         <th style="text-align: center;">Status HPP</th>
                                         <th style="text-align: center; width: 60px;">Aksi</th>
@@ -1828,27 +1833,75 @@
             <div class="modal-body">
                 <div class="form-group">
                     <label>Produk</label>
-                    <input type="text" class="form-input" value="Kopi Arabica 250g" disabled>
+                    <input type="text" id="stock-opname-name" class="form-input" value="" disabled>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
                         <label>Stok Sistem Saat Ini</label>
-                        <input type="text" class="form-input" value="124" disabled>
+                        <input type="text" id="stock-opname-stock" class="form-input" value="0" disabled>
                     </div>
                     <div class="form-group">
                         <label>Stok Fisik (Aktual)</label>
-                        <input type="number" class="form-input" placeholder="0">
+                        <input type="number" id="stock-opname-actual" class="form-input" placeholder="0">
                     </div>
                 </div>
                 <div class="form-group">
                     <label>Keterangan Penyesuaian</label>
-                    <textarea class="form-input" placeholder="Contoh: Barang rusak, hilang, dsb"></textarea>
+                    <textarea id="stock-opname-note" class="form-input" placeholder="Contoh: Barang rusak, hilang, dsb"></textarea>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn-toolbar secondary" onclick="closeModal('modal-stock-opname')">Batal</button>
                 <button class="btn-toolbar primary" onclick="submitStockOpname()"><i data-lucide="save"></i> Sesuaikan
                     Stok</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Konfirmasi Nonaktifkan Produk (A2.2) -->
+    <div class="modal-overlay" id="modal-confirm-deactivate-product">
+        <div class="modal" style="max-width: 480px;">
+            <div class="modal-header">
+                <h3>Konfirmasi Nonaktifkan Produk</h3>
+                <button class="modal-close" onclick="closeModal('modal-confirm-deactivate-product')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="deactivate-product-id">
+                <div id="deactivate-product-stock-warning" style="display:none; margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: 6px; background: #fffbeb; border: 1px solid #fef3c7; color: #b45309; font-size: 0.875rem;">
+                    <div style="font-weight: 700; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.25rem;">
+                        <i data-lucide="alert-triangle" style="width: 16px; height: 16px;"></i> Peringatan Stok Masih Ada
+                    </div>
+                    <div id="deactivate-product-warning-text"></div>
+                </div>
+                <p id="deactivate-product-message" style="margin: 0; color: var(--gray-600); font-size: 0.9rem; line-height: 1.5;"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-toolbar secondary" onclick="closeModal('modal-confirm-deactivate-product')">Batal</button>
+                <button class="btn-toolbar warning" id="btn-confirm-deactivate-product" onclick="executeDeactivateProduct()"><i data-lucide="eye-off"></i> Ya, Nonaktifkan</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Konfirmasi Hapus Produk (A2.1) -->
+    <div class="modal-overlay" id="modal-confirm-delete-product">
+        <div class="modal" style="max-width: 480px;">
+            <div class="modal-header">
+                <h3>Hapus Produk</h3>
+                <button class="modal-close" onclick="closeModal('modal-confirm-delete-product')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="delete-product-id">
+                <div id="delete-product-pricelist-warning" style="display:none; margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: 6px; background: #fffbeb; border: 1px solid #fef3c7; color: #b45309; font-size: 0.875rem;">
+                    <div style="font-weight: 700; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.25rem;">
+                        <i data-lucide="alert-triangle" style="width: 16px; height: 16px;"></i> Terdaftar di Special Price
+                    </div>
+                    <div>Produk ini tercatat dalam daftar harga Special Price. Menghapus produk akan otomatis menghapus harga khusus terkait dari Special Price.</div>
+                </div>
+                <p id="delete-product-message" style="margin: 0; color: var(--gray-600); font-size: 0.9rem; line-height: 1.5;"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-toolbar secondary" onclick="closeModal('modal-confirm-delete-product')">Batal</button>
+                <button class="btn-toolbar danger" id="btn-confirm-delete-product" onclick="executeDeleteProduct()"><i data-lucide="trash-2"></i> Ya, Hapus</button>
             </div>
         </div>
     </div>
@@ -2019,9 +2072,9 @@
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>Pricelist Khusus <span style="color:var(--gray-400);font-size:0.75rem;">(opsional)</span></label>
+                        <label>Special Price Khusus <span style="color:var(--gray-400);font-size:0.75rem;">(opsional)</span></label>
                         <select id="add-customer-pricelist" class="form-input">
-                            <option value="">Harga Master (tanpa pricelist)</option>
+                            <option value="">Harga Master (tanpa special price)</option>
                             <!-- Populated by JS -->
                         </select>
                     </div>
@@ -2125,9 +2178,9 @@
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>Pricelist Khusus <span style="color:var(--gray-400);font-size:0.75rem;">(opsional)</span></label>
+                        <label>Special Price Khusus <span style="color:var(--gray-400);font-size:0.75rem;">(opsional)</span></label>
                         <select id="edit-customer-pricelist" class="form-input">
-                            <option value="">Harga Master (tanpa pricelist)</option>
+                            <option value="">Harga Master (tanpa special price)</option>
                             <!-- Populated by JS -->
                         </select>
                     </div>
@@ -2232,7 +2285,7 @@
                     </div>
                     <div class="entity-detail"
                         style="display: flex; justify-content: space-between; font-size: 0.875rem;">
-                        <span class="entity-detail-label" style="color: var(--gray-500);">Pricelist Khusus</span>
+                        <span class="entity-detail-label" style="color: var(--gray-500);">Special Price Khusus</span>
                         <span class="entity-detail-value" id="detail-customer-pricelist" style="font-weight: 600;"></span>
                     </div>
                     <div class="entity-detail"
@@ -2499,10 +2552,11 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label>Vendor</label>
-                        <select id="add-purchase-vendor" class="form-input">
-                            <option value="" disabled selected>— Pilih Vendor —</option>
-                            <!-- Populated by JS -->
-                        </select>
+                        <div id="add-purchase-vendor-container" class="combobox-container">
+                            <input type="text" id="add-purchase-vendor-input" class="form-input combobox-input" placeholder="Cari nama atau kode vendor..." autocomplete="off">
+                            <input type="hidden" id="add-purchase-vendor" value="">
+                            <div id="add-purchase-vendor-dropdown" class="combobox-dropdown"></div>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label>Tipe Pembayaran</label>
@@ -3145,16 +3199,18 @@
 
                 <!-- Products List -->
                 <hr style="border: 0; border-top: 1px dashed var(--gray-200); margin: 1rem 0;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                    <label style="margin-bottom: 0; font-weight: 600;">Daftar Item</label>
-                    <div style="display: flex; gap: 0.5rem;">
-                        <select id="edit-invoice-product-select" class="form-input" style="width: 200px;">
-                            <!-- Filled by JS -->
-                        </select>
-                        <button type="button" class="btn-toolbar secondary"
-                            style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" onclick="addEditInvoiceItem()"><i
-                                data-lucide="plus"></i> Tambah Item</button>
+                <div style="margin-bottom: 1rem;">
+                    <label style="margin-bottom: 0.5rem; font-weight: 600; display: block;">Daftar Item</label>
+                    <div id="edit-invoice-search-wrapper" style="position: relative; max-width: 380px;">
+                        <div style="position: relative; display: flex; align-items: center;">
+                            <i data-lucide="search" style="position: absolute; left: 0.75rem; width: 16px; height: 16px; color: var(--gray-400); pointer-events: none;"></i>
+                            <input type="text" id="edit-invoice-product-search" class="form-input"
+                                placeholder="Ketik nama atau kode produk untuk menambah..."
+                                autocomplete="off"
+                                style="padding: 0.5rem 0.75rem 0.5rem 2.25rem; font-size: 0.85rem; width: 100%; border-radius: 6px; background: white; border: 1px solid var(--gray-300);">
+                        </div>
                     </div>
+                    <div id="edit-invoice-product-dropdown" class="po-autocomplete-dropdown" style="display: none;"></div>
                 </div>
 
                 <div
@@ -3483,8 +3539,7 @@
             </div>
             <div class="modal-footer">
                 <button class="btn-toolbar secondary" onclick="closeModal('modal-delete-master')">Batal</button>
-                <button class="btn-toolbar primary" id="btn-confirm-delete-master"
-                    style="background: var(--rose-600); color: white; border-color: var(--rose-600);"
+                <button class="btn-toolbar danger" id="btn-confirm-delete-master"
                     onclick="confirmDeleteMaster()">
                     <i data-lucide="trash-2"></i> Ya, Hapus
                 </button>
@@ -3679,29 +3734,29 @@
     </div>
 
     <!-- ============================================================
-     PRICELIST MODALS
+     SPECIAL PRICE MODALS
      ============================================================ -->
 
     <!-- Modal Create Pricelist -->
     <div class="modal-overlay" id="modal-create-pricelist">
         <div class="modal" style="max-width: 500px;">
             <div class="modal-header">
-                <h3>Buat Pricelist Baru</h3>
+                <h3>Buat Special Price Baru</h3>
                 <button class="modal-close" onclick="closeModal('modal-create-pricelist')"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
                 <div class="form-group">
-                    <label>Nama Pricelist <span style="color: var(--rose-500);">*</span></label>
+                    <label>Nama Special Price <span style="color: var(--rose-500);">*</span></label>
                     <input type="text" id="create-pl-nama" class="form-input" placeholder="Contoh: VIP Gold, Grosir Jawa Timur, Reseller A">
                 </div>
                 <div class="form-group">
                     <label>Keterangan <span style="color: var(--gray-400); font-size: 0.75rem;">(opsional)</span></label>
-                    <textarea id="create-pl-keterangan" class="form-input" rows="3" placeholder="Catatan atau ketentuan khusus pricelist ini"></textarea>
+                    <textarea id="create-pl-keterangan" class="form-input" rows="3" placeholder="Catatan atau ketentuan khusus special price ini"></textarea>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn-toolbar secondary" onclick="closeModal('modal-create-pricelist')">Batal</button>
-                <button class="btn-toolbar primary" onclick="submitCreatePricelist()"><i data-lucide="save"></i> Buat Pricelist</button>
+                <button class="btn-toolbar primary" onclick="submitCreatePricelist()"><i data-lucide="save"></i> Buat Special Price</button>
             </div>
         </div>
     </div>
@@ -3710,17 +3765,17 @@
     <div class="modal-overlay" id="modal-edit-pricelist">
         <div class="modal" style="max-width: 500px;">
             <div class="modal-header">
-                <h3>Edit Informasi Pricelist</h3>
+                <h3>Edit Informasi Special Price</h3>
                 <button class="modal-close" onclick="closeModal('modal-edit-pricelist')"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
                 <input type="hidden" id="edit-pl-id">
                 <div class="form-group">
-                    <label>Kode Pricelist</label>
+                    <label>Kode Special Price</label>
                     <input type="text" id="edit-pl-kode-display" class="form-input" disabled style="background: var(--gray-100);">
                 </div>
                 <div class="form-group">
-                    <label>Nama Pricelist <span style="color: var(--rose-500);">*</span></label>
+                    <label>Nama Special Price <span style="color: var(--rose-500);">*</span></label>
                     <input type="text" id="edit-pl-nama" class="form-input">
                 </div>
                 <div class="form-group">
@@ -3746,16 +3801,16 @@
     <div class="modal-overlay" id="modal-duplicate-pricelist">
         <div class="modal" style="max-width: 480px;">
             <div class="modal-header">
-                <h3>Duplikat Pricelist</h3>
+                <h3>Duplikat Special Price</h3>
                 <button class="modal-close" onclick="closeModal('modal-duplicate-pricelist')"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
                 <input type="hidden" id="duplicate-pl-id">
                 <p style="font-size: 0.875rem; color: var(--gray-600); margin-bottom: 1rem;">
-                    Seluruh item dan harga dari pricelist ini akan disalin ke pricelist baru.
+                    Seluruh item dan harga dari special price ini akan disalin ke special price baru.
                 </p>
                 <div class="form-group">
-                    <label>Nama Pricelist Baru <span style="color: var(--rose-500);">*</span></label>
+                    <label>Nama Special Price Baru <span style="color: var(--rose-500);">*</span></label>
                     <input type="text" id="duplicate-pl-nama" class="form-input">
                 </div>
             </div>
@@ -3777,7 +3832,7 @@
                 <input type="hidden" id="deactivate-pl-id">
                 <div style="background: #fffbeb; border: 1px solid #fef3c7; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem;">
                     <p id="deactivate-pl-message" style="margin: 0; color: #92400e; font-size: 0.875rem; line-height: 1.5;">
-                        Pricelist ini sedang digunakan oleh pelanggan.
+                        Special Price ini sedang digunakan oleh pelanggan.
                     </p>
                 </div>
                 <p style="font-size: 0.85rem; color: var(--gray-600); margin: 0;">
@@ -3795,7 +3850,7 @@
     <div class="modal-overlay" id="modal-add-pricelist-products">
         <div class="modal" style="max-width: 780px;">
             <div class="modal-header">
-                <h3>Tambah Produk ke Pricelist</h3>
+                <h3>Tambah Produk ke Special Price</h3>
                 <button class="modal-close" onclick="closeModal('modal-add-pricelist-products')"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
@@ -3848,7 +3903,7 @@
                 <span id="add-pl-selected-count" style="font-size: 0.85rem; color: var(--gray-600); font-weight: 500;">0 produk dipilih</span>
                 <div style="display: flex; gap: 0.5rem;">
                     <button class="btn-toolbar secondary" onclick="closeModal('modal-add-pricelist-products')">Batal</button>
-                    <button class="btn-toolbar primary" onclick="submitAddPricelistProducts()"><i data-lucide="check"></i> Tambahkan ke Pricelist</button>
+                    <button class="btn-toolbar primary" onclick="submitAddPricelistProducts()"><i data-lucide="check"></i> Tambahkan ke Special Price</button>
                 </div>
             </div>
         </div>
@@ -3858,7 +3913,7 @@
     <div class="modal-overlay" id="modal-import-pricelist-csv">
         <div class="modal" style="max-width: 750px;">
             <div class="modal-header">
-                <h3>Import Harga Pricelist dari CSV</h3>
+                <h3>Import Harga Special Price dari CSV</h3>
                 <button class="modal-close" onclick="closeModal('modal-import-pricelist-csv')"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
@@ -3932,7 +3987,7 @@
                     <label>Terapkan untuk:</label>
                     <select id="bulk-percent-target" class="form-input">
                         <option value="selected">Hanya produk yang dicentang di tabel</option>
-                        <option value="all">Semua produk dalam pricelist ini</option>
+                        <option value="all">Semua produk dalam special price ini</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -3962,7 +4017,7 @@
     </div>
 
     <!-- Application Script -->
-    <script src="dashboard.js?v=8"></script>
+    <script src="dashboard.js?v=9"></script>
 
     <!-- Modal Delete Outstanding Invoice -->
     <div class="modal-overlay" id="modal-delete-outstanding">

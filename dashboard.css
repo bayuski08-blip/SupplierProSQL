@@ -6,6 +6,20 @@
 /* ---------- Additional Variables ---------- */
 :root {
     --sidebar-width: 260px;
+    --rose-50: #fff1f2;
+    --rose-100: #ffe4e6;
+    --rose-200: #fecdd3;
+    --rose-500: #f43f5e;
+    --rose-600: #e11d48;
+    --amber-50: #fffbeb;
+    --amber-100: #fef3c7;
+    --amber-500: #f59e0b;
+    --amber-600: #d97706;
+    --emerald-50: #ecfdf5;
+    --emerald-100: #d1fae5;
+    --emerald-200: #a7f3d0;
+    --emerald-500: #10b981;
+    --emerald-600: #059669;
     --sidebar-collapsed: 72px;
     --topbar-height: 64px;
     --indigo-500: #6366f1;
@@ -806,16 +820,31 @@
 }
 
 .btn-toolbar.danger {
-    background: linear-gradient(135deg, #e11d48, #be123c);
-    color: white;
-    border: none;
-    box-shadow: 0 1px 3px rgba(225, 29, 72, 0.4);
+    background: linear-gradient(135deg, #e11d48, #be123c) !important;
+    color: #ffffff !important;
+    border: 1px solid #be123c !important;
+    box-shadow: 0 1px 3px rgba(225, 29, 72, 0.4) !important;
 }
 
 .btn-toolbar.danger:hover {
-    background: linear-gradient(135deg, #be123c, #9f1239);
+    background: linear-gradient(135deg, #be123c, #9f1239) !important;
+    color: #ffffff !important;
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(225, 29, 72, 0.4);
+    box-shadow: 0 4px 12px rgba(225, 29, 72, 0.4) !important;
+}
+
+.btn-toolbar.warning {
+    background: linear-gradient(135deg, #d97706, #b45309) !important;
+    color: #ffffff !important;
+    border: 1px solid #b45309 !important;
+    box-shadow: 0 1px 3px rgba(217, 119, 6, 0.4) !important;
+}
+
+.btn-toolbar.warning:hover {
+    background: linear-gradient(135deg, #b45309, #92400e) !important;
+    color: #ffffff !important;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(217, 119, 6, 0.4) !important;
 }
 
 .btn-toolbar i {
@@ -2683,8 +2712,8 @@ textarea.form-input {
 }
 
 .po-autocomplete-dropdown {
-    position: absolute;
-    z-index: 1050;
+    position: fixed;
+    z-index: 2000;
     background: white;
     border: 1px solid var(--gray-200);
     border-radius: 0.5rem;
@@ -2749,4 +2778,79 @@ textarea.form-input {
 .po-row-highlight {
     animation: poRowFlash 1.5s ease-out;
 }
+
+/* ---------- Batch A Styles ---------- */
+/* A1: Low Stock Scroll Frame */
+#low-stock-frame {
+    max-height: 290px;
+    overflow-y: auto;
+}
+#low-stock-frame thead th,
+#low-stock-table thead th {
+    position: sticky;
+    top: 0;
+    background: #f8fafc;
+    z-index: 2;
+    box-shadow: 0 1px 0 var(--gray-200);
+}
+
+/* A2: Inactive Product Badge */
+.badge-status.nonaktif {
+    background: #f1f5f9;
+    color: #64748b;
+    border: 1px solid #cbd5e1;
+}
+
+/* A4: Reusable Combobox Component */
+.combobox-container {
+    position: relative;
+    width: 100%;
+}
+.combobox-input {
+    width: 100%;
+    cursor: text;
+}
+.combobox-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--border-radius, 6px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    max-height: 220px;
+    overflow-y: auto;
+    z-index: 1050;
+    margin-top: 4px;
+    display: none;
+}
+.combobox-dropdown.active,
+.combobox-dropdown.show {
+    display: block !important;
+}
+.combobox-item {
+    padding: 0.6rem 0.85rem;
+    font-size: 0.875rem;
+    cursor: pointer;
+    border-bottom: 1px solid var(--gray-100);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background 0.15s ease;
+}
+.combobox-item:last-child {
+    border-bottom: none;
+}
+.combobox-item:hover, .combobox-item.highlighted {
+    background: var(--blue-50, #eff6ff);
+    color: var(--blue-700, #1d4ed8);
+}
+.combobox-item-empty {
+    padding: 0.75rem;
+    font-size: 0.85rem;
+    color: var(--gray-400);
+    text-align: center;
+}
+
 

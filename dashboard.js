@@ -71,6 +71,26 @@ function rp(n) {
     return 'Rp ' + Number(n).toLocaleString('id-ID');
 }
 
+
+/**
+ * formatNumTrim(val) — Normalisasi angka DECIMAL string DB ke tampilan bersih.
+ * 1.0000->1, 1.5->1.5, 205000.0->205000, 0.25->0.25
+ */
+/**
+ * formatNumberTrim(val) — Normalisasi angka dari DECIMAL string DB ke tampilan bersih.
+ * Aturan: 1.0000 -> 1, 10.00 -> 10, 205000.0 -> 205000, 1.5000 -> 1.5, 0.2500 -> 0.25
+ * @param {string|number} val
+ * @returns {string}
+ */
+function formatNumberTrim(val) {
+    if (val === null || val === undefined || val === '') return '';
+    var s = String(val).trim();
+    if (!s.includes('.')) return s;
+    var trimmed = s.replace(/\.?0+$/, '');
+    return trimmed === '' ? '0' : trimmed;
+}
+const formatNumTrim = formatNumberTrim;
+
 function rpShort(n) {
     if (n >= 1_000_000_000) return 'Rp ' + (n / 1_000_000_000).toFixed(1) + 'M';
     if (n >= 1_000_000) return 'Rp ' + (n / 1_000_000).toFixed(1) + 'jt';
@@ -204,7 +224,367 @@ function debounce(fn, delay = 250) {
     };
 }
 
+// ==========================================================================
+// BUG 2: REAL-TIME REACTIVE DASHBOARD AUTO-REFRESH & CROSS-TAB SYNC
+// ==========================================================================
+let syncChannel = null;
+try {
+    if (typeof BroadcastChannel !== 'undefined') {
+        syncChannel = new BroadcastChannel('supplierpro_data_sync');
+    }
+} catch (e) {
+    console.warn('BroadcastChannel not supported, falling back to storage event', e);
+}
+
+function notifyDataChange(type = 'general', payload = {}) {
+    const timestamp = Date.now();
+    const message = { type, timestamp, payload };
+
+    // 1. Post to BroadcastChannel
+    if (syncChannel) {
+        try {
+            syncChannel.postMessage(message);
+        } catch (e) {
+            console.error('Failed to broadcast data change', e);
+        }
+    }
+
+    // 2. Fallback: trigger storage event for tabs in same origin
+    try {
+        localStorage.setItem('supplierpro_sync_event', JSON.stringify(message));
+    } catch (_) {}
+
+    // 3. Immediately refresh local dashboard if on dashboard page
+    if (currentPage === 'dashboard') {
+        refreshDashboardData(true);
+    }
+}
+
+function handleSyncMessage(msg) {
+    if (!msg || !msg.timestamp) return;
+    console.log('[Sync] Received data change notification:', msg.type);
+
+    if (currentPage === 'dashboard') {
+        refreshDashboardData(true);
+    }
+}
+
+if (syncChannel) {
+    syncChannel.onmessage = (event) => {
+        handleSyncMessage(event.data);
+    };
+}
+
+window.addEventListener('storage', (e) => {
+    if (e.key === 'supplierpro_sync_event' && e.newValue) {
+        try {
+            const data = JSON.parse(e.newValue);
+            handleSyncMessage(data);
+        } catch (_) {}
+    }
+});
+
+let isRefreshingDashboard = false;
+async function refreshDashboardData(silent = false) {
+    if (isRefreshingDashboard) return;
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+
+    isRefreshingDashboard = true;
+    try {
+        const canSeeFinance = ['admin', 'finance', 'owner'].includes(role);
+
+        // Fetch dashboard summary with cache: 'no-store'
+        const summaryPromise = fetch('/api/dashboard/summary', {
+            headers: getAuthHeaders(),
+            cache: 'no-store'
+        }).then(r => r.ok ? r.json() : null).then(data => {
+            if (data) DASHBOARD_SUMMARY = data;
+        }).catch(err => {
+            if (!silent) console.warn('Silent refresh summary error:', err);
+        });
+
+        const promises = [summaryPromise];
+
+        if (canSeeFinance) {
+            const daysTrend = 7;
+            const trendPromise = fetch('/api/dashboard/sales-trend?days=' + daysTrend, {
+                headers: getAuthHeaders(),
+                cache: 'no-store'
+            }).then(r => r.ok ? r.json() : null).then(data => {
+                if (data) SALES_CHART_DATA = data;
+            }).catch(() => {});
+
+            const compPromise = fetch('/api/dashboard/sales-composition?days=30', {
+                headers: getAuthHeaders(),
+                cache: 'no-store'
+            }).then(r => r.ok ? r.json() : null).then(data => {
+                if (data) DONUT_DATA = data;
+            }).catch(() => {});
+
+            promises.push(trendPromise, compPromise);
+        }
+
+        await Promise.allSettled(promises);
+
+        if (currentPage === 'dashboard') {
+            renderDashboard();
+            if (canSeeFinance) {
+                renderSalesChart();
+                renderDonutChart();
+            }
+        }
+    } catch (err) {
+        if (!silent) console.error('Error refreshing dashboard:', err);
+    } finally {
+        isRefreshingDashboard = false;
+    }
+}
+
+let dashboardAutoRefreshTimer = null;
+function startDashboardAutoRefresh() {
+    if (dashboardAutoRefreshTimer) clearInterval(dashboardAutoRefreshTimer);
+    dashboardAutoRefreshTimer = setInterval(() => {
+        if (document.visibilityState === 'visible' && currentPage === 'dashboard') {
+            refreshDashboardData(true);
+        }
+    }, 30000);
+}
+
+// Event listeners for page visibility and focus
+window.addEventListener('pageshow', () => {
+    if (currentPage === 'dashboard') {
+        refreshDashboardData(true);
+    }
+});
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && currentPage === 'dashboard') {
+        refreshDashboardData(true);
+    }
+});
+
+window.addEventListener('focus', () => {
+    if (currentPage === 'dashboard') {
+        refreshDashboardData(true);
+    }
+});
+
 // ---------- Dynamic Data ----------
+// ==========================================================================
+// A4: REUSABLE COMBOBOX COMPONENT
+// ==========================================================================
+class ComboboxSelect {
+    constructor(options) {
+        this.container = typeof options.container === 'string' ? document.getElementById(options.container) : options.container;
+        this.input = typeof options.input === 'string' ? document.getElementById(options.input) : options.input;
+        this.hidden = typeof options.hidden === 'string' ? document.getElementById(options.hidden) : options.hidden;
+        this.dropdown = typeof options.dropdown === 'string' ? document.getElementById(options.dropdown) : options.dropdown;
+        this.placeholder = options.placeholder || 'Pilih...';
+        this.emptyMessage = options.emptyMessage || 'Vendor tidak ditemukan';
+        this.maxItems = options.maxItems || 20;
+        this.onSelect = options.onSelect || null;
+        this.items = [];
+        this.filteredItems = [];
+        this.highlightedIndex = -1;
+        this.isOpen = false;
+
+        this.init();
+    }
+
+    init() {
+        if (!this.input || !this.dropdown) return;
+
+        this.input.addEventListener('focus', () => this.open());
+        this.input.addEventListener('click', () => this.open());
+        this.input.addEventListener('input', () => this.filter(this.input.value));
+        this.input.addEventListener('keydown', (e) => this.onKeyDown(e));
+
+        document.addEventListener('click', (e) => {
+            if (this.container && !this.container.contains(e.target)) {
+                this.close();
+            }
+        });
+    }
+
+    setData(items) {
+        this.items = items || [];
+        if (this.isOpen) {
+            this.filter(this.input.value);
+        }
+    }
+
+    open() {
+        if (this.items.length === 0 && Array.isArray(VENDORS) && VENDORS.length > 0) {
+            this.setData(VENDORS.map(v => ({ id: v.id, label: v.name, code: v.idNumber || '' })));
+        }
+        this.isOpen = true;
+        this.filter(this.input ? this.input.value : '');
+    }
+
+    close() {
+        this.isOpen = false;
+        if (this.dropdown) {
+            this.dropdown.classList.remove('active', 'show');
+            this.dropdown.style.display = 'none';
+            this.dropdown.innerHTML = '';
+        }
+        this.highlightedIndex = -1;
+        const currentVal = this.hidden ? this.hidden.value : '';
+        const selectedItem = this.items.find(i => String(i.id) === String(currentVal));
+        if (selectedItem) {
+            this.input.value = selectedItem.label;
+        } else if (!currentVal) {
+            this.input.value = '';
+        }
+    }
+
+    filter(query) {
+        const q = (query || '').trim().toLowerCase();
+        if (!q) {
+            this.filteredItems = this.items.slice(0, this.maxItems);
+        } else {
+            this.filteredItems = this.items.filter(item => {
+                const label = (item.label || '').toLowerCase();
+                const code = (item.code || '').toLowerCase();
+                return label.includes(q) || code.includes(q);
+            }).slice(0, this.maxItems);
+        }
+        this.highlightedIndex = -1;
+        this.renderDropdown();
+    }
+
+    renderDropdown() {
+        if (!this.dropdown) return;
+        this.dropdown.innerHTML = '';
+
+        if (this.filteredItems.length === 0) {
+            const emptyEl = document.createElement('div');
+            emptyEl.className = 'combobox-item-empty';
+            emptyEl.textContent = this.emptyMessage;
+            this.dropdown.appendChild(emptyEl);
+        } else {
+            this.filteredItems.forEach((item, index) => {
+                const div = document.createElement('div');
+                div.className = 'combobox-item' + (String(item.id) === String(this.hidden?.value) ? ' selected' : '');
+                div.dataset.index = index;
+
+                let codeHtml = item.code ? `<span class="code">${item.code}</span>` : '';
+                div.innerHTML = `
+                    <span class="label">${item.label}</span>
+                    ${codeHtml}
+                `;
+
+                div.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    this.selectItem(item);
+                });
+                div.addEventListener('mouseenter', () => {
+                    this.highlightIndex(index);
+                });
+
+                this.dropdown.appendChild(div);
+            });
+        }
+
+        this.dropdown.classList.add('active', 'show');
+        this.dropdown.style.display = 'block';
+    }
+
+    highlightIndex(index) {
+        const items = this.dropdown.querySelectorAll('.combobox-item');
+        items.forEach(el => el.classList.remove('highlighted'));
+        if (index >= 0 && index < items.length) {
+            this.highlightedIndex = index;
+            items[index].classList.add('highlighted');
+            items[index].scrollIntoView({ block: 'nearest' });
+        } else {
+            this.highlightedIndex = -1;
+        }
+    }
+
+    selectItem(item) {
+        if (!item) return;
+        if (this.hidden) this.hidden.value = item.id;
+        if (this.input) this.input.value = item.label;
+        this.close();
+        if (typeof this.onSelect === 'function') {
+            this.onSelect(item);
+        }
+    }
+
+    setValue(id) {
+        const found = this.items.find(i => String(i.id) === String(id));
+        if (found) {
+            if (this.hidden) this.hidden.value = found.id;
+            if (this.input) this.input.value = found.label;
+        } else {
+            if (this.hidden) this.hidden.value = '';
+            if (this.input) this.input.value = '';
+        }
+    }
+
+    reset() {
+        if (this.hidden) this.hidden.value = '';
+        if (this.input) this.input.value = '';
+        this.close();
+    }
+
+    onKeyDown(e) {
+        if (!this.isOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+            this.open();
+            return;
+        }
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            const max = this.filteredItems.length;
+            if (max > 0) {
+                const next = (this.highlightedIndex + 1) % max;
+                this.highlightIndex(next);
+            }
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            const max = this.filteredItems.length;
+            if (max > 0) {
+                const prev = (this.highlightedIndex - 1 + max) % max;
+                this.highlightIndex(prev);
+            }
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (this.highlightedIndex >= 0 && this.highlightedIndex < this.filteredItems.length) {
+                this.selectItem(this.filteredItems[this.highlightedIndex]);
+            } else if (this.filteredItems.length === 1) {
+                this.selectItem(this.filteredItems[0]);
+            }
+        } else if (e.key === 'Escape') {
+            this.close();
+        }
+    }
+}
+
+function initAddPurchaseVendorCombobox() {
+    if (!document.getElementById('add-purchase-vendor-container')) return;
+    if (!window.addPurchaseVendorCombobox) {
+        window.addPurchaseVendorCombobox = new ComboboxSelect({
+            container: 'add-purchase-vendor-container',
+            input: 'add-purchase-vendor-input',
+            hidden: 'add-purchase-vendor',
+            dropdown: 'add-purchase-vendor-dropdown',
+            placeholder: 'Cari nama atau kode vendor...',
+            emptyMessage: 'Vendor tidak ditemukan',
+            maxItems: 20
+        });
+    }
+    if (Array.isArray(VENDORS) && VENDORS.length > 0) {
+        window.addPurchaseVendorCombobox.setData(
+            VENDORS.map(v => ({ id: v.id, label: v.name, code: v.idNumber || '' }))
+        );
+    }
+}
+
+let CURRENT_PAGE_PRODUCTS = new Map();
+let addPurchaseVendorCombobox = null;
+
 let PRODUCTS = [];
 let CUSTOMERS = [];
 let VENDORS = [];
@@ -251,7 +631,7 @@ const PAGE_TITLES = {
     settings: { title: 'Pengaturan', subtitle: 'Konfigurasi profil dan preferensi' },
     roles: { title: 'Otoritas Akses', subtitle: 'Kelola hak akses dan peran staff' },
     'master-data': { title: 'Master Data', subtitle: 'Kelola kategori, satuan, dan tipe pembayaran' },
-    pricelists: { title: 'Daftar Harga Khusus', subtitle: 'Kelola pricelist harga bertingkat untuk pelanggan' },
+    pricelists: { title: 'Special Price', subtitle: 'Kelola daftar harga khusus untuk pelanggan' },
 };
 
 // ---------- Role Based Access Control (RBAC) ----------
@@ -332,12 +712,19 @@ function navigateTo(page) {
 
     currentPage = page;
 
+    if (page === 'dashboard') {
+        refreshDashboardData(true);
+    }
+
     // A1: Toggle pos-active class untuk desktop full-height POS layout
     if (page === 'pos') {
         document.body.classList.add('pos-active');
-        if (typeof populateCustomerSelect === 'function') {
-            populateCustomerSelect(document.getElementById('pos-customer-search')?.value || '');
-        }
+        ensureProductsLoadedForPOS().then(() => {
+            renderPOSProducts();
+            if (typeof populateCustomerSelect === 'function') {
+                populateCustomerSelect(document.getElementById('pos-customer-search')?.value || '');
+            }
+        });
         // Jika mode edit aktif dan navigasi manual ke POS dari sidebar, keluar mode edit (tanpa confirm)
         // enterProformaEditMode akan set ulang state setelah navigasi
     } else {
@@ -462,29 +849,33 @@ async function fetchDashboardSummary() {
             DASHBOARD_SUMMARY = await res.json();
         }
     } catch (err) {
-        console.error('Failed to fetch dashboard summary', err);
+        console.warn('Dashboard summary not accessible for current role', err);
     }
 }
 
 async function fetchSalesTrend(days = 7) {
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    if (role !== 'admin' && role !== 'finance') return;
     try {
         const res = await fetch(`/api/dashboard/sales-trend?days=${days}`, { headers: getAuthHeaders() });
         if (res.ok) {
             SALES_CHART_DATA = await res.json();
         }
     } catch (err) {
-        console.error('Failed to fetch sales trend', err);
+        console.warn('Sales trend not accessible for current role', err);
     }
 }
 
 async function fetchSalesComposition(days = 30) {
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    if (role !== 'admin' && role !== 'finance') return;
     try {
         const res = await fetch(`/api/dashboard/sales-composition?days=${days}`, { headers: getAuthHeaders() });
         if (res.ok) {
             DONUT_DATA = await res.json();
         }
     } catch (err) {
-        console.error('Failed to fetch sales composition', err);
+        console.warn('Sales composition not accessible for current role', err);
     }
 }
 
@@ -492,6 +883,8 @@ let currentTrendDays = 7;
 let currentCompositionDays = 30;
 
 async function refreshCharts() {
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    if (role !== 'admin' && role !== 'finance') return;
     await Promise.all([
         fetchSalesTrend(currentTrendDays),
         fetchSalesComposition(currentCompositionDays)
@@ -546,6 +939,8 @@ function setupChartListeners() {
 }
 
 async function checkReconciliationStatus() {
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    if (role !== 'admin' && role !== 'finance') return;
     try {
         const res = await fetch('/api/finance/reconciliation-status', { headers: getAuthHeaders() });
         if (res.ok) {
@@ -563,55 +958,92 @@ async function checkReconciliationStatus() {
             }
         }
     } catch (err) {
-        console.error('Failed to fetch reconciliation status', err);
+        console.warn('Reconciliation status check suppressed for non-finance role', err);
     }
 }
 
 function renderDashboard() {
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+
+    // A7: Charts hanya untuk Admin dan Finance
+    const chartsRow = document.getElementById('dashboard-charts-row');
+    if (chartsRow) {
+        if (role === 'admin' || role === 'finance') {
+            chartsRow.style.display = '';
+            renderSalesChart();
+            renderDonutChart();
+        } else {
+            chartsRow.style.display = 'none';
+        }
+    }
+
     checkReconciliationStatus();
     renderSummaryCards();
-    renderSalesChart();
-    renderDonutChart();
     renderRecentTransactions();
     renderLowStock();
 }
 
 function renderSummaryCards() {
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+
     // Prioritize fetched API summary, fallback to computed values from loaded arrays
-    const totalOmzet = DASHBOARD_SUMMARY?.revenue ?? INVOICES.filter(i => i.status.toLowerCase() !== 'batal').reduce((s, i) => s + i.total, 0);
-    const totalPiutang = DASHBOARD_SUMMARY?.receivables ?? INVOICES.filter(i => i.status.toLowerCase() !== 'lunas' && i.status.toLowerCase() !== 'batal').reduce((s, i) => s + (i.total - i.paid), 0);
-    const totalHutang = DASHBOARD_SUMMARY?.payables ?? PURCHASES.filter(p => p.status.toLowerCase() !== 'selesai' && p.status.toLowerCase() !== 'batal').reduce((s, p) => s + (p.total - p.paid), 0);
-    const lowStockCount = DASHBOARD_SUMMARY?.lowStockCount ?? PRODUCTS.filter(p => p.stock <= p.minStock).length;
+    const totalOmzet = DASHBOARD_SUMMARY?.revenue ?? INVOICES.filter(i => i.status && i.status.toLowerCase() !== 'batal').reduce((s, i) => s + i.total, 0);
+    const totalPiutang = DASHBOARD_SUMMARY?.receivables ?? INVOICES.filter(i => i.status && i.status.toLowerCase() !== 'lunas' && i.status.toLowerCase() !== 'batal').reduce((s, i) => s + (i.total - i.paid), 0);
+    const totalHutang = DASHBOARD_SUMMARY?.payables ?? PURCHASES.filter(p => p.status && p.status.toLowerCase() !== 'selesai' && p.status.toLowerCase() !== 'batal').reduce((s, p) => s + (p.total - p.paid), 0);
+    
+    // A1 & A2: Produk nonaktif TIDAK ikut dihitung di Stok Menipis
+    const lowStockCount = DASHBOARD_SUMMARY?.lowStockCount ?? PRODUCTS.filter(p => (p.is_active !== 0 && p.is_active !== false) && p.stock <= p.minStock).length;
     const labaKotor = DASHBOARD_SUMMARY?.grossProfit ?? (totalOmzet * 0.28);
     const ordersToday = DASHBOARD_SUMMARY?.ordersToday ?? (() => {
         const today = new Date().toISOString().split('T')[0];
-        return INVOICES.filter(i => (i.date || '').startsWith(today) && i.status.toLowerCase() !== 'batal').length;
+        return INVOICES.filter(i => (i.date || '').startsWith(today) && i.status && i.status.toLowerCase() !== 'batal').length;
     })();
     const activeCustomers = DASHBOARD_SUMMARY?.customerCount ?? CUSTOMERS.length;
-    const totalProducts = DASHBOARD_SUMMARY?.productCount ?? PRODUCTS.length;
+    const totalProducts = DASHBOARD_SUMMARY?.productCount ?? PRODUCTS.filter(p => p.is_active !== 0 && p.is_active !== false).length;
 
-    const cards = [
-        { label: 'Omzet Bulan Ini', value: rpShort(totalOmzet), trend: 'Total penjualan', trendDir: 'up', icon: 'trending-up', color: 'blue' },
-        { label: 'Total Piutang', value: rpShort(totalPiutang), trend: totalPiutang > 0 ? 'Belum terbayar' : 'Semua lunas', trendDir: totalPiutang > 0 ? 'down' : 'up', icon: 'hand-coins', color: 'amber' },
-        { label: 'Total Hutang', value: rpShort(totalHutang), trend: totalHutang > 0 ? 'Ke vendor' : 'Semua lunas', trendDir: totalHutang > 0 ? 'down' : 'up', icon: 'landmark', color: 'rose' },
-        { label: 'Stok Menipis', value: lowStockCount + ' produk', trend: lowStockCount > 0 ? 'Perlu restock' : 'Stok aman', trendDir: lowStockCount > 0 ? 'down' : 'up', icon: 'alert-triangle', color: 'orange' },
-        { label: 'Laba Kotor', value: rpShort(labaKotor), trend: labaKotor >= 0 ? 'Revenue - HPP' : 'Rugi', trendDir: labaKotor >= 0 ? 'up' : 'down', icon: 'wallet', color: 'emerald' },
-        { label: 'Order Hari Ini', value: ordersToday + ' transaksi', trend: 'Hari ini', trendDir: 'up', icon: 'shopping-cart', color: 'indigo' },
-        { label: 'Pelanggan Aktif', value: activeCustomers + ' pelanggan', trend: 'Terdaftar', trendDir: 'up', icon: 'users', color: 'violet' },
-        { label: 'Produk Terdaftar', value: totalProducts + ' produk', trend: 'Katalog', trendDir: 'up', icon: 'package', color: 'cyan' },
-    ];
+    // A7: Pembagian card dashboard per role
+    const cards = [];
+
+    // Omzet & Keuangan: Admin & Finance saja
+    if (role === 'admin' || role === 'finance') {
+        cards.push({ label: 'Omzet Bulan Ini', value: rpShort(totalOmzet), trend: 'Total penjualan', trendDir: 'up', icon: 'trending-up', color: 'blue' });
+        cards.push({ label: 'Total Piutang', value: rpShort(totalPiutang), trend: totalPiutang > 0 ? 'Belum terbayar' : 'Semua lunas', trendDir: totalPiutang > 0 ? 'down' : 'up', icon: 'hand-coins', color: 'amber' });
+        cards.push({ label: 'Total Hutang', value: rpShort(totalHutang), trend: totalHutang > 0 ? 'Ke vendor' : 'Semua lunas', trendDir: totalHutang > 0 ? 'down' : 'up', icon: 'landmark', color: 'rose' });
+        cards.push({ label: 'Laba Kotor', value: rpShort(labaKotor), trend: labaKotor >= 0 ? 'Revenue - HPP' : 'Rugi', trendDir: labaKotor >= 0 ? 'up' : 'down', icon: 'wallet', color: 'emerald' });
+    }
+
+    // Stok Menipis: Admin, Finance, Kasir, Gudang
+    cards.push({ label: 'Stok Menipis', value: lowStockCount + ' produk', trend: lowStockCount > 0 ? 'Perlu restock' : 'Stok aman', trendDir: lowStockCount > 0 ? 'down' : 'up', icon: 'alert-triangle', color: 'orange' });
+
+    // Order Hari Ini: Admin, Finance, Kasir (Gudang tidak melihat order hari ini)
+    if (role === 'admin' || role === 'finance' || role === 'kasir') {
+        cards.push({ label: 'Order Hari Ini', value: ordersToday + ' transaksi', trend: 'Hari ini', trendDir: 'up', icon: 'shopping-cart', color: 'indigo' });
+    }
+
+    // Pelanggan Aktif: Admin, Finance, Kasir
+    if (role === 'admin' || role === 'finance' || role === 'kasir') {
+        cards.push({ label: 'Pelanggan Aktif', value: activeCustomers + ' pelanggan', trend: 'Terdaftar', trendDir: 'up', icon: 'users', color: 'violet' });
+    }
+
+    // Produk Terdaftar: Admin & Gudang (Kasir tidak perlu card katalog)
+    if (role === 'admin' || role === 'gudang') {
+        cards.push({ label: 'Produk Terdaftar', value: totalProducts + ' produk', trend: 'Katalog', trendDir: 'up', icon: 'package', color: 'cyan' });
+    }
 
     const grid = document.getElementById('summary-grid');
-    grid.innerHTML = cards.map(c => `
-        <div class="summary-card ${c.color}">
-            <div class="summary-card-header">
-                <div class="summary-card-icon ${c.color}"><i data-lucide="${c.icon}"></i></div>
-                <span class="summary-card-trend ${c.trendDir}">${c.trendDir === 'up' ? '↑' : '↓'} ${c.trend}</span>
+    if (grid) {
+        grid.innerHTML = cards.map(c => `
+            <div class="summary-card ${c.color}">
+                <div class="summary-card-header">
+                    <div class="summary-card-icon ${c.color}"><i data-lucide="${c.icon}"></i></div>
+                    <span class="summary-card-trend ${c.trendDir}">${c.trendDir === 'up' ? '↑' : '↓'} ${c.trend}</span>
+                </div>
+                <div class="summary-card-value">${c.value}</div>
+                <div class="summary-card-label">${c.label}</div>
             </div>
-            <div class="summary-card-value">${c.value}</div>
-            <div class="summary-card-label">${c.label}</div>
-        </div>
-    `).join('');
+        `).join('');
+        if (window.lucide) lucide.createIcons();
+    }
 }
 
 
@@ -715,20 +1147,51 @@ function renderDonutChart() {
 }
 
 function renderRecentTransactions() {
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    const cardEl = document.getElementById('dash-card-recent-transactions');
+
+    // A7: Gudang tidak memiliki izin transaksi / invoice -> card tidak dirender
+    if (role === 'gudang') {
+        if (cardEl) cardEl.style.display = 'none';
+        return;
+    }
+    if (cardEl) cardEl.style.display = '';
+
+    // A7: Untuk kasir jangan tampilkan agregat total omset
+    const thTotal = document.getElementById('th-recent-tx-total');
+    if (thTotal) {
+        thTotal.style.display = (role === 'kasir') ? 'none' : '';
+    }
+
     const tbody = document.getElementById('recent-transactions-body');
+    if (!tbody) return;
+
     tbody.innerHTML = INVOICES.slice(0, 5).map(inv => `
         <tr>
             <td style="font-weight:600; color: var(--blue-600);">${inv.id}</td>
             <td>${inv.customer}</td>
-            <td style="font-weight:600;">${rp(inv.total)}</td>
+            ${role === 'kasir' ? '' : `<td style="font-weight:600;">${rp(inv.total)}</td>`}
             <td><span class="badge-status ${inv.status}">${capitalize(inv.status)}</span></td>
         </tr>
     `).join('');
 }
 
 function renderLowStock() {
-    const lowStock = PRODUCTS.filter(p => p.stock <= p.minStock);
+    // A1: Tampilkan dalam frame dengan scroll vertikal. A2: Produk nonaktif tidak ikut dihitung.
+    let lowStock = [];
+    if (DASHBOARD_SUMMARY && Array.isArray(DASHBOARD_SUMMARY.lowStockProducts)) {
+        lowStock = DASHBOARD_SUMMARY.lowStockProducts.map(p => ({
+            name: p.name,
+            stock: parseFloat(p.stock),
+            minStock: parseFloat(p.min_stock)
+        }));
+    } else {
+        lowStock = PRODUCTS.filter(p => (p.is_active !== 0 && p.is_active !== false) && p.stock <= p.minStock);
+    }
+
     const tbody = document.getElementById('low-stock-body');
+    if (!tbody) return;
+
     tbody.innerHTML = lowStock.map(p => `
         <tr>
             <td style="font-weight: 600;">${p.name}</td>
@@ -910,6 +1373,7 @@ function _renderCustomersLocal_UNUSED(filter = '', type = '') {
     }
 
     if (typeof lucide !== 'undefined') lucide.createIcons();
+    startDashboardAutoRefresh();
 }
 
 document.getElementById('customer-search')?.addEventListener('input', debounce(() => {
@@ -1242,15 +1706,7 @@ function _renderPiutangLocal_UNUSED(filter) {
         const overdueBadge = isOverdue
             ? '<span class="badge-status overdue" style="display:inline-flex;align-items:center;gap:3px;font-size:0.7rem;padding:2px 7px;margin-left:4px;vertical-align:middle;"><i data-lucide="clock" style="width:11px;height:11px;"></i> Lewat JT</span>'
             : '';
-        let actionButtons;
-        if (canPayOrVoid) {
-            const bayarBtn = statusLower !== 'lunas'
-                ? '<button class="btn-toolbar primary" style="padding:0.25rem 0.5rem;font-size:0.75rem;" onclick="openPiutangPaymentModal(\'' + inv.id + '\',' + sisa + ')">Bayar</button>'
-                : '<span style="color:var(--gray-400);font-size:0.8rem;">Lunas</span>';
-            actionButtons = '<button class="btn-toolbar secondary" style="padding:0.25rem 0.5rem;font-size:0.75rem;margin-right:0.25rem;" title="Riwayat Cicilan" onclick="openPaymentHistoryModal(\'' + inv.id + '\')"><i data-lucide="list" style="width:13px;height:13px;margin:0;"></i></button>' + bayarBtn;
-        } else {
-            actionButtons = '<button class="btn-toolbar secondary" style="padding:0.25rem 0.5rem;font-size:0.75rem;" title="Riwayat Cicilan" onclick="openPaymentHistoryModal(\'' + inv.id + '\')"><i data-lucide="list" style="width:13px;height:13px;margin:0;"></i></button>';
-        }
+        let actionButtons = '<button class="btn-toolbar secondary" style="padding:0.25rem 0.5rem;font-size:0.75rem;" title="Riwayat Cicilan & Bayar" onclick="openPaymentHistoryModal(\'' + inv.id + '\')"><i data-lucide="list" style="width:13px;height:13px;margin:0;"></i></button>';
         return '<tr>' +
             '<td style="font-weight:600;color:var(--blue-600);">' + inv.id + '</td>' +
             '<td>' + inv.customer + '</td>' +
@@ -2011,13 +2467,13 @@ function renderCart() {
                     </div>
                     <div class="cart-item-price-edit" style="display:flex; align-items:center; gap:0.25rem;">
                         <span style="font-size:0.75rem; color:var(--gray-500);">Rp</span>
-                        <input type="number" value="${item.price}" onchange="updateCartPrice('${item.id}', this.value)" style="width:70px; padding:0.1rem 0.25rem; font-size:0.875rem; border:1px solid var(--gray-200); border-radius:0.25rem;" />
+                        <input type="number" step="any" value="${formatNumberTrim(item.price)}" onchange="updateCartPrice('${item.id}', this.value)" style="width:70px; padding:0.1rem 0.25rem; font-size:0.875rem; border:1px solid var(--gray-200); border-radius:0.25rem;" />
                         <span style="font-size:0.75rem; color:var(--gray-500);">/ ${item.unit}</span>
                     </div>
                 </div>
                 <div class="cart-item-qty">
                     <button class="cart-qty-btn" onclick="updateCartQty('${item.id}', -1)">-</button>
-                    <span class="cart-qty-val">${item.qty}</span>
+                    <span class="cart-qty-val">${formatNumberTrim(item.qty)}</span>
                     <button class="cart-qty-btn" onclick="updateCartQty('${item.id}', 1)">+</button>
                 </div>
                 <div class="cart-item-total">${rp(item.price * item.qty)}</div>
@@ -2225,6 +2681,7 @@ document.getElementById('btn-checkout')?.addEventListener('click', async () => {
             }
 
             openModal('modal-checkout-success');
+            notifyDataChange('sales');
 
             cart = [];
             currentPOSCustomerEffectivePrices = {};
@@ -3262,7 +3719,7 @@ function populateCustomerSelect(filter = '') {
 
             // Jika pelanggan sudah dipilih dan berbeda, dan keranjang tidak kosong: minta konfirmasi
             if (currentCustomerId && currentCustomerId !== id && cart.length > 0) {
-                if (!confirm('Mengganti pelanggan akan mengosongkan keranjang karena pricelist mungkin berbeda. Lanjutkan?')) {
+                if (!confirm('Mengganti pelanggan akan mengosongkan keranjang karena Special Price mungkin berbeda. Lanjutkan?')) {
                     dropdown.style.display = 'none';
                     return;
                 }
@@ -3375,10 +3832,12 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
         initPOSCustomerSearch();
         initPoProductSearch();
+        initAddPurchaseVendorCombobox();
     });
 } else {
     initPOSCustomerSearch();
     initPoProductSearch();
+    initAddPurchaseVendorCombobox();
 }
 
 // ---------- Tab Filter Bindings ----------
@@ -3571,28 +4030,62 @@ async function init() {
     renderCustomers();
     renderVendors();
 
-    // Populate dropdowns and fetch all data from DB
+    // Populate dropdowns and fetch role-permitted data from DB (A7: eliminate 403 storm)
     await populateMasterDropdowns();
-    await Promise.all([
-        fetchDashboardSummary(),
-        fetchProducts(),
-        fetchCustomers(),
-        fetchPricelists(),
-        fetchVendors(),
-        fetchPurchases(),
-        fetchInvoices(),
-        fetchCashTransactions(),
-        fetchUsers(),
-        loadPrefixSettings(),
-        loadInvoicePreferences(),
-        loadLandingDemoSetting()
-    ]);
+
+    const loggedRole = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    const fetchPromises = [fetchDashboardSummary()];
+
+    if (loggedRole === 'admin') {
+        fetchPromises.push(
+            fetchProducts(),
+            fetchCustomers(),
+            fetchPricelists(),
+            fetchVendors(),
+            fetchPurchases(),
+            fetchInvoices(),
+            fetchCashTransactions(),
+            fetchUsers(),
+            loadPrefixSettings(),
+            loadInvoicePreferences(),
+            loadLandingDemoSetting()
+        );
+    } else if (loggedRole === 'finance') {
+        fetchPromises.push(
+            fetchInvoices(),
+            fetchPurchases(),
+            fetchCashTransactions(),
+            fetchVendors(),
+            fetchCustomers()
+        );
+    } else if (loggedRole === 'kasir') {
+        fetchPromises.push(
+            fetchProducts(),
+            fetchCustomers(),
+            fetchInvoices(),
+            fetchPricelists()
+        );
+    } else if (loggedRole === 'gudang') {
+        fetchPromises.push(
+            fetchProducts(),
+            fetchPurchases(),
+            fetchVendors()
+        );
+    } else {
+        fetchPromises.push(fetchProducts());
+    }
+
+    await Promise.allSettled(fetchPromises);
 
     // Re-render dashboard with real DB data
     renderDashboard();
-    renderInvoices();
-    renderPiutang();
-    renderHutang();
+    if (['admin', 'kasir', 'finance'].includes(loggedRole)) {
+        renderInvoices();
+        renderPiutang();
+    }
+    if (['admin', 'finance'].includes(loggedRole)) {
+        renderHutang();
+    }
 
     // Dynamically populate year filters to ensure current year is always available
     const currentYear = new Date().getFullYear();
@@ -3652,11 +4145,11 @@ const getAuthHeaders = () => ({
     'Pragma': 'no-cache'
 });
 
-async function fetchProducts(page) {
+async function ensureProductsLoadedForPOS() {
+    if (PRODUCTS.length > 0) return;
     try {
-        // Selalu ambil data lengkap untuk PRODUCTS (dipakai POS, dropdown, filter lokal)
-        const resAll = await fetch('/api/products?all=true', { headers: getAuthHeaders() });
-        const dataAll = await resAll.json();
+        const res = await fetch('/api/products?all=true&status=active', { headers: getAuthHeaders() });
+        const data = await res.json();
         const mapProduct = p => ({
             id: p.id,
             sku: p.sku,
@@ -3670,16 +4163,136 @@ async function fetchProducts(page) {
             minStock: parseFloat(p.min_stock),
             unit: p.unit || 'pcs',
             unit_id: p.unit_id,
+            is_active: p.is_active !== 0 && p.is_active !== false,
             emoji: ''
         });
-        PRODUCTS = (Array.isArray(dataAll) ? dataAll : []).map(mapProduct);
+        PRODUCTS = (Array.isArray(data) ? data : []).map(mapProduct);
+    } catch (e) {
+        console.error('Failed to load products for POS', e);
+    }
+}
 
-        // Paginated fetch untuk tabel produk
+function escapeJsString(str) {
+    if (!str) return '';
+    return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+function onProductStatusFilterChange() {
+    paginationState.products.page = 1;
+    fetchProducts(1);
+}
+
+let pendingDeactivateProductId = null;
+let pendingDeleteProductId = null;
+
+function confirmToggleProductStatus(id, newStatus, stock, name) {
+    if (newStatus === 0 && stock > 0) {
+        pendingDeactivateProductId = id;
+        document.getElementById('deactivate-product-id').value = id;
+        const msgEl = document.getElementById('deactivate-product-message');
+        const warnEl = document.getElementById('deactivate-product-stock-warning');
+        const warnText = document.getElementById('deactivate-product-warning-text');
+        if (warnEl) warnEl.style.display = 'block';
+        if (warnText) {
+            warnText.innerHTML = `Produk ini masih memiliki stok sebanyak <strong>${stock}</strong>. Menonaktifkannya akan menyembunyikan produk dari POS, PO, dan transaksi baru.`;
+        }
+        if (msgEl) {
+            msgEl.innerHTML = `Apakah Anda yakin ingin menonaktifkan produk <strong>"${name}"</strong>?`;
+        }
+        if (window.lucide) lucide.createIcons();
+        openModal('modal-confirm-deactivate-product');
+    } else {
+        toggleProductStatus(id, newStatus);
+    }
+}
+
+async function executeDeactivateProduct() {
+    const id = pendingDeactivateProductId || document.getElementById('deactivate-product-id')?.value;
+    if (!id) return;
+    pendingDeactivateProductId = null;
+    closeModal('modal-confirm-deactivate-product');
+    await toggleProductStatus(id, 0);
+}
+
+async function toggleProductStatus(id, is_active) {
+    try {
+        const res = await fetch(`/api/products/${id}/status`, {
+            method: 'PATCH',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ is_active })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(data.message || (is_active ? 'Produk berhasil diaktifkan!' : 'Produk berhasil dinonaktifkan!'), 'success');
+            notifyDataChange('product_status');
+            await fetchProducts(paginationState.products.page);
+            // Refresh POS cache
+            PRODUCTS = [];
+            if (typeof renderPOSProducts === 'function' && currentPage === 'pos') {
+                ensureProductsLoadedForPOS().then(() => renderPOSProducts());
+            }
+        } else {
+            showToast(data.error || 'Gagal mengubah status produk', 'error');
+        }
+    } catch (err) {
+        console.error('Failed to toggle product status', err);
+        showToast('Gagal menghubungi server', 'error');
+    }
+}
+
+function confirmDeleteProduct(id, name, hasPricelists) {
+    pendingDeleteProductId = id;
+    document.getElementById('delete-product-id').value = id;
+    const msgEl = document.getElementById('delete-product-message');
+    const plWarnEl = document.getElementById('delete-product-pricelist-warning');
+    if (msgEl) {
+        msgEl.innerHTML = `Apakah Anda yakin ingin menghapus produk <strong>"${name}"</strong>? Tindakan ini tidak dapat dibatalkan.`;
+    }
+    if (plWarnEl) {
+        plWarnEl.style.display = hasPricelists ? 'block' : 'none';
+    }
+    if (window.lucide) lucide.createIcons();
+    openModal('modal-confirm-delete-product');
+}
+
+async function executeDeleteProduct() {
+    const id = pendingDeleteProductId || document.getElementById('delete-product-id')?.value;
+    if (!id) return;
+    pendingDeleteProductId = null;
+    closeModal('modal-confirm-delete-product');
+
+    try {
+        const res = await fetch(`/api/products/${id}`, {
+            method: 'DELETE',
+            headers: getAuthHeaders()
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('Produk berhasil dihapus!', 'success');
+            notifyDataChange('product_delete');
+            await fetchProducts(paginationState.products.page);
+            PRODUCTS = [];
+            if (typeof renderPOSProducts === 'function' && currentPage === 'pos') {
+                ensureProductsLoadedForPOS().then(() => renderPOSProducts());
+            }
+        } else {
+            showToast(data.error || 'Gagal menghapus produk', 'error');
+        }
+    } catch (err) {
+        console.error('Failed to delete product', err);
+        showToast('Gagal menghubungi server', 'error');
+    }
+}
+
+async function fetchProducts(page) {
+    try {
+        // Paginated fetch untuk tabel produk (A3: Hapus blocking sequential fetch all products)
         if (page !== undefined) paginationState.products.page = page;
         const q = document.getElementById('product-search')?.value || '';
         const category = document.getElementById('product-category-filter')?.value || '';
+        const statusFilter = document.getElementById('product-status-filter')?.value || 'active';
         const pg = paginationState.products.page;
-        let url = '/api/products?page=' + pg + '&limit=' + PAGE_SIZE;
+        let url = '/api/products?page=' + pg + '&limit=' + PAGE_SIZE + '&status=' + encodeURIComponent(statusFilter);
         if (q) url += '&q=' + encodeURIComponent(q);
         if (category && category !== 'all') url += '&category=' + encodeURIComponent(category);
 
@@ -3691,23 +4304,73 @@ async function fetchProducts(page) {
         paginationState.products.total = pag.total || 0;
         paginationState.products.totalPages = pag.totalPages || 1;
 
+        const mapProduct = p => ({
+            id: p.id,
+            sku: p.sku,
+            brand: p.brand || '',
+            name: p.name,
+            category: p.category,
+            category_id: p.category_id,
+            cost: parseFloat(p.cost_price),
+            price: parseFloat(p.sell_price),
+            stock: parseFloat(p.stock),
+            minStock: parseFloat(p.min_stock),
+            unit: p.unit || 'pcs',
+            unit_id: p.unit_id,
+            is_active: p.is_active !== 0 && p.is_active !== false,
+            has_transactions: !!p.has_transactions,
+            has_pricelists: !!p.has_pricelists,
+            emoji: ''
+        });
+
+        // Simpan baris halaman ini untuk akses instan di modal (A3: Modal Opname Instan)
+        CURRENT_PAGE_PRODUCTS.clear();
+
         const tbody = document.getElementById('products-body');
         if (!tbody) return;
         tbody.innerHTML = rows.map(p => {
             const pr = mapProduct(p);
+            CURRENT_PAGE_PRODUCTS.set(String(pr.id), pr);
+
+            const isActive = pr.is_active;
             const stockStatus = pr.stock <= pr.minStock ? 'rendah' : 'aman';
             const stockLabel = pr.stock <= pr.minStock ? 'Rendah' : 'Aman';
+            const statusBadge = isActive
+                ? `<span class="badge-status ${stockStatus}">${stockLabel}</span>`
+                : `<span class="badge-status nonaktif">Nonaktif</span>`;
+
+            // A2.2: Tombol toggle status
+            const toggleStatusBtn = isActive
+                ? `<button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem; color: var(--amber-600);" title="Nonaktifkan Produk" onclick="confirmToggleProductStatus('${pr.id}', 0, ${pr.stock}, '${escapeJsString(pr.name)}')">
+                    <i data-lucide="eye-off" style="width: 14px; height: 14px; margin: 0;"></i>
+                   </button>`
+                : `<button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem; color: var(--emerald-600);" title="Aktifkan Produk" onclick="toggleProductStatus('${pr.id}', 1)">
+                    <i data-lucide="eye" style="width: 14px; height: 14px; margin: 0;"></i>
+                   </button>`;
+
+            // A2.1: Proteksi Delete Produk
+            let deleteBtn = '';
+            if (pr.has_transactions) {
+                deleteBtn = `<button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; color: var(--gray-400); cursor: not-allowed; opacity: 0.5;" title="Produk sudah memiliki riwayat transaksi, gunakan Nonaktifkan" disabled>
+                    <i data-lucide="trash-2" style="width: 14px; height: 14px; margin: 0;"></i>
+                </button>`;
+            } else {
+                deleteBtn = `<button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; color: var(--rose-500);" title="Hapus Produk" onclick="confirmDeleteProduct('${pr.id}', '${escapeJsString(pr.name)}', ${pr.has_pricelists ? 1 : 0})">
+                    <i data-lucide="trash-2" style="width: 14px; height: 14px; margin: 0;"></i>
+                </button>`;
+            }
+
             return `
-            <tr>
+            <tr style="${isActive ? '' : 'opacity: 0.75; background: var(--gray-50);'}">
                 <td><code style="background:var(--gray-100); padding:2px 6px; border-radius:4px; font-size:0.78rem;">${pr.sku}</code></td>
                 <td style="font-weight:600;">${pr.name}</td>
-                <td>${pr.category}</td>
+                <td>${pr.category || '-'}</td>
                 <td>${rp(pr.cost)}</td>
                 <td style="font-weight:700;">${rp(pr.price)}</td>
                 <td style="font-weight:700;">${pr.stock}</td>
                 <td>${pr.unit}</td>
                 <td>${pr.minStock}</td>
-                <td><span class="badge-status ${stockStatus}">${stockLabel}</span></td>
+                <td>${statusBadge}</td>
                 <td style="text-align: right; white-space: nowrap;">
                     <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem;" title="Edit Produk" onclick="openEditProductModal('${pr.id}')">
                         <i data-lucide="edit-2" style="width: 14px; height: 14px; margin: 0;"></i>
@@ -3715,9 +4378,8 @@ async function fetchProducts(page) {
                     <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem; color: var(--blue-600);" title="Stock Opname" onclick="openStockOpnameModal('${pr.id}')">
                         <i data-lucide="boxes" style="width: 14px; height: 14px; margin: 0;"></i>
                     </button>
-                    <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; color: var(--rose-500);" title="Hapus Produk" onclick="deleteProduct('${pr.id}')">
-                        <i data-lucide="trash-2" style="width: 14px; height: 14px; margin: 0;"></i>
-                    </button>
+                    ${toggleStatusBtn}
+                    ${deleteBtn}
                 </td>
             </tr>
             `;
@@ -3774,6 +4436,7 @@ async function saveProduct(isEdit) {
         if (res.ok) {
             closeModal(`modal-${isEdit ? 'edit' : 'add'}-product`);
             showToast(isEdit ? 'Produk berhasil diperbarui!' : 'Produk berhasil ditambahkan!', 'success');
+            notifyDataChange('product');
             await fetchProducts();
             if (typeof renderPOSProducts === 'function') renderPOSProducts();
         } else {
@@ -3786,55 +4449,104 @@ async function saveProduct(isEdit) {
     }
 }
 
-function openEditProductModal(id) {
-    const p = PRODUCTS.find(x => x.id === id);
-    if (!p) return;
+async function openEditProductModal(id) {
+    let p = CURRENT_PAGE_PRODUCTS.get(String(id));
+    if (!p) {
+        try {
+            const res = await fetch(`/api/products/${id}`, { headers: getAuthHeaders() });
+            if (res.ok) {
+                const row = await res.json();
+                p = {
+                    id: row.id,
+                    sku: row.sku,
+                    brand: row.brand || '',
+                    name: row.name,
+                    category: row.category,
+                    category_id: row.category_id,
+                    cost: parseFloat(row.cost_price),
+                    price: parseFloat(row.sell_price),
+                    stock: parseFloat(row.stock),
+                    minStock: parseFloat(row.min_stock),
+                    unit: row.unit || 'pcs',
+                    unit_id: row.unit_id
+                };
+            }
+        } catch (err) {
+            console.error('Failed to fetch product for edit', err);
+        }
+    }
+    if (!p) {
+        showToast('Data produk tidak ditemukan!', 'error');
+        return;
+    }
     document.getElementById('edit-product-id').value = p.id;
     const brandEl = document.getElementById('edit-product-brand');
     if (brandEl) brandEl.value = p.brand || '';
     document.getElementById('edit-product-name').value = p.name;
     document.getElementById('edit-product-sku').value = p.sku;
-    // FIX: set category select — try both category_id and category name
     const catEl = document.getElementById('edit-product-category');
     if (catEl) {
-        // Try setting by value (which is the name from master)
         catEl.value = p.category || '';
         if (!catEl.value && p.category_id) catEl.value = p.category_id;
     }
-    document.getElementById('edit-product-cost').value = p.cost;
-    document.getElementById('edit-product-price').value = p.price;
-    document.getElementById('edit-product-stock').value = p.stock;
-    document.getElementById('edit-product-minstock').value = p.minStock;
+    document.getElementById('edit-product-cost').value = formatNumberTrim(p.cost);
+    document.getElementById('edit-product-price').value = formatNumberTrim(p.price);
+    document.getElementById('edit-product-stock').value = formatNumberTrim(p.stock);
+    document.getElementById('edit-product-minstock').value = formatNumberTrim(p.minStock);
     const unitEl = document.getElementById('edit-product-unit');
     if (unitEl) unitEl.value = p.unit_id || p.unit || '';
     openModal('modal-edit-product');
 }
 
 // ==========================================================================
-// STOCK OPNAME
+// STOCK OPNAME (A3: Instant Opening)
 // ==========================================================================
 let stockOpnameProductId = null;
 
-function openStockOpnameModal(id) {
-    const p = PRODUCTS.find(x => x.id === id);
-    if (!p) return;
+async function openStockOpnameModal(id) {
+    let p = CURRENT_PAGE_PRODUCTS.get(String(id));
+    if (!p) {
+        try {
+            const res = await fetch(`/api/products/${id}`, { headers: getAuthHeaders() });
+            if (res.ok) {
+                const row = await res.json();
+                p = {
+                    id: row.id,
+                    name: row.name,
+                    stock: parseFloat(row.stock || 0)
+                };
+            }
+        } catch (err) {
+            console.error('Failed to fetch product for opname', err);
+        }
+    }
+    if (!p) {
+        showToast('Data produk tidak ditemukan!', 'error');
+        return;
+    }
+
     stockOpnameProductId = p.id;
-    const nameEl = document.querySelector('#modal-stock-opname .form-group:nth-child(1) input');
-    const stockEl = document.querySelector('#modal-stock-opname .form-row .form-group:first-child input');
-    const actualEl = document.querySelector('#modal-stock-opname .form-row .form-group:last-child input');
-    const noteEl = document.querySelector('#modal-stock-opname textarea');
+    const nameEl = document.getElementById('stock-opname-name') || document.querySelector('#modal-stock-opname .form-group:nth-child(1) input');
+    const stockEl = document.getElementById('stock-opname-stock') || document.querySelector('#modal-stock-opname .form-row .form-group:first-child input');
+    const actualEl = document.getElementById('stock-opname-actual') || document.querySelector('#modal-stock-opname .form-row .form-group:last-child input');
+    const noteEl = document.getElementById('stock-opname-note') || document.querySelector('#modal-stock-opname textarea');
+
     if (nameEl) nameEl.value = p.name;
-    if (stockEl) stockEl.value = p.stock;
-    if (actualEl) actualEl.value = '';
+    if (stockEl) stockEl.value = formatNumberTrim(p.stock !== undefined ? p.stock : 0);
+    if (actualEl) {
+        actualEl.value = '';
+        setTimeout(() => actualEl.focus(), 150);
+    }
     if (noteEl) noteEl.value = '';
+
     openModal('modal-stock-opname');
 }
 
 async function submitStockOpname() {
     if (!stockOpnameProductId) return;
-    const actualEl = document.querySelector('#modal-stock-opname .form-row .form-group:last-child input');
-    const noteEl = document.querySelector('#modal-stock-opname textarea');
-    const actual = parseInt(actualEl ? actualEl.value : '');
+    const actualEl = document.getElementById('stock-opname-actual') || document.querySelector('#modal-stock-opname .form-row .form-group:last-child input');
+    const noteEl = document.getElementById('stock-opname-note') || document.querySelector('#modal-stock-opname textarea');
+    const actual = parseFloat(actualEl ? actualEl.value : '');
     if (isNaN(actual) || actual < 0) {
         showToast('Masukkan jumlah stok fisik yang valid!', 'warning');
         return;
@@ -3849,9 +4561,13 @@ async function submitStockOpname() {
         if (res.ok) {
             closeModal('modal-stock-opname');
             showToast('Stok berhasil disesuaikan!', 'success');
+            notifyDataChange('stock_opname');
             stockOpnameProductId = null;
-            await fetchProducts();
-            if (typeof renderPOSProducts === 'function') renderPOSProducts();
+            await fetchProducts(paginationState.products.page);
+            PRODUCTS = [];
+            if (typeof renderPOSProducts === 'function' && currentPage === 'pos') {
+                ensureProductsLoadedForPOS().then(() => renderPOSProducts());
+            }
         } else {
             const err = await res.json();
             showToast('Gagal: ' + (err.error || 'Terjadi kesalahan'), 'error');
@@ -3862,24 +4578,16 @@ async function submitStockOpname() {
     }
 }
 
-async function deleteProduct(id) {
-    if (!confirm('Yakin ingin menghapus produk ini?')) return;
-    try {
-        const res = await fetch(`/api/products/${id}`, {
-            method: 'DELETE',
-            headers: getAuthHeaders()
-        });
-        if (res.ok) {
-            showToast('Produk berhasil dihapus!', 'success');
-            await fetchProducts();
-            if (typeof renderPOSProducts === 'function') renderPOSProducts();
-        } else {
-            const err = await res.json().catch(() => ({}));
-            showToast('Gagal menghapus produk: ' + (err.error || 'Terjadi kesalahan'), 'error');
+function deleteProduct(id) {
+    const p = CURRENT_PAGE_PRODUCTS.get(String(id));
+    if (p) {
+        if (p.has_transactions) {
+            showToast('Produk sudah memiliki riwayat transaksi, gunakan fitur Nonaktifkan.', 'warning');
+            return;
         }
-    } catch (err) {
-        console.error(err);
-        showToast('Gagal menghapus produk', 'error');
+        confirmDeleteProduct(id, p.name, p.has_pricelists ? 1 : 0);
+    } else {
+        confirmDeleteProduct(id, 'Produk #' + id, 0);
     }
 }
 
@@ -4308,8 +5016,11 @@ async function fetchVendors(page) {
         // Populate vendor dropdowns in PO modals
         const vendorOptions = '<option value="" disabled selected>- Pilih Vendor -</option>' +
             VENDORS.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
-        const addVendorEl = document.getElementById('add-purchase-vendor');
-        if (addVendorEl) addVendorEl.innerHTML = vendorOptions;
+        if (window.addPurchaseVendorCombobox) {
+            window.addPurchaseVendorCombobox.setData(
+                VENDORS.map(v => ({ id: v.id, label: v.name, code: v.idNumber || '' }))
+            );
+        }
         const editVendorEl = document.getElementById('edit-purchase-vendor');
         if (editVendorEl) editVendorEl.innerHTML = vendorOptions;
 
@@ -4589,7 +5300,7 @@ function renderAddPurchaseItems(highlightProductId = null) {
     let subtotal = 0;
 
     addPurchaseItems.forEach((item, index) => {
-        const product = PRODUCTS.find(p => String(p.id) === String(item.product_id)) || { name: item.product_id, unit: 'pcs' };
+        const product = (Array.isArray(PRODUCTS) ? PRODUCTS.find(p => String(p.id) === String(item.product_id)) : null) || { name: item.product_name || item.product_id, unit: item.unit || 'pcs' };
         const itemTotal = (parseFloat(item.quantity) || 0) * (parseFloat(item.price) || 0);
         subtotal += itemTotal;
 
@@ -4606,13 +5317,13 @@ function renderAddPurchaseItems(highlightProductId = null) {
                 <div style="font-weight: 500; color: var(--gray-900);">${escapeHtml(product.name)}</div>
             </td>
             <td style="padding: 0.5rem; text-align: center; white-space: nowrap;">
-                <input type="number" min="1" value="${item.quantity}" oninput="updateAddPurchaseItemQty(${index}, this.value)" onchange="updateAddPurchaseItemQty(${index}, this.value)" style="width: 60px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: center;">
+                <input type="number" min="1" value="${formatNumberTrim(item.quantity)}" oninput="updateAddPurchaseItemQty(${index}, this.value)" onchange="updateAddPurchaseItemQty(${index}, this.value)" step="any" min="0.001" style="width: 80px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: center;">
                 <span style="font-size: 0.8rem; color: var(--gray-500); margin-left: 0.25rem;">${escapeHtml(product.unit || 'pcs')}</span>
             </td>
             <td style="padding: 0.5rem; text-align: right;">
                 <div style="display:flex; align-items:center; justify-content:flex-end; gap:0.25rem;">
                     <span style="font-size:0.75rem; color:var(--gray-500);">Rp</span>
-                    <input type="number" value="${item.price}" oninput="updateAddPurchaseItemPrice(${index}, this.value)" onchange="updateAddPurchaseItemPrice(${index}, this.value)" style="width: 80px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: right;">
+                    <input type="number" value="${formatNumberTrim(item.price)}" oninput="updateAddPurchaseItemPrice(${index}, this.value)" onchange="updateAddPurchaseItemPrice(${index}, this.value)" step="any" style="width: 90px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: right;">
                 </div>
             </td>
             <td style="padding: 0.5rem; text-align: right; font-weight: 600; color: var(--gray-900);">
@@ -4648,6 +5359,8 @@ function addProductToPo(prod) {
     } else {
         addPurchaseItems.push({
             product_id: prod.id,
+            product_name: prod.name,
+            unit: prod.unit || 'pcs',
             quantity: 1,
             price: prod.cost || prod.price || 0
         });
@@ -4662,175 +5375,277 @@ function addProductToPo(prod) {
     closePoDropdown();
 }
 
-function positionPoDropdown() {
-    const input = document.getElementById('add-purchase-product-search');
-    const dropdown = document.getElementById('add-purchase-product-dropdown');
-    const modal = document.querySelector('#modal-add-purchase .modal');
-    if (!input || !dropdown || dropdown.style.display === 'none' || !modal) return;
 
-    const inputRect = input.getBoundingClientRect();
-    const modalRect = modal.getBoundingClientRect();
-
-    const top = inputRect.bottom - modalRect.top + modal.scrollTop + 4;
-    const left = inputRect.left - modalRect.left + modal.scrollLeft;
-    const maxW = Math.min(360, window.innerWidth - 32);
-
-    dropdown.style.top = `${top}px`;
-    dropdown.style.left = `${Math.max(8, left)}px`;
-    dropdown.style.width = `${Math.min(inputRect.width || 360, maxW)}px`;
-}
-
-function closePoDropdown() {
-    const dropdown = document.getElementById('add-purchase-product-dropdown');
-    if (dropdown) {
-        dropdown.style.display = 'none';
-        dropdown.innerHTML = '';
-    }
-    poCurrentMatches = [];
-    poSearchActiveIndex = 0;
-}
-
-function renderPoDropdown(keyword) {
-    const dropdown = document.getElementById('add-purchase-product-dropdown');
-    if (!dropdown) return;
-
-    const q = (keyword || '').trim().toLowerCase();
-    if (!q) {
-        closePoDropdown();
-        return;
+// ==========================================================================
+// SHARED PRODUCT AUTOCOMPLETE COMPONENT (Reused in PO and Edit Invoice)
+// ==========================================================================
+class ProductAutocomplete {
+    constructor(config) {
+        this.inputId = config.inputId;
+        this.dropdownId = config.dropdownId;
+        this.wrapperId = config.wrapperId || null;
+        this.modalSelector = config.modalSelector || null;
+        this.getPrice = config.getPrice || function(p) { return parseFloat(p.price || 0); };
+        this.onSelect = config.onSelect || function() {};
+        this.matches = [];
+        this.activeIndex = 0;
+        this.debounceTimer = null;
     }
 
-    const productList = Array.isArray(PRODUCTS) ? PRODUCTS : [];
-    poCurrentMatches = productList.filter(p => (p.name || '').toLowerCase().includes(q));
+    getInput() { return document.getElementById(this.inputId); }
+    getDropdown() { return document.getElementById(this.dropdownId); }
 
-    if (poCurrentMatches.length === 0) {
-        dropdown.innerHTML = `<div class="po-dropdown-empty">Produk tidak ditemukan</div>`;
-        dropdown.style.display = 'block';
-        positionPoDropdown();
-        return;
-    }
-
-    const displayed = poCurrentMatches.slice(0, 8);
-    poSearchActiveIndex = 0;
-
-    let itemsHtml = displayed.map((p, idx) => {
-        const highlightedName = highlightMatch(p.name, q);
-        const buyPrice = p.cost || p.price || 0;
-        const metaText = `Stok ${p.stock ?? 0} · ${rp(buyPrice)}`;
-        const selectedClass = idx === poSearchActiveIndex ? 'po-item-selected' : '';
-
-        return `
-            <div class="po-dropdown-item ${selectedClass}" data-index="${idx}" data-product-id="${escapeHtml(p.id)}">
-                <div class="po-item-name" style="font-size: 0.85rem; font-weight: 500; color: var(--gray-800); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                    ${highlightedName}
-                </div>
-                <div class="po-item-meta" style="font-size: 0.78rem; color: var(--gray-500); white-space: nowrap; margin-left: 0.5rem;">
-                    ${escapeHtml(metaText)}
-                </div>
-            </div>
-        `;
-    }).join('');
-
-    const countText = `${poCurrentMatches.length} hasil · ↑↓ pilih · Enter tambah`;
-    dropdown.innerHTML = `
-        <div class="po-dropdown-list">
-            ${itemsHtml}
-        </div>
-        <div class="po-dropdown-footer">
-            ${countText}
-        </div>
-    `;
-
-    dropdown.querySelectorAll('.po-dropdown-item').forEach(el => {
-        el.addEventListener('mousedown', (e) => {
-            e.preventDefault();
-            const prodId = el.dataset.productId;
-            const prod = productList.find(p => String(p.id) === String(prodId));
-            if (prod) addProductToPo(prod);
-        });
-    });
-
-    dropdown.style.display = 'block';
-    positionPoDropdown();
-}
-
-function updatePoDropdownSelection() {
-    const dropdown = document.getElementById('add-purchase-product-dropdown');
-    if (!dropdown || dropdown.style.display === 'none') return;
-
-    const items = dropdown.querySelectorAll('.po-dropdown-item');
-    items.forEach((item, idx) => {
-        if (idx === poSearchActiveIndex) {
-            item.classList.add('po-item-selected');
-            item.scrollIntoView({ block: 'nearest' });
-        } else {
-            item.classList.remove('po-item-selected');
+    close() {
+        const dd = this.getDropdown();
+        if (dd) {
+            dd.style.display = 'none';
+            dd.innerHTML = '';
         }
-    });
-}
+        this.matches = [];
+        this.activeIndex = 0;
+    }
 
-function initPoProductSearch() {
-    const input = document.getElementById('add-purchase-product-search');
-    const dropdown = document.getElementById('add-purchase-product-dropdown');
-    const modal = document.querySelector('#modal-add-purchase .modal');
-    if (!input || !dropdown) return;
+    position() {
+        const input = this.getInput();
+        const dd = this.getDropdown();
+        if (!input || !dd || dd.style.display === 'none') return;
 
-    if (input.dataset.poSearchInitialized === 'true') return;
-    input.dataset.poSearchInitialized = 'true';
+        const inputRect = input.getBoundingClientRect();
+        const ddH = dd.offsetHeight || 320;
+        const spaceBelow = window.innerHeight - inputRect.bottom - 8;
+        const spaceAbove = inputRect.top - 8;
+        const GAP = 4;
 
-    input.addEventListener('input', (e) => {
-        clearTimeout(poSearchDebounceTimer);
-        const val = e.target.value;
-        poSearchDebounceTimer = setTimeout(() => {
-            renderPoDropdown(val);
-        }, 150);
-    });
+        const openUpward = spaceBelow < ddH && spaceAbove > spaceBelow;
+        const width = Math.min(Math.max(inputRect.width, 260), window.innerWidth - 32);
+        let left = inputRect.left;
+        if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
+        if (left < 8) left = 8;
 
-    input.addEventListener('keydown', (e) => {
-        if (dropdown.style.display !== 'block' || poCurrentMatches.length === 0) {
-            if (e.key === 'Enter') e.preventDefault();
+        dd.style.width = width + 'px';
+        dd.style.left  = left + 'px';
+
+        if (openUpward) {
+            dd.style.bottom = (window.innerHeight - inputRect.top + GAP) + 'px';
+            dd.style.top    = 'auto';
+        } else {
+            dd.style.top    = (inputRect.bottom + GAP) + 'px';
+            dd.style.bottom = 'auto';
+        }
+    }
+
+    async search(keyword) {
+        const dd = this.getDropdown();
+        if (!dd) return;
+
+        const q = (keyword || '').trim().toLowerCase();
+        if (!q) {
+            this.close();
             return;
         }
 
-        const displayedCount = Math.min(poCurrentMatches.length, 8);
-
-        if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            poSearchActiveIndex = (poSearchActiveIndex + 1) % displayedCount;
-            updatePoDropdownSelection();
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            poSearchActiveIndex = (poSearchActiveIndex - 1 + displayedCount) % displayedCount;
-            updatePoDropdownSelection();
-        } else if (e.key === 'Enter') {
-            e.preventDefault();
-            const selectedProd = poCurrentMatches[poSearchActiveIndex];
-            if (selectedProd) {
-                addProductToPo(selectedProd);
+        let matches = [];
+        // Hanya produk aktif
+        if (Array.isArray(PRODUCTS) && PRODUCTS.length > 0) {
+            const productList = PRODUCTS.filter(p => (p.is_active !== 0 && p.is_active !== false));
+            matches = productList.filter(p =>
+                (p.name || '').toLowerCase().includes(q) ||
+                (p.sku || '').toLowerCase().includes(q)
+            );
+        } else {
+            try {
+                const res = await fetch('/api/products?q=' + encodeURIComponent(q) + '&status=active&limit=20', {
+                    headers: getAuthHeaders()
+                });
+                if (res.ok) {
+                    const json = await res.json();
+                    const rows = Array.isArray(json) ? json : (json.data || []);
+                    matches = rows.map(p => ({
+                        id: p.id,
+                        sku: p.sku,
+                        name: p.name,
+                        price: parseFloat(p.sell_price || 0),
+                        cost: parseFloat(p.cost_price || 0),
+                        stock: parseFloat(p.stock || 0),
+                        unit: p.unit || 'pcs',
+                        is_active: p.is_active !== 0 && p.is_active !== false
+                    }));
+                }
+            } catch (e) {
+                console.error('Product search error:', e);
+                matches = [];
             }
-        } else if (e.key === 'Escape') {
-            e.preventDefault();
-            closePoDropdown();
         }
-    });
 
-    if (modal) {
-        modal.addEventListener('scroll', () => {
-            if (dropdown.style.display === 'block') positionPoDropdown();
+        this.matches = matches;
+        this.activeIndex = 0;
+
+        if (matches.length === 0) {
+            dd.innerHTML = '<div class="po-dropdown-empty">Produk tidak ditemukan</div>';
+            dd.style.display = 'block';
+            this.position();
+            return;
+        }
+
+        const displayed = matches.slice(0, 8);
+        const self = this;
+        const itemsHtml = displayed.map((p, idx) => {
+            const highlightedName = highlightMatch(p.name, q);
+            const price = self.getPrice(p);
+            const metaText = 'Stok ' + (p.stock != null ? p.stock : 0) + ' · ' + rp(price);
+            const selectedClass = idx === self.activeIndex ? 'po-item-selected' : '';
+
+            return '<div class="po-dropdown-item ' + selectedClass + '" data-index="' + idx + '" data-product-id="' + escapeHtml(p.id) + '">' +
+                '<div class="po-item-name" style="font-size:0.85rem; font-weight:500; color:var(--gray-800); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' +
+                    highlightedName +
+                '</div>' +
+                '<div class="po-item-meta" style="font-size:0.78rem; color:var(--gray-500); white-space:nowrap; margin-left:0.5rem;">' +
+                    escapeHtml(metaText) +
+                '</div>' +
+            '</div>';
+        }).join('');
+
+        const countText = matches.length + ' hasil · ↑↓ pilih · Enter tambah';
+        dd.innerHTML = '<div class="po-dropdown-list">' + itemsHtml + '</div>' +
+                       '<div class="po-dropdown-footer">' + countText + '</div>';
+
+        dd.querySelectorAll('.po-dropdown-item').forEach(el => {
+            el.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                const prodId = el.dataset.productId;
+                const prod = self.matches.find(p => String(p.id) === String(prodId));
+                if (prod) {
+                    self.onSelect(prod);
+                    const inp = self.getInput();
+                    if (inp) {
+                        inp.value = '';
+                        inp.focus();
+                    }
+                    self.close();
+                }
+            });
+        });
+
+        dd.style.display = 'block';
+        this.position();
+    }
+
+    updateSelection() {
+        const dd = this.getDropdown();
+        if (!dd || dd.style.display === 'none') return;
+        const items = dd.querySelectorAll('.po-dropdown-item');
+        const self = this;
+        items.forEach((item, idx) => {
+            if (idx === self.activeIndex) {
+                item.classList.add('po-item-selected');
+                item.scrollIntoView({ block: 'nearest' });
+            } else {
+                item.classList.remove('po-item-selected');
+            }
         });
     }
-    window.addEventListener('resize', () => {
-        if (dropdown.style.display === 'block') positionPoDropdown();
-    });
 
-    document.addEventListener('click', (e) => {
-        const searchContainer = document.querySelector('.po-search-container');
-        if (!searchContainer || !dropdown) return;
-        if (!searchContainer.contains(e.target) && !dropdown.contains(e.target)) {
-            closePoDropdown();
+    init() {
+        const input = this.getInput();
+        const dd = this.getDropdown();
+        if (!input || !dd) return;
+        if (input.dataset.autocompleteInit === 'true') return;
+        input.dataset.autocompleteInit = 'true';
+
+        const self = this;
+        input.addEventListener('input', (e) => {
+            clearTimeout(self.debounceTimer);
+            const val = e.target.value;
+            self.debounceTimer = setTimeout(() => {
+                self.search(val);
+            }, 150);
+        });
+
+        input.addEventListener('keydown', (e) => {
+            if (dd.style.display !== 'block' || self.matches.length === 0) {
+                if (e.key === 'Enter') e.preventDefault();
+                return;
+            }
+
+            const displayedCount = Math.min(self.matches.length, 8);
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                self.activeIndex = (self.activeIndex + 1) % displayedCount;
+                self.updateSelection();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                self.activeIndex = (self.activeIndex - 1 + displayedCount) % displayedCount;
+                self.updateSelection();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                const selectedProd = self.matches[self.activeIndex];
+                if (selectedProd) {
+                    self.onSelect(selectedProd);
+                    input.value = '';
+                    self.close();
+                }
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                self.close();
+            }
+        });
+
+        if (this.modalSelector) {
+            const modal = document.querySelector(this.modalSelector);
+            if (modal) {
+                modal.addEventListener('scroll', () => {
+                    if (dd.style.display === 'block') self.position();
+                });
+            }
         }
-    });
+
+        window.addEventListener('resize', () => {
+            if (dd.style.display === 'block') self.position();
+        });
+
+        document.addEventListener('click', (e) => {
+            const wrapper = self.wrapperId ? document.getElementById(self.wrapperId) : null;
+            const container = wrapper || (input ? input.closest('.po-search-container') || input.parentElement : null);
+            if (!container || !dd) return;
+            if (!container.contains(e.target) && !dd.contains(e.target)) {
+                self.close();
+            }
+        });
+    }
 }
+
+// ── PO Modal Product Search Instance ──────────────────────────────────────────
+let poProductAutocomplete = null;
+function getPoProductAutocomplete() {
+    if (!poProductAutocomplete) {
+        poProductAutocomplete = new ProductAutocomplete({
+            inputId: 'add-purchase-product-search',
+            dropdownId: 'add-purchase-product-dropdown',
+            modalSelector: '#modal-add-purchase .modal',
+            getPrice: function(p) { return p.cost || p.price || 0; },
+            onSelect: function(p) { addProductToPo(p); }
+        });
+    }
+    return poProductAutocomplete;
+}
+
+// Backwards-compatible PO delegators (used by tests & existing callers)
+function positionPoDropdown() {
+    getPoProductAutocomplete().position();
+}
+function closePoDropdown() {
+    getPoProductAutocomplete().close();
+}
+async function renderPoDropdown(keyword) {
+    return getPoProductAutocomplete().search(keyword);
+}
+function updatePoDropdownSelection() {
+    getPoProductAutocomplete().updateSelection();
+}
+function initPoProductSearch() {
+    getPoProductAutocomplete().init();
+}
+
 
 window.addAddPurchaseItem = (prodId) => {
     let targetId = prodId;
@@ -4849,7 +5664,7 @@ window.removeAddPurchaseItem = (index) => {
 };
 
 window.updateAddPurchaseItemQty = (index, val) => {
-    const qty = parseInt(val);
+    const qty = parseFloat(val);
     addPurchaseItems[index].quantity = qty > 0 ? qty : 1;
     renderAddPurchaseItems();
 };
@@ -4862,6 +5677,22 @@ window.updateAddPurchaseItemPrice = (index, val) => {
 
 // FIX: open add-purchase modal with cleared form
 function openAddPurchaseModal() {
+    // Ensure vendor combobox is initialized and populated
+    if (!window.addPurchaseVendorCombobox) {
+        initAddPurchaseVendorCombobox();
+    }
+    if (window.addPurchaseVendorCombobox) {
+        if (Array.isArray(VENDORS) && VENDORS.length > 0) {
+            window.addPurchaseVendorCombobox.setData(
+                VENDORS.map(v => ({ id: v.id, label: v.name, code: v.idNumber || '' }))
+            );
+        }
+        window.addPurchaseVendorCombobox.reset();
+    }
+
+    // Ensure active products are cached in background for search
+    ensureProductsLoadedForPOS();
+
     // Reset all fields
     const vendorEl = document.getElementById('add-purchase-vendor');
     const dateEl = document.getElementById('add-purchase-date');
@@ -4869,7 +5700,7 @@ function openAddPurchaseModal() {
     const ptEl = document.getElementById('add-purchase-payment-type');
     const searchInput = document.getElementById('add-purchase-product-search');
 
-    if (vendorEl) vendorEl.selectedIndex = 0;
+    if (vendorEl) vendorEl.value = '';
     if (dateEl) dateEl.value = new Date().toISOString().split('T')[0];
     if (paidEl) paidEl.value = '';
     if (ptEl) ptEl.selectedIndex = 0;
@@ -4909,13 +5740,13 @@ function renderEditPurchaseItems() {
                 <div style="font-weight: 500; color: var(--gray-900);">${product.name}</div>
             </td>
             <td style="padding: 0.5rem; text-align: center; white-space: nowrap;">
-                <input type="number" min="1" value="${item.quantity}" onchange="updateEditPurchaseItemQty(${index}, this.value)" style="width: 60px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: center;">
+                <input type="number" min="1" value="${formatNumberTrim(item.quantity)}" onchange="updateEditPurchaseItemQty(${index}, this.value)" step="any" min="0.001" style="width: 80px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: center;">
                 <span style="font-size: 0.8rem; color: var(--gray-500); margin-left: 0.25rem;">${product.unit || 'pcs'}</span>
             </td>
             <td style="padding: 0.5rem; text-align: right;">
                 <div style="display:flex; align-items:center; justify-content:flex-end; gap:0.25rem;">
                     <span style="font-size:0.75rem; color:var(--gray-500);">Rp</span>
-                    <input type="number" value="${itemPrice}" onchange="updateEditPurchaseItemPrice(${index}, this.value)" style="width: 80px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: right;">
+                    <input type="number" value="${formatNumberTrim(itemPrice)}" onchange="updateEditPurchaseItemPrice(${index}, this.value)" step="any" style="width: 90px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: right;">
                 </div>
             </td>
             <td style="padding: 0.5rem; text-align: right; font-weight: 600; color: var(--gray-900);">
@@ -4965,7 +5796,7 @@ window.removeEditPurchaseItem = (index) => {
 };
 
 window.updateEditPurchaseItemQty = (index, val) => {
-    const qty = parseInt(val);
+    const qty = parseFloat(val);
     if (qty > 0) {
         editPurchaseItems[index].quantity = qty;
     } else {
@@ -5053,6 +5884,11 @@ async function savePurchase(isEdit) {
         return;
     }
 
+    const vendorVal = document.getElementById(`${prefix}-purchase-vendor`)?.value || '';
+    if (!vendorVal) {
+        showToast('Pilih vendor terlebih dahulu!', 'warning');
+        return;
+    }
     const total = itemsToSave.reduce((s, i) => s + i.total, 0);
 
     let dueDate = document.getElementById(`${prefix}-purchase-due-date`)?.value || '';
@@ -5088,6 +5924,7 @@ async function savePurchase(isEdit) {
         if (res.ok) {
             closeModal(`modal-${isEdit ? 'edit' : 'add'}-purchase`);
             showToast(isEdit ? 'Purchase Order berhasil diperbarui!' : 'Purchase Order berhasil dibuat!', 'success');
+            notifyDataChange('purchase');
             await fetchPurchases();
             await fetchProducts(); // update stock
             renderHutang();
@@ -5280,16 +6117,12 @@ async function fetchPiutang(page) {
                 : '';
             let actionButtons;
             if (canPayOrVoid) {
-                const bayarBtn = statusLower !== 'lunas'
-                    ? `<button class="btn-toolbar primary" style="padding:0.25rem 0.5rem;font-size:0.75rem;" onclick="openPiutangPaymentModal('${inv.id}', ${sisa})">Bayar</button>`
-                    : '<span style="color:var(--gray-400);font-size:0.8rem;">Lunas</span>';
-                
-                // Requirement 2: Tombol Delete HANYA untuk invoice import outstanding
+                // A6: Sembunyikan tombol "Bayar" di setiap baris, sisakan tombol cicilan/riwayat bayar 3 garis
                 const deleteBtn = inv.isOutstandingImport
                     ? `<button class="btn-toolbar secondary" style="padding:0.25rem 0.5rem;font-size:0.75rem;margin-left:0.25rem;color:var(--rose-500);" title="Hapus Invoice Outstanding" onclick="confirmDeleteOutstandingInvoice('${inv.id}', ${inv.paid || 0})"><i data-lucide="trash-2" style="width:13px;height:13px;margin:0;"></i></button>`
                     : '';
 
-                actionButtons = `<button class="btn-toolbar secondary" style="padding:0.25rem 0.5rem;font-size:0.75rem;margin-right:0.25rem;" title="Riwayat Cicilan" onclick="openPaymentHistoryModal('${inv.id}')"><i data-lucide="list" style="width:13px;height:13px;margin:0;"></i></button>${bayarBtn}${deleteBtn}`;
+                actionButtons = `<button class="btn-toolbar secondary" style="padding:0.25rem 0.5rem;font-size:0.75rem;" title="Riwayat Cicilan & Bayar" onclick="openPaymentHistoryModal('${inv.id}')"><i data-lucide="list" style="width:13px;height:13px;margin:0;"></i></button>${deleteBtn}`;
             } else {
                 actionButtons = '<span style="color:var(--gray-400);font-size:0.8rem;">Lihat Saja</span>';
             }
@@ -5335,6 +6168,10 @@ async function fetchPiutang(page) {
 }
 
 let editInvoiceItems = [];
+let editInvoiceCurrentCustomerId = null;
+let editInvoicePoCurrentMatches = [];
+let editInvoicePoSearchActiveIndex = 0;
+let editInvoicePoSearchDebounce = null;
 
 function renderEditInvoiceItems() {
     const container = document.getElementById('edit-invoice-items-container');
@@ -5359,12 +6196,12 @@ function renderEditInvoiceItems() {
                 <div style="font-weight: 500; color: var(--gray-900);">${product.name}</div>
             </td>
             <td style="padding: 0.5rem; text-align: center;">
-                <input type="number" min="1" value="${item.quantity}" onchange="updateEditInvoiceItemQty(${index}, this.value)" style="width: 60px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: center;">
+                <input type="number" min="1" value="${formatNumTrim(item.quantity)}" onchange="updateEditInvoiceItemQty(${index}, this.value)" step="any" style="width: 80px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: center;">
             </td>
             <td style="padding: 0.5rem; text-align: right;">
                 <div style="display:flex; align-items:center; justify-content:flex-end; gap:0.25rem;">
                     <span style="font-size:0.75rem; color:var(--gray-500);">Rp</span>
-                    <input type="number" value="${item.price}" onchange="updateEditInvoiceItemPrice(${index}, this.value)" style="width: 80px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: right;">
+                    <input type="number" value="${formatNumTrim(item.price)}" onchange="updateEditInvoiceItemPrice(${index}, this.value)" step="any" style="width: 90px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: right;">
                 </div>
             </td>
             <td style="padding: 0.5rem; text-align: right; font-weight: 600; color: var(--gray-900);">
@@ -5413,25 +6250,67 @@ function renderEditInvoiceItems() {
     if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
-window.addEditInvoiceItem = () => {
-    const select = document.getElementById('edit-invoice-product-select');
-    if (!select || !select.value) return;
+// ── Edit Invoice Product Search Instance ──────────────────────────────────────
+let editInvoiceProductAutocomplete = null;
+function getEditInvoiceProductAutocomplete() {
+    if (!editInvoiceProductAutocomplete) {
+        editInvoiceProductAutocomplete = new ProductAutocomplete({
+            inputId: 'edit-invoice-product-search',
+            dropdownId: 'edit-invoice-product-dropdown',
+            wrapperId: 'edit-invoice-search-wrapper',
+            modalSelector: '#modal-edit-invoice .modal',
+            getPrice: function(p) { return getEditInvoiceProductPrice(p); },
+            onSelect: function(p) { addEditInvoiceItemFromSearch(p); }
+        });
+    }
+    return editInvoiceProductAutocomplete;
+}
 
-    const prod = PRODUCTS.find(p => p.id === select.value);
+function closeEditInvoiceDropdown() {
+    getEditInvoiceProductAutocomplete().close();
+}
+
+function positionEditInvoiceDropdown() {
+    getEditInvoiceProductAutocomplete().position();
+}
+
+function renderEditInvoiceDropdown(keyword) {
+    return getEditInvoiceProductAutocomplete().search(keyword);
+}
+
+function initEditInvoiceProductSearch() {
+    getEditInvoiceProductAutocomplete().init();
+}
+
+function getEditInvoiceProductPrice(prod) {
+    if (editInvoiceCurrentCustomerId) {
+        var eff = currentPOSCustomerEffectivePrices[prod.id];
+        if (eff) return parseFloat(eff.harga_efektif);
+    }
+    return parseFloat(prod.price || prod.sell_price || 0);
+}
+
+function addEditInvoiceItemFromSearch(prod) {
     if (!prod) return;
-
-    const existing = editInvoiceItems.find(i => i.product_id === prod.id);
+    var existing = editInvoiceItems.find(function(i) { return String(i.product_id) === String(prod.id); });
     if (existing) {
-        existing.quantity += 1;
+        existing.quantity = (parseFloat(existing.quantity) || 0) + 1;
     } else {
         editInvoiceItems.push({
             product_id: prod.id,
+            product_name: prod.name,
             quantity: 1,
-            price: prod.price
+            price: getEditInvoiceProductPrice(prod)
         });
     }
     renderEditInvoiceItems();
-};
+    var input = document.getElementById('edit-invoice-product-search');
+    if (input) { input.value = ''; input.focus(); }
+    closeEditInvoiceDropdown();
+}
+
+// Legacy stub
+window.addEditInvoiceItem = function() {};
 
 window.removeEditInvoiceItem = (index) => {
     editInvoiceItems.splice(index, 1);
@@ -5439,7 +6318,7 @@ window.removeEditInvoiceItem = (index) => {
 };
 
 window.updateEditInvoiceItemQty = (index, val) => {
-    const qty = parseInt(val);
+    const qty = parseFloat(val);
     if (qty > 0) {
         editInvoiceItems[index].quantity = qty;
     } else {
@@ -5514,12 +6393,29 @@ async function openEditInvoiceModal(id) {
         ptEl.disabled = !canChangeStatusOrType;
     }
 
-    // Populate product select
-    const select = document.getElementById('edit-invoice-product-select');
-    if (select) {
-        select.innerHTML = '<option value="" disabled selected>- Pilih Produk -</option>' +
-            PRODUCTS.map(p => `<option value="${p.id}">${p.name} (${rp(p.price)})</option>`).join('');
+    // Simpan customerId untuk lookup special price saat user tambah produk baru
+    editInvoiceCurrentCustomerId = inv.customerId || null;
+
+    // Load effective prices untuk pelanggan ini
+    if (editInvoiceCurrentCustomerId) {
+        try {
+            var effRes = await fetch(
+                '/api/pricelists/effective-prices?customer_id=' + encodeURIComponent(editInvoiceCurrentCustomerId),
+                { headers: getAuthHeaders() }
+            );
+            if (effRes.ok) {
+                var effData = await effRes.json();
+                var effRows = Array.isArray(effData) ? effData : (Array.isArray(effData.prices) ? effData.prices : []);
+                currentPOSCustomerEffectivePrices = {};
+                effRows.forEach(function(row) { currentPOSCustomerEffectivePrices[row.product_id] = row; });
+            }
+        } catch(_) {}
     }
+
+    // Reset search input (allow re-init)
+    var searchInput = document.getElementById('edit-invoice-product-search');
+    if (searchInput) { searchInput.value = ''; delete searchInput.dataset.editInvSearchInit; }
+    closeEditInvoiceDropdown();
 
     // Reset items and show loading
     editInvoiceItems = [];
@@ -5540,6 +6436,7 @@ async function openEditInvoiceModal(id) {
     renderEditInvoiceItems();
 
     openModal('modal-edit-invoice');
+    setTimeout(initEditInvoiceProductSearch, 50);
 }
 
 let pendingSaveInvoicePayload = null;
@@ -5632,6 +6529,7 @@ async function executeSaveInvoiceEdits() {
         if (res.ok) {
             closeModal('modal-edit-invoice');
             showToast('Invoice berhasil diperbarui!', 'success');
+            notifyDataChange('invoice_edit');
             // Muat ulang daftar invoice dan piutang tanpa full page reload
             await fetchInvoices();
             await fetchProducts(); // stock changed
@@ -5701,6 +6599,7 @@ async function confirmCancelInvoice() {
             closeModal('modal-cancel-invoice');
             closeModal('modal-edit-invoice');
             showToast('Invoice berhasil dibatalkan. Stok telah dikembalikan.', 'success');
+            notifyDataChange('invoice_cancel');
             await fetchInvoices();
             if (typeof fetchPiutang === 'function') await fetchPiutang();
             await fetchProducts();
@@ -5730,6 +6629,7 @@ async function confirmCancelPurchase() {
             closeModal('modal-cancel-purchase');
             closeModal('modal-edit-purchase');
             showToast('PO berhasil dibatalkan. Stok telah dikembalikan.', 'success');
+            notifyDataChange('purchase_cancel');
             await fetchPurchases();
             await fetchProducts();
             if (typeof renderHutang === 'function') renderHutang();
@@ -5886,6 +6786,7 @@ async function saveCashTransaction() {
         if (res.ok) {
             closeModal('modal-add-cash');
             showToast('Transaksi kas berhasil disimpan!', 'success');
+            notifyDataChange('cash');
             await fetchCashTransactions();
         } else {
             const err = await res.json();
@@ -6037,6 +6938,7 @@ async function submitPayment() {
             paymentSuccess = true;
             closeModal('modal-payment');
             showToast('Pembayaran berhasil dicatat!', 'success');
+            notifyDataChange('payment');
         } else {
             let errMsg = 'Gagal memproses pembayaran';
             try {
@@ -6202,6 +7104,7 @@ async function submitVoidPayment() {
         if (res.ok) {
             closeModal('modal-void-payment');
             showToast('Pembayaran berhasil di-void dan posting kas dibalik.', 'success');
+            notifyDataChange('payment_void');
             _voidPaymentId = null;
             await fetchInvoices();
             await fetchCashTransactions();
@@ -8197,7 +9100,7 @@ function populateCustomerPricelistDropdown(selectId, selectedId) {
     const el = document.getElementById(selectId);
     if (!el) return;
     const activeLists = (PRICELISTS || []).filter(pl => pl.is_active);
-    el.innerHTML = '<option value="">Harga Master (tanpa pricelist)</option>' +
+    el.innerHTML = '<option value="">Harga Master (tanpa Special Price)</option>' +
         activeLists.map(pl =>
             `<option value="${pl.id}" ${String(pl.id) === String(selectedId) ? 'selected' : ''}>${pl.nama} (${pl.kode})</option>`
         ).join('');
@@ -8314,7 +9217,7 @@ async function handlePOSCustomerChange(customerId) {
             });
             renderCart();
             if (pricesAdjusted) {
-                showToast('Harga item keranjang disesuaikan dengan pricelist pelanggan.', 'info');
+                showToast('Harga item keranjang disesuaikan dengan Special Price pelanggan.', 'info');
             }
         }
     } catch (err) {
@@ -8371,7 +9274,7 @@ function renderPricelistsTable() {
     if (list.length === 0) {
         tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2.5rem; color:var(--gray-400);">
             <i data-lucide="inbox" style="width:28px;height:28px;margin-bottom:0.5rem;display:inline-block;opacity:0.6;"></i>
-            <div>Belum ada pricelist yang sesuai. Klik "Buat Pricelist Baru" untuk memulai.</div>
+            <div>Belum ada Special Price yang sesuai. Klik "Buat Special Price Baru" untuk memulai.</div>
         </td></tr>`;
         if (window.lucide) lucide.createIcons();
         return;
@@ -8438,7 +9341,7 @@ async function submitCreatePricelist() {
     const nama = document.getElementById('create-pl-nama')?.value.trim();
     const keterangan = document.getElementById('create-pl-keterangan')?.value.trim() || '';
     if (!nama) {
-        showToast('Nama pricelist wajib diisi!', 'warning');
+        showToast('Nama Special Price wajib diisi!', 'warning');
         return;
     }
 
@@ -8455,7 +9358,7 @@ async function submitCreatePricelist() {
             await fetchPricelists();
             openPricelistDetail(data.data.id);
         } else {
-            showToast(data.error || 'Gagal membuat pricelist', 'error');
+            showToast(data.error || 'Gagal membuat Special Price', 'error');
         }
     } catch (err) {
         showToast('Gagal menghubungi server', 'error');
@@ -8481,7 +9384,7 @@ async function submitEditPricelist() {
     const is_active = parseInt(document.getElementById('edit-pl-status')?.value || '1', 10);
 
     if (!nama) {
-        showToast('Nama pricelist tidak boleh kosong!', 'warning');
+        showToast('Nama Special Price tidak boleh kosong!', 'warning');
         return;
     }
 
@@ -8513,13 +9416,13 @@ async function doUpdatePricelist(payload) {
         if (res.ok) {
             closeModal('modal-edit-pricelist');
             closeModal('modal-confirm-deactivate-pricelist');
-            showToast('Pricelist berhasil diperbarui!', 'success');
+            showToast('Special Price berhasil diperbarui!', 'success');
             await fetchPricelists();
             if (activePricelistId == payload.id) {
                 openPricelistDetail(payload.id);
             }
         } else {
-            showToast(data.error || 'Gagal memperbarui pricelist', 'error');
+            showToast(data.error || 'Gagal memperbarui Special Price', 'error');
         }
     } catch (err) {
         showToast('Gagal menghubungi server', 'error');
@@ -8551,7 +9454,7 @@ async function submitDuplicatePricelist() {
     const nama = document.getElementById('duplicate-pl-nama')?.value.trim();
     if (!id) return;
     if (!nama) {
-        showToast('Nama pricelist baru wajib diisi!', 'warning');
+        showToast('Nama Special Price baru wajib diisi!', 'warning');
         return;
     }
 
@@ -8568,7 +9471,7 @@ async function submitDuplicatePricelist() {
             await fetchPricelists();
             openPricelistDetail(data.data.id);
         } else {
-            showToast(data.error || 'Gagal menduplikat pricelist', 'error');
+            showToast(data.error || 'Gagal menduplikat Special Price', 'error');
         }
     } catch (err) {
         showToast('Gagal menghubungi server', 'error');
@@ -8579,7 +9482,7 @@ async function submitDuplicatePricelist() {
 async function deletePricelist(id, nama, totalCustomers) {
     // Spec R7: Pricelist yang masih dipakai customer tidak boleh dihapus
     if (totalCustomers > 0) {
-        showToast(`Tidak dapat dihapus: ${totalCustomers} pelanggan masih menggunakan pricelist ini. Pricelist hanya boleh dinonaktifkan.`, 'warning');
+        showToast(`Tidak dapat dihapus: ${totalCustomers} pelanggan masih menggunakan Special Price ini. Special Price hanya boleh dinonaktifkan.`, 'warning');
         return;
     }
     if (!confirm(`Hapus permanen pricelist "${nama}"?`)) return;
@@ -8592,11 +9495,11 @@ async function deletePricelist(id, nama, totalCustomers) {
             return;
         }
         if (res.ok) {
-            showToast('Pricelist berhasil dihapus!', 'success');
+            showToast('Special Price berhasil dihapus!', 'success');
             await fetchPricelists();
             showPricelistView('list');
         } else {
-            showToast(data.error || 'Gagal menghapus pricelist', 'error');
+            showToast(data.error || 'Gagal menghapus Special Price', 'error');
         }
     } catch (err) {
         showToast('Gagal menghubungi server', 'error');
@@ -8653,7 +9556,7 @@ async function openPricelistDetail(id) {
 
         renderPricelistItemsTable(items);
     } catch (err) {
-        showToast('Gagal memuat detail pricelist', 'error');
+        showToast('Gagal memuat detail Special Price', 'error');
         showPricelistView('list');
     }
 }
@@ -8704,8 +9607,8 @@ function renderPricelistItemsTable(items) {
             </td>
             <td style="text-align:right;">
                 <input type="number" class="inline-price-input"
-                    value="${hargaKhusus}"
-                    min="1" step="1"
+                    value="${formatNumberTrim(hargaKhusus)}"
+                    min="0" step="any"
                     onchange="savePricelistItemPrice('${item.product_id}', this.value, this)"
                     style="width:130px; text-align:right; font-weight:600;"
                     title="Ubah harga khusus">
@@ -8768,11 +9671,11 @@ async function savePricelistItemPrice(productId, newPrice, inputEl) {
 async function deletePricelistItem(productId) {
     const id = activePricelistId;
     if (!id) return;
-    if (!confirm('Hapus produk ini dari pricelist?')) return;
+    if (!confirm('Hapus produk ini dari Special Price?')) return;
     try {
         const res = await fetch(`/api/pricelists/${id}/items/${productId}`, { method: 'DELETE', headers: getAuthHeaders() });
         if (res.ok) {
-            showToast('Produk dihapus dari pricelist', 'success');
+            showToast('Produk dihapus dari Special Price', 'success');
             await openPricelistDetail(id);
             await fetchPricelists();
         } else {
@@ -8805,7 +9708,7 @@ async function deleteSelectedPricelistItems() {
     const id = activePricelistId;
     const checked = Array.from(document.querySelectorAll('.pl-item-chk:checked')).map(c => c.value);
     if (!checked.length || !id) return;
-    if (!confirm(`Hapus ${checked.length} produk terpilih dari pricelist ini?`)) return;
+    if (!confirm(`Hapus ${checked.length} produk terpilih dari Special Price ini?`)) return;
 
     try {
         for (const productId of checked) {
@@ -8986,11 +9889,11 @@ async function submitAddPricelistProducts() {
         const data = await res.json();
         if (res.ok) {
             closeModal('modal-add-pricelist-products');
-            showToast(`${items.length} produk berhasil ditambahkan ke pricelist!`, 'success');
+            showToast(`${items.length} produk berhasil ditambahkan ke Special Price!`, 'success');
             await openPricelistDetail(id);
             await fetchPricelists();
         } else {
-            showToast(data.error || 'Gagal menyimpan item ke pricelist', 'error');
+            showToast(data.error || 'Gagal menyimpan item ke Special Price', 'error');
         }
     } catch (err) {
         showToast('Gagal menyimpan', 'error');
@@ -9187,7 +10090,7 @@ async function submitPricelistCsvItems() {
         const data = await res.json();
         if (res.ok) {
             closeModal('modal-import-pricelist-csv');
-            showToast(`${items.length} produk berhasil diimpor ke pricelist!`, 'success');
+            showToast(`${items.length} produk berhasil diimpor ke Special Price!`, 'success');
             plCsvParsedRows = [];
             await openPricelistDetail(id);
             await fetchPricelists();
@@ -9444,6 +10347,7 @@ async function executeDeleteOutstandingInvoice() {
         if (res.ok) {
             closeModal('modal-delete-outstanding');
             showToast('Invoice outstanding berhasil dihapus', 'success');
+            notifyDataChange('invoice_delete');
             selectedPiutangIds.delete(String(id));
             await fetchPiutang();
             if (typeof fetchInvoices === 'function') await fetchInvoices();

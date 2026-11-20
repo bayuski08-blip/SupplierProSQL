@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS products (
   stock DECIMAL(20,4) DEFAULT 0,
   min_stock DECIMAL(20,4) DEFAULT 0,
   unit_id VARCHAR(255),
+  is_active TINYINT(1) DEFAULT 1,
+  INDEX idx_products_is_active (is_active),
   FOREIGN KEY (category_id) REFERENCES product_categories(id) ON DELETE SET NULL,
   FOREIGN KEY (unit_id) REFERENCES product_units(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

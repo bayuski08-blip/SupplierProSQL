@@ -883,68 +883,98 @@ app.post('/api/settings', authenticateToken, authorizeRoles('admin'), async (req
 // --- Dashboard & Summary Routes ---
 app.get('/api/dashboard/summary', authenticateToken, async (req, res) => {
   try {
-    // Revenue (omzet) - semua invoice yang tidak batal
-    const revenueResult = await pool.query("SELECT SUM(total) as revenue FROM sales_invoices WHERE status NOT IN ('Batal', 'Cancel', 'Dibatalkan')");
-    const revenue = parseFloat(revenueResult.rows[0].revenue || 0);
+    const role = (req.user?.role || 'kasir').toLowerCase();
+    const canSeeFinance = ['admin', 'finance', 'owner'].includes(role);
+    const canSeeOrders = ['admin', 'finance', 'kasir', 'owner'].includes(role);
+    const canSeeCustomers = ['admin', 'finance', 'kasir', 'owner'].includes(role);
+    const canSeeProducts = ['admin', 'gudang', 'kasir', 'finance', 'owner'].includes(role);
 
-    // Piutang - invoice yang belum lunas
-    const receivablesResult = await pool.query("SELECT SUM(total - paid_amount) as receivables FROM sales_invoices WHERE status NOT IN ('Lunas', 'Batal', 'Cancel', 'Dibatalkan')");
-    const receivables = parseFloat(receivablesResult.rows[0].receivables || 0);
-
-    // Hutang ke vendor - PO yang belum selesai
-    const payablesResult = await pool.query("SELECT SUM(total - paid_amount) as payables FROM purchase_orders WHERE status NOT IN ('Selesai', 'Batal', 'Cancel', 'Dibatalkan')");
-    const payables = parseFloat(payablesResult.rows[0].payables || 0);
-
-    // Stok menipis
-    const lowStockResult = await pool.query('SELECT id, name, stock, min_stock FROM products WHERE stock <= min_stock ORDER BY stock ASC');
+    // Stok menipis - HANYA produk aktif (A1 & A2)
+    const lowStockResult = await pool.query('SELECT id, name, stock, min_stock FROM products WHERE (is_active = 1 OR is_active IS NULL) AND stock <= min_stock ORDER BY stock ASC');
     const lowStockProducts = lowStockResult.rows;
 
-    // Laba Kotor (Revenue - HPP)
-    const hppResult = await pool.query(`
-      SELECT COALESCE(SUM(ii.quantity * p.cost_price), 0) as hpp
-      FROM invoice_items ii
-      JOIN products p ON ii.product_id = p.id
-      JOIN sales_invoices si ON ii.invoice_id = si.id
-      WHERE si.status NOT IN ('Batal', 'Cancel', 'Dibatalkan')
-    `);
-    const hpp = parseFloat(hppResult.rows[0].hpp || 0);
-    const grossProfit = revenue - hpp;
+    let revenue = 0, receivables = 0, payables = 0, grossProfit = 0, unpaidCount = 0;
+    if (canSeeFinance) {
+      // Revenue (omzet) - semua invoice yang tidak batal
+      const revenueResult = await pool.query("SELECT SUM(total) as revenue FROM sales_invoices WHERE status NOT IN ('Batal', 'Cancel', 'Dibatalkan')");
+      revenue = parseFloat(revenueResult.rows[0]?.revenue || 0);
 
-    // Order hari ini
-    const today = new Date().toISOString().split('T')[0];
-    const ordersTodayResult = await pool.query("SELECT COUNT(*) as count FROM sales_invoices WHERE DATE(date) = ? AND status NOT IN ('Batal', 'Cancel', 'Dibatalkan')", [today]);
-    const ordersToday = parseInt(ordersTodayResult.rows[0].count || 0);
+      // Piutang - invoice yang belum lunas
+      const receivablesResult = await pool.query("SELECT SUM(total - paid_amount) as receivables FROM sales_invoices WHERE status NOT IN ('Lunas', 'Batal', 'Cancel', 'Dibatalkan')");
+      receivables = parseFloat(receivablesResult.rows[0]?.receivables || 0);
 
-    // Jumlah pelanggan aktif
-    const customersResult = await pool.query('SELECT COUNT(*) as count FROM customers');
-    const customerCount = parseInt(customersResult.rows[0].count || 0);
+      // Hutang ke vendor - PO yang belum selesai
+      const payablesResult = await pool.query("SELECT SUM(total - paid_amount) as payables FROM purchase_orders WHERE status NOT IN ('Selesai', 'Batal', 'Cancel', 'Dibatalkan')");
+      payables = parseFloat(payablesResult.rows[0]?.payables || 0);
 
-    // Jumlah produk
-    const productsResult = await pool.query('SELECT COUNT(*) as count FROM products');
-    const productCount = parseInt(productsResult.rows[0].count || 0);
+      // Laba Kotor (Revenue - HPP)
+      const hppResult = await pool.query(`
+        SELECT COALESCE(SUM(ii.quantity * p.cost_price), 0) as hpp
+        FROM invoice_items ii
+        JOIN products p ON ii.product_id = p.id
+        JOIN sales_invoices si ON ii.invoice_id = si.id
+        WHERE si.status NOT IN ('Batal', 'Cancel', 'Dibatalkan')
+      `);
+      const hpp = parseFloat(hppResult.rows[0]?.hpp || 0);
+      grossProfit = revenue - hpp;
 
-    // Jumlah invoice belum lunas (untuk badge piutang)
-    const unpaidCountResult = await pool.query("SELECT COUNT(*) as count FROM sales_invoices WHERE status NOT IN ('Lunas', 'Batal', 'Cancel', 'Dibatalkan')");
-    const unpaidCount = parseInt(unpaidCountResult.rows[0].count || 0);
+      // Jumlah invoice belum lunas (untuk badge piutang)
+      const unpaidCountResult = await pool.query("SELECT COUNT(*) as count FROM sales_invoices WHERE status NOT IN ('Lunas', 'Batal', 'Cancel', 'Dibatalkan')");
+      unpaidCount = parseInt(unpaidCountResult.rows[0]?.count || 0);
+    }
 
-    res.json({
-      revenue,
-      receivables,
-      payables,
+    let ordersToday = 0;
+    if (canSeeOrders) {
+      const today = new Date().toISOString().split('T')[0];
+      const ordersTodayResult = await pool.query("SELECT COUNT(*) as count FROM sales_invoices WHERE DATE(date) = ? AND status NOT IN ('Batal', 'Cancel', 'Dibatalkan')", [today]);
+      ordersToday = parseInt(ordersTodayResult.rows[0]?.count || 0);
+    }
+
+    let customerCount = 0;
+    if (canSeeCustomers) {
+      const customersResult = await pool.query('SELECT COUNT(*) as count FROM customers');
+      customerCount = parseInt(customersResult.rows[0]?.count || 0);
+    }
+
+    let productCount = 0;
+    if (canSeeProducts) {
+      const productsResult = await pool.query('SELECT COUNT(*) as count FROM products WHERE (is_active = 1 OR is_active IS NULL)');
+      productCount = parseInt(productsResult.rows[0]?.count || 0);
+    }
+
+    // Bangun response sesuai peran (A7: dashboard per role)
+    const responseData = {
       lowStockCount: lowStockProducts.length,
       lowStockProducts,
-      grossProfit,
-      ordersToday,
-      customerCount,
-      productCount,
-      unpaidCount
-    });
+    };
+
+    if (canSeeFinance) {
+      responseData.revenue = revenue;
+      responseData.receivables = receivables;
+      responseData.payables = payables;
+      responseData.grossProfit = grossProfit;
+      responseData.unpaidCount = unpaidCount;
+    }
+
+    if (canSeeOrders) {
+      responseData.ordersToday = ordersToday;
+    }
+
+    if (canSeeCustomers) {
+      responseData.customerCount = customerCount;
+    }
+
+    if (canSeeProducts) {
+      responseData.productCount = productCount;
+    }
+
+    res.json(responseData);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.get('/api/dashboard/sales-trend', authenticateToken, async (req, res) => {
+app.get('/api/dashboard/sales-trend', authenticateToken, authorizeRoles('admin', 'finance', 'owner'), async (req, res) => {
   const days = parseInt(req.query.days) || 7;
   try {
     const query = `
@@ -1005,7 +1035,7 @@ app.get('/api/dashboard/sales-trend', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/dashboard/sales-composition', authenticateToken, async (req, res) => {
+app.get('/api/dashboard/sales-composition', authenticateToken, authorizeRoles('admin', 'finance', 'owner'), async (req, res) => {
   const days = parseInt(req.query.days) || 30;
   try {
     // MySQL: compute total first, then calculate percentages
@@ -1040,7 +1070,7 @@ app.get('/api/dashboard/sales-composition', authenticateToken, async (req, res) 
 // --- Products Routes ---
 app.get('/api/products', authenticateToken, async (req, res) => {
   try {
-    const { customer_id, page, limit: limitQ, q, search, category, stock_status, paginate, all } = req.query;
+    const { customer_id, page, limit: limitQ, q, search, category, stock_status, status, paginate, all } = req.query;
     const isPaginated = (page !== undefined || paginate === 'true') && all !== 'true' && limitQ !== 'all';
 
     const whereConditions = [];
@@ -1062,6 +1092,16 @@ app.get('/api/products', authenticateToken, async (req, res) => {
       whereConditions.push('p.stock <= p.min_stock');
     } else if (stock_status === 'safe') {
       whereConditions.push('p.stock > p.min_stock');
+    }
+
+    // A2.2 Filter status: active (default), inactive, all
+    if (status === 'inactive') {
+      whereConditions.push('p.is_active = 0');
+    } else if (status === 'all') {
+      // Tidak ada filter status
+    } else {
+      // Default: hanya produk aktif
+      whereConditions.push('(p.is_active = 1 OR p.is_active IS NULL)');
     }
 
     const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
@@ -1096,7 +1136,13 @@ app.get('/api/products', authenticateToken, async (req, res) => {
             CASE WHEN pi.harga IS NOT NULL THEN 'pricelist' ELSE 'master' END AS sumber_harga,
             pl.id AS pricelist_id,
             pl.nama AS pricelist_nama,
-            pl.kode AS pricelist_kode
+            pl.kode AS pricelist_kode,
+            (
+              EXISTS(SELECT 1 FROM invoice_items ii WHERE ii.product_id = p.id) OR
+              EXISTS(SELECT 1 FROM purchase_order_items poi WHERE poi.product_id = p.id) OR
+              EXISTS(SELECT 1 FROM proforma_items pfi WHERE pfi.product_id = p.id)
+            ) AS has_transactions,
+            EXISTS(SELECT 1 FROM pricelist_items pli WHERE pli.product_id = p.id) AS has_pricelists
           FROM products p 
           LEFT JOIN product_categories c ON p.category_id = c.id 
           LEFT JOIN product_units u ON p.unit_id = u.id
@@ -1119,7 +1165,13 @@ app.get('/api/products', authenticateToken, async (req, res) => {
             'master' AS sumber_harga,
             NULL AS pricelist_id,
             NULL AS pricelist_nama,
-            NULL AS pricelist_kode
+            NULL AS pricelist_kode,
+            (
+              EXISTS(SELECT 1 FROM invoice_items ii WHERE ii.product_id = p.id) OR
+              EXISTS(SELECT 1 FROM purchase_order_items poi WHERE poi.product_id = p.id) OR
+              EXISTS(SELECT 1 FROM proforma_items pfi WHERE pfi.product_id = p.id)
+            ) AS has_transactions,
+            EXISTS(SELECT 1 FROM pricelist_items pli WHERE pli.product_id = p.id) AS has_pricelists
           FROM products p 
           LEFT JOIN product_categories c ON p.category_id = c.id 
           LEFT JOIN product_units u ON p.unit_id = u.id
@@ -1158,7 +1210,13 @@ app.get('/api/products', authenticateToken, async (req, res) => {
           CASE WHEN pi.harga IS NOT NULL THEN 'pricelist' ELSE 'master' END AS sumber_harga,
           pl.id AS pricelist_id,
           pl.nama AS pricelist_nama,
-          pl.kode AS pricelist_kode
+          pl.kode AS pricelist_kode,
+          (
+            EXISTS(SELECT 1 FROM invoice_items ii WHERE ii.product_id = p.id) OR
+            EXISTS(SELECT 1 FROM purchase_order_items poi WHERE poi.product_id = p.id) OR
+            EXISTS(SELECT 1 FROM proforma_items pfi WHERE pfi.product_id = p.id)
+          ) AS has_transactions,
+          EXISTS(SELECT 1 FROM pricelist_items pli WHERE pli.product_id = p.id) AS has_pricelists
         FROM products p 
         LEFT JOIN product_categories c ON p.category_id = c.id 
         LEFT JOIN product_units u ON p.unit_id = u.id
@@ -1179,7 +1237,13 @@ app.get('/api/products', authenticateToken, async (req, res) => {
           'master' AS sumber_harga,
           NULL AS pricelist_id,
           NULL AS pricelist_nama,
-          NULL AS pricelist_kode
+          NULL AS pricelist_kode,
+          (
+            EXISTS(SELECT 1 FROM invoice_items ii WHERE ii.product_id = p.id) OR
+            EXISTS(SELECT 1 FROM purchase_order_items poi WHERE poi.product_id = p.id) OR
+            EXISTS(SELECT 1 FROM proforma_items pfi WHERE pfi.product_id = p.id)
+          ) AS has_transactions,
+          EXISTS(SELECT 1 FROM pricelist_items pli WHERE pli.product_id = p.id) AS has_pricelists
         FROM products p 
         LEFT JOIN product_categories c ON p.category_id = c.id 
         LEFT JOIN product_units u ON p.unit_id = u.id
@@ -1244,13 +1308,43 @@ app.put('/api/products/:id', authenticateToken, authorizeRoles('admin', 'gudang'
 
 app.delete('/api/products/:id', authenticateToken, authorizeRoles('admin', 'gudang'), async (req, res) => {
   const { id } = req.params;
-  const deleteQuery = 'DELETE FROM products WHERE id = $1';
   try {
-    const result = await pool.query(deleteQuery, [id]);
+    // A2.1: Proteksi delete - periksa riwayat transaksi
+    const invCheck = await pool.query('SELECT 1 FROM invoice_items WHERE product_id = ? LIMIT 1', [id]);
+    const poCheck = await pool.query('SELECT 1 FROM purchase_order_items WHERE product_id = ? LIMIT 1', [id]);
+    const profCheck = await pool.query('SELECT 1 FROM proforma_items WHERE product_id = ? LIMIT 1', [id]);
+
+    if ((invCheck.rows && invCheck.rows.length > 0) || (poCheck.rows && poCheck.rows.length > 0) || (profCheck.rows && profCheck.rows.length > 0)) {
+      return res.status(400).json({ error: 'Produk sudah memiliki riwayat transaksi, gunakan Nonaktifkan' });
+    }
+
+    // Jika produk terdaftar di Special Price (pricelist), hapus baris harga tersebut
+    await pool.query('DELETE FROM pricelist_items WHERE product_id = ?', [id]);
+
+    const result = await pool.query('DELETE FROM products WHERE id = ?', [id]);
     if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Produk tidak ditemukan' });
     }
     res.json({ success: true, message: 'Produk berhasil dihapus' });
+  } catch (err) {
+    if (err.code === 'ER_ROW_IS_REFERENCED_2' || err.errno === 1451) {
+      return res.status(400).json({ error: 'Produk sudah memiliki riwayat transaksi, gunakan Nonaktifkan' });
+    }
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// A2.2: Nonaktifkan / Aktifkan produk
+app.patch('/api/products/:id/status', authenticateToken, authorizeRoles('admin', 'gudang'), async (req, res) => {
+  const { id } = req.params;
+  const { is_active } = req.body;
+  try {
+    const activeVal = (is_active === 1 || is_active === true || is_active === '1') ? 1 : 0;
+    const result = await pool.query('UPDATE products SET is_active = ? WHERE id = ?', [activeVal, id]);
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Produk tidak ditemukan' });
+    }
+    res.json({ success: true, is_active: activeVal, message: `Produk berhasil ${activeVal ? 'diaktifkan' : 'dinonaktifkan'}` });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -3000,7 +3094,7 @@ app.delete('/api/finance/receivables/:id', authenticateToken, authorizeRoles('ad
     if (!inv.is_outstanding_import || itemCount > 0) {
       await client.query('ROLLBACK');
       return res.status(403).json({
-        error: 'Akses ditolak: Hanya invoice yang berasal dari Input/Import Outstanding yang dapat dihapus.'
+        error: 'Akses ditolak: Hanya invoice yang berasal dari Input/Import Outstanding yang dapat dihapus. Piutang dari transaksi penjualan tidak dapat dihapus.'
       });
     }
 

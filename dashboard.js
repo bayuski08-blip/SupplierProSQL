@@ -4274,7 +4274,6 @@ async function init() {
     // Populate dropdowns and fetch role-permitted data from DB (A7: eliminate 403 storm)
     await populateMasterDropdowns();
 
-    const loggedRole = (localStorage.getItem('role') || 'kasir').toLowerCase();
     const fetchPromises = [fetchDashboardSummary()];
 
     if (loggedRole === 'admin') {
@@ -10930,9 +10929,67 @@ function parsePricelistCsvText(text) {
     plCsvParsedRows = Array.from(dedupMap.values());
 
     if (previewBody) previewBody.innerHTML = htmlRows.join('');
-    const target = document.getElementById('bulk-percent-target')?.value || 'all';
-    const pct = parseFloat(document.getElementById('bulk-percent-value')?.value || '90');
-    const round = parseInt(document.getElementById('bulk-percent-round')?.value || '100', 10);
+    if (validBadge) validBadge.textContent = `${validCount} baris valid (${plCsvParsedRows.length} produk unik)`;
+    if (invalidBadge) invalidBadge.textContent = `${invalidCount} baris error`;
+
+    const previewContainer = document.getElementById('pl-csv-preview-container');
+    if (previewContainer) previewContainer.style.display = 'block';
+
+    if (submitBtn) {
+        submitBtn.disabled = plCsvParsedRows.length === 0;
+        submitBtn.innerHTML = `<i data-lucide="check-circle"></i> Simpan ${plCsvParsedRows.length} Item Valid`;
+    }
+    if (window.lucide) lucide.createIcons();
+}
+
+async function submitPricelistCsvItems() {
+    const id = activePricelistId;
+    if (!id || plCsvParsedRows.length === 0) return;
+
+    const items = plCsvParsedRows.map(r => ({ product_id: r.product_id, harga: r.harga }));
+
+    try {
+        const res = await fetch(`/api/pricelists/${id}/items`, {
+            method: 'PUT',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ items })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            closeModal('modal-import-pricelist-csv');
+            showToast(`${items.length} produk berhasil diimpor ke Special Price!`, 'success');
+            plCsvParsedRows = [];
+            await openPricelistDetail(id);
+            await fetchPricelists();
+        } else {
+            showToast(data.error || 'Gagal menyimpan item import', 'error');
+        }
+    } catch (err) {
+        showToast('Gagal mengimpor CSV', 'error');
+    }
+}
+
+// ── Modal Bulk Percent ─────────────────────────────────────────────────────
+function openPricelistBulkPercentModal() {
+    const id = activePricelistId;
+    if (!id) return;
+    const checked = document.querySelectorAll('.pl-item-chk:checked');
+    const targetSelect = document.getElementById('bulk-percent-target');
+    if (targetSelect) {
+        targetSelect.value = checked.length > 0 ? 'selected' : 'all';
+    }
+    const valInp = document.getElementById('bulk-percent-value');
+    if (valInp && !valInp.value) valInp.value = '90';
+    openModal('modal-pricelist-bulk-percent');
+}
+
+async function applyPricelistBulkPercent() {
+    const id = activePricelistId;
+    if (!id || !pricelistDetailData?.items?.length) return;
+
+    if (validBadge) validBadge.textContent = `${validCount} baris valid (${plCsvParsedRows.length} produk unik)`;
+    if (invalidBadge) invalidBadge.textContent = `${invalidCount} baris error`;
+
 
     if (isNaN(pct) || pct <= 0) {
         showToast('Masukkan persentase yang valid (> 0)', 'warning');

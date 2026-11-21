@@ -632,14 +632,16 @@ const PAGE_TITLES = {
     roles: { title: 'Otoritas Akses', subtitle: 'Kelola hak akses dan peran staff' },
     'master-data': { title: 'Master Data', subtitle: 'Kelola kategori, satuan, dan tipe pembayaran' },
     pricelists: { title: 'Special Price', subtitle: 'Kelola daftar harga khusus untuk pelanggan' },
+    returns: { title: 'Daftar Retur', subtitle: 'Riwayat retur penjualan dan pembelian' },
+    'stock-moves': { title: 'Stock Move', subtitle: 'Monitoring pergerakan fisik stok' },
 };
 
 // ---------- Role Based Access Control (RBAC) ----------
 const ROLE_PERMISSIONS = {
-    admin: ['dashboard', 'pos', 'products', 'customers', 'vendors', 'purchases', 'proformas', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'reports', 'settings', 'roles', 'master-data', 'customerfee', 'pricelists'],
-    finance: ['dashboard', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'reports'],
-    gudang: ['dashboard', 'products', 'purchases', 'vendors'],
-    kasir: ['dashboard', 'pos', 'customers', 'proformas', 'invoices', 'piutang']
+    admin: ['dashboard', 'pos', 'products', 'customers', 'vendors', 'purchases', 'proformas', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'reports', 'settings', 'roles', 'master-data', 'customerfee', 'pricelists', 'returns', 'stock-moves'],
+    finance: ['dashboard', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'reports', 'returns'],
+    gudang: ['dashboard', 'products', 'purchases', 'vendors', 'stock-moves', 'returns'],
+    kasir: ['dashboard', 'pos', 'customers', 'proformas', 'invoices', 'piutang', 'returns']
 };
 
 function applyRoleRestrictions() {
@@ -663,6 +665,34 @@ function applyRoleRestrictions() {
     if (btnImportInv) btnImportInv.style.display = canImportInvoice ? '' : 'none';
     const btnImportPiutang = document.getElementById('btn-import-piutang');
     if (btnImportPiutang) btnImportPiutang.style.display = canImportInvoice ? '' : 'none';
+
+    // Returns tabs & financial visibility:
+    const returnsSalesTabBtn = document.getElementById('tab-btn-returns-sales');
+    const returnsPurchasesTabBtn = document.getElementById('tab-btn-returns-purchases');
+    if (returnsSalesTabBtn && returnsPurchasesTabBtn) {
+        if (role === 'gudang') {
+            returnsSalesTabBtn.style.display = 'none';
+            returnsPurchasesTabBtn.style.display = '';
+            if (typeof switchReturnsTab === 'function') switchReturnsTab('purchases');
+        } else if (role === 'kasir') {
+            returnsPurchasesTabBtn.style.display = 'none';
+            returnsSalesTabBtn.style.display = '';
+            if (typeof switchReturnsTab === 'function') switchReturnsTab('sales');
+        } else {
+            returnsSalesTabBtn.style.display = '';
+            returnsPurchasesTabBtn.style.display = '';
+        }
+    }
+
+    const canSeeFinance = role === 'admin' || role === 'finance' || role === 'owner';
+    document.querySelectorAll('.th-returns-finance, .th-sales-return-finance, .th-purchase-return-finance, .th-ret-detail-finance').forEach(el => {
+        el.style.display = canSeeFinance ? '' : 'none';
+    });
+
+    const recentStockCard = document.getElementById('dash-card-recent-stock-moves');
+    if (recentStockCard) {
+        recentStockCard.style.display = (role === 'admin' || role === 'gudang') ? '' : 'none';
+    }
 
     // Also hide nav groups if all their items are hidden
     document.querySelectorAll('.nav-group').forEach(group => {
@@ -759,6 +789,12 @@ function navigateTo(page) {
     if (page === 'proformas') {
         fetchProformas(1);
     }
+    if (page === 'returns') {
+        if (typeof loadReturnsPage === 'function') loadReturnsPage();
+    }
+    if (page === 'stock-moves') {
+        if (typeof loadStockMovesPage === 'function') loadStockMovesPage(1);
+    }
 
     // Close mobile sidebar
     document.getElementById('sidebar').classList.remove('open');
@@ -783,9 +819,36 @@ document.getElementById('sidebar-overlay').addEventListener('click', () => {
     document.getElementById('sidebar-overlay').classList.remove('active');
 });
 
-// ---------- Modal Helpers ----------
+// ---------- Modal Stack Management (B1, B2, B3) ----------
+const openModalsStack = [];
+
 function openModal(id) {
-    document.getElementById(id).classList.add('active');
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    // Remove if already in stack, push to top
+    const idx = openModalsStack.indexOf(id);
+    if (idx !== -1) {
+        openModalsStack.splice(idx, 1);
+    }
+    openModalsStack.push(id);
+
+    // Dynamic z-index and pointer-events
+    openModalsStack.forEach((modalId, i) => {
+        const m = document.getElementById(modalId);
+        if (m) {
+            m.style.zIndex = 1000 + ((i + 1) * 20);
+            if (i === openModalsStack.length - 1) {
+                m.style.pointerEvents = 'auto';
+            } else {
+                m.style.pointerEvents = 'none';
+            }
+        }
+    });
+
+    document.body.classList.add('modal-open');
+    el.classList.add('active');
+
     if (id === 'modal-add-product') {
         const brandEl = document.getElementById('add-product-brand');
         const skuEl = document.getElementById('add-product-sku');
@@ -827,14 +890,40 @@ function openModal(id) {
 }
 
 function closeModal(id) {
-    document.getElementById(id).classList.remove('active');
+    const el = document.getElementById(id);
+    if (el) {
+        el.classList.remove('active');
+        el.style.zIndex = '';
+        el.style.pointerEvents = '';
+    }
+
+    const idx = openModalsStack.indexOf(id);
+    if (idx !== -1) {
+        openModalsStack.splice(idx, 1);
+    }
+
+    if (openModalsStack.length > 0) {
+        document.body.classList.add('modal-open');
+        const topModal = document.getElementById(openModalsStack[openModalsStack.length - 1]);
+        if (topModal) topModal.style.pointerEvents = 'auto';
+    } else {
+        document.body.classList.remove('modal-open');
+    }
 }
+
+// Global Esc key listener: closes topmost modal
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && openModalsStack.length > 0) {
+        const topModalId = openModalsStack[openModalsStack.length - 1];
+        closeModal(topModalId);
+    }
+});
 
 // Close modal on overlay click
 document.querySelectorAll('.modal-overlay').forEach(overlay => {
     overlay.addEventListener('click', (e) => {
         if (e.target === overlay) {
-            overlay.classList.remove('active');
+            closeModal(overlay.id);
         }
     });
 });
@@ -981,6 +1070,7 @@ function renderDashboard() {
     renderSummaryCards();
     renderRecentTransactions();
     renderLowStock();
+    renderRecentStockMoves();
 }
 
 function renderSummaryCards() {
@@ -1203,6 +1293,53 @@ function renderLowStock() {
 
     if (lowStock.length === 0) {
         tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--gray-400); padding:2rem;">Semua stok aman</td></tr>';
+    }
+}
+
+async function renderRecentStockMoves() {
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    const cardEl = document.getElementById('dash-card-recent-stock-moves');
+    if (!cardEl) return;
+
+    if (role !== 'admin' && role !== 'gudang') {
+        cardEl.style.display = 'none';
+        return;
+    }
+    cardEl.style.display = '';
+
+    const tbody = document.getElementById('recent-stock-moves-body');
+    if (!tbody) return;
+
+    try {
+        const res = await fetch('/api/stock-moves?page=1&limit=10', { headers: getAuthHeaders() });
+        if (!res.ok) return;
+        const json = await res.json();
+        const moves = json.data || [];
+        if (moves.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--gray-400); padding:1rem;">Belum ada pergerakan stok.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = moves.map(m => {
+            const dateStr = (m.tanggal || '').split('T')[0];
+            const moveType = m.tipe || '';
+            const typeLabel = typeof formatMoveType === 'function' ? formatMoveType(moveType) : moveType;
+            const inQty = parseFloat(m.qtyMasuk || 0);
+            const outQty = parseFloat(m.qtyKeluar || 0);
+            const qtyDisplay = inQty > 0 ? `<span style="color:var(--emerald-600); font-weight:600;">+${inQty}</span>` : `<span style="color:var(--rose-600); font-weight:600;">-${outQty}</span>`;
+            return `
+                <tr>
+                    <td style="font-size:0.8rem; color:var(--gray-500);">${dateStr}</td>
+                    <td style="font-weight:500;">${m.productName || '-'}<br><small style="color:var(--gray-400);">${m.sku || ''}</small></td>
+                    <td><span class="badge-status ${moveType}">${typeLabel}</span></td>
+                    <td style="text-align:right;">${qtyDisplay}</td>
+                    <td style="text-align:right; font-weight:600;">${parseFloat(m.stokSesudah || 0)}</td>
+                </tr>
+            `;
+        }).join('');
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    } catch (e) {
+        console.error('Failed to render recent stock moves card', e);
     }
 }
 
@@ -5221,9 +5358,12 @@ async function fetchPurchases(page) {
 
         const tbody = document.getElementById('purchases-body');
         if (tbody) {
-            tbody.innerHTML = rows.map(p => `
+            tbody.innerHTML = rows.map(p => {
+                const retAmount = parseFloat(p.return_amount || p.returnAmount || 0);
+                const retBadge = retAmount > 0 ? `<span class="badge-retur-indicator" title="Total Retur: ${rp(retAmount)}">Ada Retur</span>` : '';
+                return `
             <tr>
-                <td style="font-weight:600; color: var(--blue-600);">${p.id}</td>
+                <td style="font-weight:600; color: var(--blue-600);">${p.id}${retBadge ? ' ' + retBadge : ''}</td>
                 <td>${p.date}</td>
                 <td>${p.vendor}</td>
                 <td style="font-weight:700;">${rp(p.total)}</td>
@@ -5237,11 +5377,15 @@ async function fetchPurchases(page) {
                     <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem;" title="Edit PO" onclick="openEditPurchaseModal('${p.id}')">
                         <i data-lucide="edit-2" style="width: 14px; height: 14px; margin: 0;"></i>
                     </button>
+                    ${p.status.toLowerCase() !== 'batal' ? `<button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem; color: var(--amber-600);" title="Retur Pembelian" onclick="openPurchaseReturnModal('${p.id}')">
+                        <i data-lucide="rotate-ccw" style="width: 14px; height: 14px; margin: 0;"></i>
+                    </button>` : ''}
                     ${p.status.toLowerCase() !== 'batal' ? `<button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; color: var(--rose-500);" title="Batalkan PO" onclick="cancelPurchase('${p.id}')">
                         <i data-lucide="x-circle" style="width: 14px; height: 14px; margin: 0;"></i>
                     </button>` : ''}
                 </td>
-            </tr>`).join('');
+            </tr>`;
+            }).join('');
         }
 
         renderPagination({
@@ -5813,6 +5957,8 @@ window.updateEditPurchaseItemPrice = (index, val) => {
     renderEditPurchaseItems();
 };
 
+let originalEditPurchaseItems = [];
+
 // FIX: open edit-purchase modal and load existing items
 async function openEditPurchaseModal(id) {
     const po = PURCHASES.find(x => x.id === id);
@@ -5849,6 +5995,7 @@ async function openEditPurchaseModal(id) {
 
     // Reset items and show loading
     editPurchaseItems = [];
+    originalEditPurchaseItems = [];
     const container = document.getElementById('edit-purchase-items-container');
     if (container) container.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 1rem; color: var(--gray-400);">Memuat data item...</td></tr>';
 
@@ -5856,6 +6003,7 @@ async function openEditPurchaseModal(id) {
         const res = await fetch(`/api/purchases/${encodeURIComponent(id)}/items?_t=${Date.now()}`, { headers: getAuthHeaders() });
         if (res.ok) {
             editPurchaseItems = await res.json();
+            originalEditPurchaseItems = JSON.parse(JSON.stringify(editPurchaseItems));
         } else {
             console.warn('Failed to load PO items, status:', res.status);
         }
@@ -5868,7 +6016,7 @@ async function openEditPurchaseModal(id) {
     openModal('modal-edit-purchase');
 }
 
-async function savePurchase(isEdit) {
+async function savePurchase(isEdit, bypassSoftLock = false, correctionReason = null) {
     const id = isEdit ? document.getElementById('edit-purchase-id').value : null;
     const prefix = isEdit ? 'edit' : 'add';
 
@@ -5882,6 +6030,29 @@ async function savePurchase(isEdit) {
     if (itemsToSave.length === 0) {
         showToast('Tambahkan minimal satu item produk!', 'warning');
         return;
+    }
+
+    // Soft-Lock Check (B3) for Edit Purchase
+    if (isEdit && !bypassSoftLock && Array.isArray(originalEditPurchaseItems) && originalEditPurchaseItems.length > 0) {
+        let isQtyReducedOrItemRemoved = false;
+        for (const orig of originalEditPurchaseItems) {
+            const cur = editPurchaseItems.find(i => String(i.product_id) === String(orig.product_id));
+            if (!cur) {
+                isQtyReducedOrItemRemoved = true;
+                break;
+            }
+            const origQty = parseFloat(orig.quantity || orig.qty || 0);
+            const curQty = parseFloat(cur.quantity || cur.qty || 0);
+            if (curQty < origQty) {
+                isQtyReducedOrItemRemoved = true;
+                break;
+            }
+        }
+
+        if (isQtyReducedOrItemRemoved) {
+            promptSoftLockModal('purchase');
+            return;
+        }
     }
 
     const vendorVal = document.getElementById(`${prefix}-purchase-vendor`)?.value || '';
@@ -5911,6 +6082,10 @@ async function savePurchase(isEdit) {
         due_date: dueDate,
         items: itemsToSave
     };
+
+    if (correctionReason) {
+        payload.correction_reason = correctionReason;
+    }
 
     const url = isEdit ? `/api/purchases/${id}` : '/api/purchases';
     const method = isEdit ? 'PUT' : 'POST';
@@ -6006,9 +6181,11 @@ async function fetchInvoices(page) {
                 const sisa = inv.total - inv.paid;
                 const isOverdue = sisa > 0 && inv.dueDate && inv.dueDate < today;
                 const overdueBadge = isOverdue ? '<span class="badge-status overdue" style="margin-left:4px; font-size:0.7rem; padding:2px 7px;">Lewat JT</span>' : '';
+                const retAmount = parseFloat(inv.return_amount || inv.returnAmount || 0);
+                const retBadge = retAmount > 0 ? `<span class="badge-retur-indicator" title="Total Retur: ${rp(retAmount)}">Ada Retur</span>` : '';
                 return `
                 <tr>
-                    <td style="font-weight:600; color: var(--blue-600);">${inv.id}</td>
+                    <td style="font-weight:600; color: var(--blue-600);">${inv.id}${retBadge ? ' ' + retBadge : ''}</td>
                     <td>${inv.date}</td>
                     <td style="font-weight:600;">${inv.customer || '-'}${overdueBadge}</td>
                     <td style="font-weight:700;">${rp(inv.total)}</td>
@@ -6344,6 +6521,8 @@ window.updateEditInvoiceItemFeeNotes = (index, val) => {
     editInvoiceItems[index].fee_notes = val || '';
 };
 
+let originalEditInvoiceItems = [];
+
 async function openEditInvoiceModal(id) {
     const inv = INVOICES.find(x => x.id === id);
     if (!inv) return;
@@ -6419,6 +6598,7 @@ async function openEditInvoiceModal(id) {
 
     // Reset items and show loading
     editInvoiceItems = [];
+    originalEditInvoiceItems = [];
     const container = document.getElementById('edit-invoice-items-container');
     if (container) container.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 1rem; color: var(--gray-400);">Memuat data item...</td></tr>';
 
@@ -6426,6 +6606,7 @@ async function openEditInvoiceModal(id) {
         const res = await fetch(`/api/invoices/${encodeURIComponent(id)}/items`, { headers: getAuthHeaders() });
         if (res.ok) {
             editInvoiceItems = await res.json();
+            originalEditInvoiceItems = JSON.parse(JSON.stringify(editInvoiceItems));
         } else {
             console.warn('Failed to load invoice items, status:', res.status);
         }
@@ -6441,9 +6622,32 @@ async function openEditInvoiceModal(id) {
 
 let pendingSaveInvoicePayload = null;
 
-async function saveInvoiceEdits() {
+async function saveInvoiceEdits(bypassSoftLock = false, correctionReason = null) {
     const id = document.getElementById('edit-invoice-id').value;
     if (!id) return;
+
+    // Soft-Lock Check (B3) for Edit Invoice
+    if (!bypassSoftLock && Array.isArray(originalEditInvoiceItems) && originalEditInvoiceItems.length > 0) {
+        let isQtyReducedOrItemRemoved = false;
+        for (const orig of originalEditInvoiceItems) {
+            const cur = editInvoiceItems.find(i => String(i.product_id) === String(orig.product_id));
+            if (!cur) {
+                isQtyReducedOrItemRemoved = true;
+                break;
+            }
+            const origQty = parseFloat(orig.quantity || orig.qty || 0);
+            const curQty = parseFloat(cur.quantity || cur.qty || 0);
+            if (curQty < origQty) {
+                isQtyReducedOrItemRemoved = true;
+                break;
+            }
+        }
+
+        if (isQtyReducedOrItemRemoved) {
+            promptSoftLockModal('invoice');
+            return;
+        }
+    }
 
     const date = document.getElementById('edit-invoice-date').value;
     const statusVal = document.getElementById('edit-invoice-status').value;  // 'lunas' | 'belum' | 'sebagian'
@@ -6481,7 +6685,8 @@ async function saveInvoiceEdits() {
         paid_amount: paidAmount,
         payment_type_id: paymentTypeId || (inv ? inv.paymentTypeId : 'PT-1'),
         due_date: newDueDate || undefined,
-        items: editInvoiceItems
+        items: editInvoiceItems,
+        correction_reason: correctionReason || undefined
     };
 
     // Jika invoice sudah ada cicilan aktif, tampilkan soft-lock modal peringatan
@@ -10364,3 +10569,918 @@ async function executeDeleteOutstandingInvoice() {
         }
     }
 }
+
+// ==============================================================================
+// BATCH B: RETUR & STOCK MOVE MODULE (B1, B2, B3, B4.1, B4.2)
+// ==============================================================================
+
+// ---------- B3. Soft-Lock Management ----------
+let pendingSoftLockType = null;
+
+function promptSoftLockModal(targetType) {
+    pendingSoftLockType = targetType;
+    const targetInput = document.getElementById('softlock-target-type');
+    if (targetInput) targetInput.value = targetType;
+
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    const isAdmin = role === 'admin';
+    const adminSection = document.getElementById('softlock-admin-koreksi-section');
+    const btnKoreksi = document.getElementById('btn-softlock-continue-koreksi');
+    const reasonInput = document.getElementById('softlock-koreksi-reason');
+
+    if (adminSection) adminSection.style.display = isAdmin ? 'block' : 'none';
+    if (btnKoreksi) btnKoreksi.style.display = isAdmin ? 'inline-block' : 'none';
+    if (reasonInput) reasonInput.value = '';
+
+    openModal('modal-softlock-warning');
+}
+
+function handleSoftLockOpenReturn() {
+    closeModal('modal-softlock-warning');
+    if (pendingSoftLockType === 'invoice') {
+        openSalesReturnFromEditInvoice();
+    } else if (pendingSoftLockType === 'purchase') {
+        openPurchaseReturnFromEditPurchase();
+    }
+}
+
+function handleSoftLockContinueKoreksi() {
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    if (role !== 'admin') {
+        showToast('Hanya admin yang berwenang melanjutkan koreksi salah input!', 'error');
+        return;
+    }
+    const reasonInput = document.getElementById('softlock-koreksi-reason');
+    const reason = (reasonInput?.value || '').trim();
+    if (reason.length < 10) {
+        showToast('Alasan koreksi wajib diisi minimal 10 karakter!', 'warning');
+        if (reasonInput) reasonInput.focus();
+        return;
+    }
+
+    closeModal('modal-softlock-warning');
+    if (pendingSoftLockType === 'invoice') {
+        saveInvoiceEdits(true, reason);
+    } else if (pendingSoftLockType === 'purchase') {
+        savePurchase(true, true, reason);
+    }
+}
+
+// ---------- B1. Retur Penjualan ----------
+let currentSalesReturnInvoice = null;
+let currentSalesReturnItems = [];
+
+async function openSalesReturnFromEditInvoice() {
+    const invId = document.getElementById('edit-invoice-id')?.value;
+    if (!invId) return;
+    await openSalesReturnModal(invId);
+}
+
+async function openSalesReturnModal(invId) {
+    try {
+        const res = await fetch(`/api/invoices/${encodeURIComponent(invId)}/returns-form`, { headers: getAuthHeaders() });
+        if (!res.ok) {
+            showToast('Gagal memuat data retur invoice', 'error');
+            return;
+        }
+        const data = await res.json();
+        currentSalesReturnInvoice = data.invoice;
+        currentSalesReturnItems = data.items || [];
+
+        // Check if invoice cancelled
+        if ((currentSalesReturnInvoice.status || '').toLowerCase() === 'cancel' || (currentSalesReturnInvoice.status || '').toLowerCase() === 'batal') {
+            showToast('Invoice yang dibatalkan tidak dapat diretur.', 'warning');
+            return;
+        }
+
+        // Fill header info
+        document.getElementById('sales-return-invoice-id').value = currentSalesReturnInvoice.id;
+        document.getElementById('sales-return-inv-number').textContent = currentSalesReturnInvoice.id;
+        document.getElementById('sales-return-inv-date').textContent = (currentSalesReturnInvoice.date || '').split('T')[0];
+        document.getElementById('sales-return-customer').textContent = currentSalesReturnInvoice.customer_name || '-';
+        document.getElementById('sales-return-sisa-piutang').textContent = rp(data.remainingDebt || 0);
+
+        document.getElementById('sales-return-date').value = new Date().toISOString().split('T')[0];
+        document.getElementById('sales-return-reason').value = '';
+
+        // Render items table
+        const tbody = document.getElementById('sales-return-items-body');
+        const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+        const canSeeFinance = role === 'admin' || role === 'finance' || role === 'owner';
+
+        if (currentSalesReturnItems.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:1rem; color:var(--gray-400);">Tidak ada item pada invoice ini.</td></tr>';
+        } else {
+            tbody.innerHTML = currentSalesReturnItems.map((item, idx) => {
+                const maxReturn = item.maxReturnable || 0;
+                const isAllReturned = maxReturn <= 0;
+                return `
+                    <tr style="${isAllReturned ? 'opacity: 0.6; background: #fafafa;' : ''}">
+                        <td>
+                            <strong style="color:var(--gray-800);">${item.product_name}</strong>
+                            <div style="font-size:0.75rem; color:var(--gray-400);">${item.product_sku || item.product_id}</div>
+                        </td>
+                        <td style="text-align:right;">${item.invoice_qty}</td>
+                        <td style="text-align:right; color:var(--rose-600);">${item.returned_qty}</td>
+                        <td style="text-align:right; font-weight:600; color:var(--emerald-600);">${maxReturn}</td>
+                        <td style="text-align:right;">
+                            <input type="number" class="form-input sales-ret-qty-input" 
+                                style="width: 80px; text-align:right; padding: 0.25rem 0.4rem; font-size: 0.85rem;"
+                                min="0" max="${maxReturn}" value="0" 
+                                data-idx="${idx}" ${isAllReturned ? 'disabled' : ''}
+                                oninput="updateSalesReturnCalc()">
+                        </td>
+                        <td>
+                            <select class="form-input sales-ret-cond-select" style="padding: 0.25rem 0.4rem; font-size: 0.8rem;" data-idx="${idx}" ${isAllReturned ? 'disabled' : ''}>
+                                <option value="kembali_ke_stok">Kembali ke Stok</option>
+                                <option value="rusak">Rusak / Tidak Kembali</option>
+                            </select>
+                        </td>
+                        <td class="th-sales-return-finance" style="text-align:right; font-weight:600; ${canSeeFinance ? '' : 'display:none;'}">
+                            <span id="sales-ret-item-subtotal-${idx}">Rp 0</span>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        updateSalesReturnCalc();
+        openModal('modal-sales-return');
+    } catch (e) {
+        console.error('Error opening sales return modal', e);
+        showToast('Error membuka form retur', 'error');
+    }
+}
+
+function updateSalesReturnCalc() {
+    if (!currentSalesReturnInvoice || !currentSalesReturnItems) return;
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    const canSeeFinance = role === 'admin' || role === 'finance' || role === 'owner';
+
+    let totalGross = 0;
+    const qtyInputs = document.querySelectorAll('.sales-ret-qty-input');
+    
+    qtyInputs.forEach(input => {
+        const idx = parseInt(input.dataset.idx, 10);
+        const item = currentSalesReturnItems[idx];
+        if (!item) return;
+
+        let val = parseFloat(input.value) || 0;
+        if (val < 0) val = 0;
+        if (val > item.maxReturnable) {
+            val = item.maxReturnable;
+            input.value = val;
+        }
+
+        const price = parseFloat(item.price || 0);
+        const itemGross = val * price;
+        totalGross += itemGross;
+
+        const subtotalEl = document.getElementById(`sales-ret-item-subtotal-${idx}`);
+        if (subtotalEl) subtotalEl.textContent = rp(itemGross);
+    });
+
+    // Cek apakah PPN aktif di pengaturan utama sistem
+    const isPpnEnabled = (typeof currentPpnEnabled !== 'undefined' && currentPpnEnabled === false) ? false : (currentSalesReturnInvoice.ppn_enabled !== false);
+
+    // Proportional discount and tax from original invoice
+    const invSubtotal = parseFloat(currentSalesReturnInvoice.subtotal || 0);
+    const invDiscount = parseFloat(currentSalesReturnInvoice.discount || 0);
+    const invTax = isPpnEnabled ? parseFloat(currentSalesReturnInvoice.tax || 0) : 0;
+
+    const discRatio = invSubtotal > 0 ? (invDiscount / invSubtotal) : 0;
+    const discountPortion = totalGross * discRatio;
+    const afterDisc = totalGross - discountPortion;
+
+    const baseForTax = invSubtotal - invDiscount;
+    const taxRatio = (isPpnEnabled && baseForTax > 0) ? (invTax / baseForTax) : 0;
+    const taxPortion = isPpnEnabled ? (afterDisc * taxRatio) : 0;
+
+    const totalRefund = Math.round(afterDisc + taxPortion);
+    const adjTotal = totalRefund - totalGross;
+
+    const remainingDebt = Math.max(0, parseFloat(currentSalesReturnInvoice.total || 0) - parseFloat(currentSalesReturnInvoice.paid_amount || 0) - parseFloat(currentSalesReturnInvoice.return_amount || 0));
+    const deductedDebt = Math.min(remainingDebt, totalRefund);
+    const depositAmount = Math.max(0, totalRefund - remainingDebt);
+
+    // Update DOM
+    const subtotalEl = document.getElementById('sales-return-sum-subtotal');
+    const adjEl = document.getElementById('sales-return-sum-adj');
+    const totalEl = document.getElementById('sales-return-sum-total');
+    const piutangEl = document.getElementById('sales-return-sum-piutang');
+    const depositEl = document.getElementById('sales-return-sum-deposit');
+    const summaryBox = document.getElementById('sales-return-summary-box');
+
+    if (subtotalEl) subtotalEl.textContent = rp(totalGross);
+    if (adjEl) adjEl.textContent = (adjTotal >= 0 ? '+' : '') + rp(adjTotal);
+    if (totalEl) totalEl.textContent = rp(totalRefund);
+    if (piutangEl) piutangEl.textContent = rp(deductedDebt);
+    if (depositEl) depositEl.textContent = rp(depositAmount);
+
+    if (summaryBox) {
+        summaryBox.style.display = canSeeFinance ? '' : 'none';
+    }
+}
+
+async function submitSalesReturn() {
+    const invId = document.getElementById('sales-return-invoice-id').value;
+    const returnDate = document.getElementById('sales-return-date').value;
+    const reason = (document.getElementById('sales-return-reason').value || '').trim();
+
+    if (!reason) {
+        showToast('Alasan retur wajib diisi!', 'warning');
+        document.getElementById('sales-return-reason').focus();
+        return;
+    }
+
+    const items = [];
+    const qtyInputs = document.querySelectorAll('.sales-ret-qty-input');
+    qtyInputs.forEach(input => {
+        const idx = parseInt(input.dataset.idx, 10);
+        const item = currentSalesReturnItems[idx];
+        const qty = parseFloat(input.value) || 0;
+        if (qty > 0 && item) {
+            const condSelect = document.querySelector(`.sales-ret-cond-select[data-idx="${idx}"]`);
+            const condition = condSelect ? condSelect.value : 'kembali_ke_stok';
+            items.push({
+                product_id: item.product_id,
+                qty: qty,
+                condition: condition
+            });
+        }
+    });
+
+    if (items.length === 0) {
+        showToast('Minimal satu item harus diretur dengan kuantitas > 0!', 'warning');
+        return;
+    }
+
+    const btnSubmit = document.getElementById('btn-submit-sales-return');
+    if (btnSubmit) btnSubmit.disabled = true;
+
+    try {
+        const res = await fetch(`/api/invoices/${encodeURIComponent(invId)}/returns`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+                return_date: returnDate,
+                reason: reason,
+                items: items
+            })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+            closeModal('modal-sales-return');
+            closeModal('modal-edit-invoice');
+            showToast(`Retur penjualan berhasil disimpan! (${data.returnId})`, 'success');
+
+            // Dynamic refresh without page reload
+            await fetchInvoices();
+            await fetchProducts();
+            if (typeof fetchPiutang === 'function') await fetchPiutang();
+            if (currentPage === 'returns') loadReturnsSales(1);
+        } else {
+            showToast('Gagal simpan retur: ' + (data.error || 'Terjadi kesalahan server'), 'error');
+        }
+    } catch (err) {
+        console.error('Error submitting sales return', err);
+        showToast('Terjadi kesalahan koneksi', 'error');
+    } finally {
+        if (btnSubmit) btnSubmit.disabled = false;
+    }
+}
+
+// ---------- B2. Retur Pembelian ----------
+let currentPurchaseReturnPO = null;
+let currentPurchaseReturnItems = [];
+
+async function openPurchaseReturnFromEditPurchase() {
+    const poId = document.getElementById('edit-purchase-id')?.value;
+    if (!poId) return;
+    await openPurchaseReturnModal(poId);
+}
+
+async function openPurchaseReturnModal(poId) {
+    try {
+        const res = await fetch(`/api/purchases/${encodeURIComponent(poId)}/returns-form`, { headers: getAuthHeaders() });
+        if (!res.ok) {
+            showToast('Gagal memuat data retur PO', 'error');
+            return;
+        }
+        const data = await res.json();
+        currentPurchaseReturnPO = data.purchase;
+        currentPurchaseReturnItems = data.items || [];
+
+        // Check if PO cancelled
+        if ((currentPurchaseReturnPO.status || '').toLowerCase() === 'batal' || (currentPurchaseReturnPO.status || '').toLowerCase() === 'cancel') {
+            showToast('PO yang dibatalkan tidak dapat diretur.', 'warning');
+            return;
+        }
+
+        // Fill header info
+        document.getElementById('purchase-return-po-id').value = currentPurchaseReturnPO.id;
+        document.getElementById('purchase-return-po-number').textContent = currentPurchaseReturnPO.id;
+        document.getElementById('purchase-return-po-date').textContent = (currentPurchaseReturnPO.date || '').split('T')[0];
+        document.getElementById('purchase-return-vendor').textContent = currentPurchaseReturnPO.vendor_name || '-';
+        document.getElementById('purchase-return-sisa-hutang').textContent = rp(data.remainingDebt || 0);
+
+        document.getElementById('purchase-return-date').value = new Date().toISOString().split('T')[0];
+        document.getElementById('purchase-return-reason').value = '';
+
+        // Render items table
+        const tbody = document.getElementById('purchase-return-items-body');
+        const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+        const canSeeFinance = role === 'admin' || role === 'finance' || role === 'owner';
+
+        if (currentPurchaseReturnItems.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:1rem; color:var(--gray-400);">Tidak ada item pada PO ini.</td></tr>';
+        } else {
+            tbody.innerHTML = currentPurchaseReturnItems.map((item, idx) => {
+                const maxReturn = item.maxReturnable || 0;
+                const currentStock = parseFloat(item.current_stock || 0);
+                const isAllReturned = maxReturn <= 0;
+                const stockWarning = currentStock < maxReturn ? `<small style="color:var(--rose-600); display:block;">(Stok hanya ${currentStock})</small>` : '';
+                return `
+                    <tr style="${isAllReturned ? 'opacity: 0.6; background: #fafafa;' : ''}">
+                        <td>
+                            <strong style="color:var(--gray-800);">${item.product_name}</strong>
+                            <div style="font-size:0.75rem; color:var(--gray-400);">${item.product_sku || item.product_id}</div>
+                        </td>
+                        <td style="text-align:right;">${item.purchase_qty}</td>
+                        <td style="text-align:right; color:var(--rose-600);">${item.returned_qty}</td>
+                        <td style="text-align:right; font-weight:500;">${currentStock}</td>
+                        <td style="text-align:right; font-weight:600; color:var(--emerald-600);">
+                            ${maxReturn}
+                            ${stockWarning}
+                        </td>
+                        <td style="text-align:right;">
+                            <input type="number" class="form-input purchase-ret-qty-input" 
+                                style="width: 80px; text-align:right; padding: 0.25rem 0.4rem; font-size: 0.85rem;"
+                                min="0" max="${maxReturn}" value="0" 
+                                data-idx="${idx}" ${isAllReturned ? 'disabled' : ''}
+                                oninput="updatePurchaseReturnCalc()">
+                        </td>
+                        <td class="th-purchase-return-finance" style="text-align:right; font-weight:600; ${canSeeFinance ? '' : 'display:none;'}">
+                            <span id="purchase-ret-item-subtotal-${idx}">Rp 0</span>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        updatePurchaseReturnCalc();
+        openModal('modal-purchase-return');
+    } catch (e) {
+        console.error('Error opening purchase return modal', e);
+        showToast('Error membuka form retur pembelian', 'error');
+    }
+}
+
+function updatePurchaseReturnCalc() {
+    if (!currentPurchaseReturnPO || !currentPurchaseReturnItems) return;
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    const canSeeFinance = role === 'admin' || role === 'finance' || role === 'owner';
+
+    // Cek apakah PPN aktif di pengaturan utama sistem
+    const isPpnEnabled = (typeof currentPpnEnabled !== 'undefined' && currentPpnEnabled === false) ? false : (currentPurchaseReturnPO.ppn_enabled !== false);
+
+    const poSubtotal = parseFloat(currentPurchaseReturnPO.subtotal || 0);
+    const poDiscount = parseFloat(currentPurchaseReturnPO.discount || 0);
+    const poTax = isPpnEnabled ? parseFloat(currentPurchaseReturnPO.tax || 0) : 0;
+
+    const discRatio = poSubtotal > 0 ? (poDiscount / poSubtotal) : 0;
+    const poDpp = poSubtotal - poDiscount;
+    const taxRatio = (isPpnEnabled && poDpp > 0) ? (poTax / poDpp) : 0;
+
+    let totalGross = 0;
+    let totalRefund = 0;
+    const qtyInputs = document.querySelectorAll('.purchase-ret-qty-input');
+    
+    qtyInputs.forEach(input => {
+        const idx = parseInt(input.dataset.idx, 10);
+        const item = currentPurchaseReturnItems[idx];
+        if (!item) return;
+
+        let val = parseFloat(input.value) || 0;
+        if (val < 0) val = 0;
+        if (val > item.maxReturnable) {
+            val = item.maxReturnable;
+            input.value = val;
+        }
+
+        const price = parseFloat(item.cost || item.price || 0);
+        const itemGross = val * price;
+        totalGross += itemGross;
+
+        const netAfterDisc = itemGross * (1 - discRatio);
+        const itemRefund = Math.round(netAfterDisc * (1 + taxRatio));
+        totalRefund += itemRefund;
+
+        const subtotalEl = document.getElementById(`purchase-ret-item-subtotal-${idx}`);
+        if (subtotalEl) subtotalEl.textContent = rp(itemGross);
+    });
+
+    const remainingDebt = Math.max(0, parseFloat(currentPurchaseReturnPO.total || 0) - parseFloat(currentPurchaseReturnPO.paid || 0) - parseFloat(currentPurchaseReturnPO.return_amount || 0));
+    const deductedDebt = Math.min(remainingDebt, totalRefund);
+    const depositAmount = Math.max(0, totalRefund - remainingDebt);
+
+    // Update DOM
+    const totalEl = document.getElementById('purchase-return-sum-total');
+    const hutangEl = document.getElementById('purchase-return-sum-hutang');
+    const depositEl = document.getElementById('purchase-return-sum-deposit');
+    const summaryBox = document.getElementById('purchase-return-summary-box');
+
+    if (totalEl) totalEl.textContent = rp(totalRefund);
+    if (hutangEl) hutangEl.textContent = rp(deductedDebt);
+    if (depositEl) depositEl.textContent = rp(depositAmount);
+
+    if (summaryBox) {
+        summaryBox.style.display = canSeeFinance ? '' : 'none';
+    }
+}
+
+async function submitPurchaseReturn() {
+    const poId = document.getElementById('purchase-return-po-id').value;
+    const returnDate = document.getElementById('purchase-return-date').value;
+    const reason = (document.getElementById('purchase-return-reason').value || '').trim();
+
+    if (!reason) {
+        showToast('Alasan retur pembelian wajib diisi!', 'warning');
+        document.getElementById('purchase-return-reason').focus();
+        return;
+    }
+
+    const items = [];
+    const qtyInputs = document.querySelectorAll('.purchase-ret-qty-input');
+    qtyInputs.forEach(input => {
+        const idx = parseInt(input.dataset.idx, 10);
+        const item = currentPurchaseReturnItems[idx];
+        const qty = parseFloat(input.value) || 0;
+        if (qty > 0 && item) {
+            items.push({
+                product_id: item.product_id,
+                qty: qty
+            });
+        }
+    });
+
+    if (items.length === 0) {
+        showToast('Minimal satu item harus diretur dengan kuantitas > 0!', 'warning');
+        return;
+    }
+
+    const btnSubmit = document.getElementById('btn-submit-purchase-return');
+    if (btnSubmit) btnSubmit.disabled = true;
+
+    try {
+        const res = await fetch(`/api/purchases/${encodeURIComponent(poId)}/returns`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+                return_date: returnDate,
+                reason: reason,
+                items: items
+            })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+            closeModal('modal-purchase-return');
+            closeModal('modal-edit-purchase');
+            showToast(`Retur pembelian berhasil disimpan! (${data.returnId})`, 'success');
+
+            // Dynamic refresh without page reload
+            await fetchPurchases();
+            await fetchProducts();
+            if (typeof renderHutang === 'function') await renderHutang();
+            if (currentPage === 'returns') loadReturnsPurchases(1);
+        } else {
+            showToast('Gagal simpan retur pembelian: ' + (data.error || 'Terjadi kesalahan server'), 'error');
+        }
+    } catch (err) {
+        console.error('Error submitting purchase return', err);
+        showToast('Terjadi kesalahan koneksi', 'error');
+    } finally {
+        if (btnSubmit) btnSubmit.disabled = false;
+    }
+}
+
+// ---------- B4.1 Halaman Daftar Retur ----------
+let currentReturnsTab = 'sales';
+
+function loadReturnsPage() {
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    if (role === 'gudang') {
+        switchReturnsTab('purchases');
+    } else {
+        switchReturnsTab('sales');
+    }
+}
+
+function switchReturnsTab(tab) {
+    currentReturnsTab = tab;
+    const btnSales = document.getElementById('tab-btn-returns-sales');
+    const btnPurchases = document.getElementById('tab-btn-returns-purchases');
+    const contentSales = document.getElementById('returns-sales-content');
+    const contentPurchases = document.getElementById('returns-purchases-content');
+
+    if (tab === 'sales') {
+        if (btnSales) btnSales.classList.add('active');
+        if (btnPurchases) btnPurchases.classList.remove('active');
+        if (contentSales) contentSales.style.display = '';
+        if (contentPurchases) contentPurchases.style.display = 'none';
+        loadReturnsSales(1);
+    } else {
+        if (btnPurchases) btnPurchases.classList.add('active');
+        if (btnSales) btnSales.classList.remove('active');
+        if (contentPurchases) contentPurchases.style.display = '';
+        if (contentSales) contentSales.style.display = 'none';
+        loadReturnsPurchases(1);
+    }
+}
+
+const debounceReturnsSearch = debounce(() => {
+    if (currentReturnsTab === 'sales') {
+        loadReturnsSales(1);
+    } else {
+        loadReturnsPurchases(1);
+    }
+}, 300);
+
+function resetReturnsFilter() {
+    const searchEl = document.getElementById('returns-search');
+    const fromEl = document.getElementById('returns-date-from');
+    const toEl = document.getElementById('returns-date-to');
+    if (searchEl) searchEl.value = '';
+    if (fromEl) fromEl.value = '';
+    if (toEl) toEl.value = '';
+    if (currentReturnsTab === 'sales') loadReturnsSales(1);
+    else loadReturnsPurchases(1);
+}
+
+async function loadReturnsSales(page = 1) {
+    const search = document.getElementById('returns-search')?.value || '';
+    const from = document.getElementById('returns-date-from')?.value || '';
+    const to = document.getElementById('returns-date-to')?.value || '';
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    const canSeeFinance = role === 'admin' || role === 'finance' || role === 'owner';
+
+    let url = `/api/returns/sales?page=${page}&limit=80`;
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+    if (from) url += `&startDate=${encodeURIComponent(from)}`;
+    if (to) url += `&endDate=${encodeURIComponent(to)}`;
+
+    const tbody = document.getElementById('returns-sales-body');
+    const emptyEl = document.getElementById('returns-sales-empty');
+    if (!tbody) return;
+
+    try {
+        const res = await fetch(url, { headers: getAuthHeaders() });
+        if (!res.ok) {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:1.5rem; color:var(--rose-500);">Gagal memuat data retur penjualan.</td></tr>';
+            return;
+        }
+        const json = await res.json();
+        const rows = json.data || [];
+        const pag = json.pagination || {};
+
+        if (rows.length === 0) {
+            tbody.innerHTML = '';
+            if (emptyEl) emptyEl.style.display = 'block';
+        } else {
+            if (emptyEl) emptyEl.style.display = 'none';
+            tbody.innerHTML = rows.map(r => {
+                const dateStr = (r.return_date || '').split('T')[0];
+                const condBadge = r.condition_summary === 'kembali_ke_stok'
+                    ? '<span class="badge-status kembali_ke_stok">Kembali ke Stok</span>'
+                    : (r.condition_summary === 'rusak' 
+                        ? '<span class="badge-status rusak">Rusak</span>' 
+                        : `<span class="badge-status opname">${capitalize(r.condition_summary || '-')}</span>`);
+                const financeCol = canSeeFinance ? `<td style="text-align:right; font-weight:600;">${rp(r.total_refund || 0)}</td>` : '';
+                return `
+                    <tr style="cursor: pointer;" onclick="openReturnDetail('sales', '${r.id}')">
+                        <td style="font-weight:600; color:var(--amber-700);">${r.id}</td>
+                        <td>${dateStr}</td>
+                        <td style="color:var(--blue-600); font-weight:500;">${r.invoice_id}</td>
+                        <td style="font-weight:600;">${r.customer_name || '-'}</td>
+                        <td style="text-align:center;">${r.item_count || 1} item</td>
+                        <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${r.reason || '-'}</td>
+                        <td>${condBadge}</td>
+                        ${financeCol}
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        renderPagination({
+            containerId: 'pagination-returns-sales',
+            currentPage: page,
+            totalItems: pag.total || 0,
+            pageSize: 80,
+            onPageChange: (p) => loadReturnsSales(p)
+        });
+
+        // Hide/show financial table header
+        document.querySelectorAll('#returns-sales-table .th-returns-finance').forEach(th => {
+            th.style.display = canSeeFinance ? '' : 'none';
+        });
+
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    } catch (e) {
+        console.error('Error fetching sales returns', e);
+    }
+}
+
+async function loadReturnsPurchases(page = 1) {
+    const search = document.getElementById('returns-search')?.value || '';
+    const from = document.getElementById('returns-date-from')?.value || '';
+    const to = document.getElementById('returns-date-to')?.value || '';
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    const canSeeFinance = role === 'admin' || role === 'finance' || role === 'owner';
+
+    let url = `/api/returns/purchases?page=${page}&limit=80`;
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+    if (from) url += `&startDate=${encodeURIComponent(from)}`;
+    if (to) url += `&endDate=${encodeURIComponent(to)}`;
+
+    const tbody = document.getElementById('returns-purchases-body');
+    const emptyEl = document.getElementById('returns-purchases-empty');
+    if (!tbody) return;
+
+    try {
+        const res = await fetch(url, { headers: getAuthHeaders() });
+        if (!res.ok) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:1.5rem; color:var(--rose-500);">Gagal memuat data retur pembelian.</td></tr>';
+            return;
+        }
+        const json = await res.json();
+        const rows = json.data || [];
+        const pag = json.pagination || {};
+
+        if (rows.length === 0) {
+            tbody.innerHTML = '';
+            if (emptyEl) emptyEl.style.display = 'block';
+        } else {
+            if (emptyEl) emptyEl.style.display = 'none';
+            tbody.innerHTML = rows.map(r => {
+                const dateStr = (r.return_date || '').split('T')[0];
+                const financeCol = canSeeFinance ? `<td style="text-align:right; font-weight:600;">${rp(r.total_refund || 0)}</td>` : '';
+                return `
+                    <tr style="cursor: pointer;" onclick="openReturnDetail('purchases', '${r.id}')">
+                        <td style="font-weight:600; color:var(--blue-700);">${r.id}</td>
+                        <td>${dateStr}</td>
+                        <td style="color:var(--blue-600); font-weight:500;">${r.purchase_id}</td>
+                        <td style="font-weight:600;">${r.vendor_name || '-'}</td>
+                        <td style="text-align:center;">${r.item_count || 1} item</td>
+                        <td style="max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${r.reason || '-'}</td>
+                        ${financeCol}
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        renderPagination({
+            containerId: 'pagination-returns-purchases',
+            currentPage: page,
+            totalItems: pag.total || 0,
+            pageSize: 80,
+            onPageChange: (p) => loadReturnsPurchases(p)
+        });
+
+        // Hide/show financial table header
+        document.querySelectorAll('#returns-purchases-table .th-returns-finance').forEach(th => {
+            th.style.display = canSeeFinance ? '' : 'none';
+        });
+
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    } catch (e) {
+        console.error('Error fetching purchase returns', e);
+    }
+}
+
+async function openReturnDetail(type, id) {
+    try {
+        const url = `/api/returns/${type}/${encodeURIComponent(id)}`;
+        const res = await fetch(url, { headers: getAuthHeaders() });
+        if (!res.ok) {
+            showToast('Gagal memuat detail retur', 'error');
+            return;
+        }
+        const data = await res.json();
+        const ret = data.return || data || {};
+        const items = data.items || [];
+        const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+        const canSeeFinance = role === 'admin' || role === 'finance' || role === 'owner';
+
+        document.getElementById('ret-detail-id').textContent = ret.id || '-';
+        document.getElementById('ret-detail-date').textContent = (ret.return_date || ret.date || '').split('T')[0] || '-';
+        
+        const isSales = type === 'sales';
+        document.getElementById('ret-detail-ref-label').textContent = isSales ? 'No. Invoice' : 'No. PO';
+        const refId = isSales ? (ret.invoice_id || '-') : (ret.purchase_id || ret.purchase_order_id || '-');
+        
+        // Link to invoice/PO if role has permission
+        const canViewRef = isSales ? (role === 'admin' || role === 'finance' || role === 'kasir') : (role === 'admin' || role === 'finance' || role === 'gudang');
+        if (canViewRef && refId !== '-') {
+            document.getElementById('ret-detail-ref-id').innerHTML = `<strong style="color:var(--blue-600); cursor:pointer;">${refId}</strong>`;
+        } else {
+            document.getElementById('ret-detail-ref-id').textContent = refId;
+        }
+
+        document.getElementById('ret-detail-party-label').textContent = isSales ? 'Pelanggan' : 'Vendor';
+        document.getElementById('ret-detail-party').textContent = (isSales ? (ret.customer_name || ret.customer) : (ret.vendor_name || ret.vendor)) || '-';
+        document.getElementById('ret-detail-reason').textContent = ret.reason || '-';
+        document.getElementById('ret-detail-creator').textContent = ret.created_by_name || ret.user_name || '-';
+
+        // Render items table
+        const tbody = document.getElementById('ret-detail-items-body');
+        tbody.innerHTML = items.map((i, idx) => {
+            const cond = i.condition || i.condition_type || '';
+            const condDisplay = isSales 
+                ? (cond === 'rusak' ? '<span class="badge-status rusak">Rusak</span>' : '<span class="badge-status kembali_ke_stok">Kembali ke Stok</span>')
+                : '<span class="badge-status kembali_ke_stok">Retur ke Vendor</span>';
+            const finCells = canSeeFinance ? `
+                <td style="text-align:right;">${rp(i.price || i.cost || 0)}</td>
+                <td style="text-align:right; font-weight:600;">${rp(i.subtotal || 0)}</td>
+            ` : '';
+            const itemQty = i.qty !== undefined ? i.qty : (i.quantity !== undefined ? i.quantity : 0);
+            return `
+                <tr>
+                    <td style="text-align:center;">${idx + 1}</td>
+                    <td><strong>${i.product_name || '-'}</strong><br><small style="color:var(--gray-400);">${i.product_code || i.product_sku || i.sku || ''}</small></td>
+                    <td style="text-align:right; font-weight:600;">${itemQty}</td>
+                    <td>${condDisplay}</td>
+                    ${finCells}
+                </tr>
+            `;
+        }).join('');
+
+        // Finance box
+        const finBox = document.getElementById('ret-detail-finance-box');
+        if (canSeeFinance) {
+            if (finBox) finBox.style.display = '';
+            document.getElementById('ret-detail-total').textContent = rp(ret.total_refund || 0);
+            document.getElementById('ret-detail-debt-label').textContent = isSales ? 'Dipotong ke Piutang:' : 'Dipotong ke Hutang:';
+            const deductedDebt = ret.deducted_from_debt !== undefined ? ret.deducted_from_debt : (isSales ? ret.piutang_deduction : ret.hutang_deduction);
+            document.getElementById('ret-detail-deducted').textContent = rp(deductedDebt || 0);
+            document.getElementById('ret-detail-deposit-label').textContent = isSales ? 'Masuk ke Deposit Pelanggan:' : 'Masuk ke Deposit Vendor:';
+            const depositAdded = ret.added_to_deposit !== undefined ? ret.added_to_deposit : (isSales ? ret.customer_deposit_amount : ret.vendor_deposit_amount);
+            document.getElementById('ret-detail-deposit').textContent = rp(depositAdded || 0);
+        } else {
+            if (finBox) finBox.style.display = 'none';
+        }
+
+        // Hide/show table header
+        document.querySelectorAll('.th-ret-detail-finance').forEach(th => {
+            th.style.display = canSeeFinance ? '' : 'none';
+        });
+
+        openModal('modal-return-detail');
+    } catch (e) {
+        console.error('Error opening return detail modal', e);
+        showToast('Error membuka detail retur', 'error');
+    }
+}
+
+// ---------- B4.2 Halaman Stock Move ----------
+const debounceStockMovesSearch = debounce(() => {
+    loadStockMovesPage(1);
+}, 300);
+
+function resetStockMovesFilter() {
+    const searchEl = document.getElementById('stock-moves-search');
+    const typeEl = document.getElementById('stock-moves-filter-type');
+    const fromEl = document.getElementById('stock-moves-date-from');
+    const toEl = document.getElementById('stock-moves-date-to');
+    if (searchEl) searchEl.value = '';
+    if (typeEl) typeEl.value = 'all';
+    if (fromEl) fromEl.value = '';
+    if (toEl) toEl.value = '';
+    loadStockMovesPage(1);
+}
+
+function formatMoveType(type) {
+    const map = {
+        stok_awal: 'Stok Awal',
+        penjualan: 'Penjualan',
+        pembelian: 'Pembelian',
+        opname: 'Opname',
+        retur_penjualan: 'Retur Jual',
+        retur_penjualan_rusak: 'Retur Rusak',
+        retur_pembelian: 'Retur Beli',
+        cancel_invoice: 'Batal Inv',
+        koreksi_edit: 'Koreksi'
+    };
+    return map[type] || capitalize(type || '-');
+}
+
+async function loadStockMovesPage(page = 1) {
+    const search = document.getElementById('stock-moves-search')?.value || '';
+    const type = document.getElementById('stock-moves-filter-type')?.value || 'all';
+    const from = document.getElementById('stock-moves-date-from')?.value || '';
+    const to = document.getElementById('stock-moves-date-to')?.value || '';
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+
+    // Spec B4.2: Akses: admin dan gudang
+    if (role !== 'admin' && role !== 'gudang') {
+        showToast('Akses ditolak: Hanya Admin dan Gudang yang dapat melihat Stock Move.', 'error');
+        navigateTo('dashboard');
+        return;
+    }
+
+    let url = `/api/stock-moves?page=${page}&limit=80`;
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+    if (type && type !== 'all') url += `&tipe=${encodeURIComponent(type)}`;
+    if (from) url += `&date_from=${encodeURIComponent(from)}`;
+    if (to) url += `&date_to=${encodeURIComponent(to)}`;
+
+    const tbody = document.getElementById('stock-moves-body');
+    const emptyEl = document.getElementById('stock-moves-empty');
+    if (!tbody) return;
+
+    try {
+        const res = await fetch(url, { headers: getAuthHeaders() });
+        if (!res.ok) {
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:1.5rem; color:var(--rose-500);">Gagal memuat data stock moves.</td></tr>';
+            return;
+        }
+        const json = await res.json();
+        const rows = json.data || [];
+        const pag = json.pagination || {};
+
+        if (rows.length === 0) {
+            tbody.innerHTML = '';
+            if (emptyEl) emptyEl.style.display = 'block';
+        } else {
+            if (emptyEl) emptyEl.style.display = 'none';
+            tbody.innerHTML = rows.map(m => {
+                const dateStr = (m.tanggal || '').split('T')[0];
+                const moveType = m.tipe || '';
+                const typeLabel = formatMoveType(moveType);
+                const inQty = parseFloat(m.qtyMasuk || 0);
+                const outQty = parseFloat(m.qtyKeluar || 0);
+                const inDisplay = inQty > 0 ? `<span style="color:var(--emerald-600); font-weight:600;">+${inQty}</span>` : '<span style="color:var(--gray-300);">-</span>';
+                const outDisplay = outQty > 0 ? `<span style="color:var(--rose-600); font-weight:600;">-${outQty}</span>` : '<span style="color:var(--gray-300);">-</span>';
+
+                // Spec B4.2: No. referensi untuk role gudang ditampilkan sebagai teks biasa (tidak bisa diklik).
+                let refDisplay = m.refNo || m.refId || '-';
+                if (role === 'admin' && (m.refNo || m.refId)) {
+                    refDisplay = `<span style="color:var(--blue-600); font-weight:500;">${m.refNo || m.refId}</span>`;
+                }
+
+                return `
+                    <tr>
+                        <td style="font-size:0.82rem; color:var(--gray-500);">${dateStr}</td>
+                        <td>
+                            <strong>${m.productName || '-'}</strong>
+                            <div style="font-size:0.75rem; color:var(--gray-400);">${m.sku || ''}</div>
+                        </td>
+                        <td><span class="badge-status ${moveType}">${typeLabel}</span></td>
+                        <td>${refDisplay}</td>
+                        <td style="text-align:right;">${inDisplay}</td>
+                        <td style="text-align:right;">${outDisplay}</td>
+                        <td style="text-align:right; font-weight:700;">${parseFloat(m.stokSesudah || 0)}</td>
+                        <td style="font-size:0.82rem; color:var(--gray-600); max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${m.keterangan || '-'}</td>
+                        <td style="font-size:0.8rem; color:var(--gray-500);">${m.user || '-'}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        renderPagination({
+            containerId: 'pagination-stock-moves',
+            currentPage: page,
+            totalItems: pag.total || 0,
+            pageSize: 80,
+            onPageChange: (p) => loadStockMovesPage(p)
+        });
+
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    } catch (e) {
+        console.error('Error fetching stock moves', e);
+    }
+}
+
+// Window attachments for inline HTML onclick/oninput handlers
+window.switchReturnsTab = switchReturnsTab;
+window.debounceReturnsSearch = debounceReturnsSearch;
+window.resetReturnsFilter = resetReturnsFilter;
+window.loadReturnsSales = loadReturnsSales;
+window.loadReturnsPurchases = loadReturnsPurchases;
+window.openReturnDetail = openReturnDetail;
+window.debounceStockMovesSearch = debounceStockMovesSearch;
+window.resetStockMovesFilter = resetStockMovesFilter;
+window.loadStockMovesPage = loadStockMovesPage;
+window.openSalesReturnFromEditInvoice = openSalesReturnFromEditInvoice;
+window.openSalesReturnModal = openSalesReturnModal;
+window.updateSalesReturnCalc = updateSalesReturnCalc;
+window.submitSalesReturn = submitSalesReturn;
+window.openPurchaseReturnFromEditPurchase = openPurchaseReturnFromEditPurchase;
+window.openPurchaseReturnModal = openPurchaseReturnModal;
+window.updatePurchaseReturnCalc = updatePurchaseReturnCalc;
+window.submitPurchaseReturn = submitPurchaseReturn;
+window.handleSoftLockOpenReturn = handleSoftLockOpenReturn;
+window.handleSoftLockContinueKoreksi = handleSoftLockContinueKoreksi;
+window.renderRecentStockMoves = renderRecentStockMoves;
+

@@ -540,8 +540,8 @@
                                         <th>Tipe Pembayaran</th>
                                         <th>Kota</th>
                                         <th>Telepon / WA</th>
-                                        <th>Limit Piutang</th>
-                                        <th>Sisa Limit Piutang</th>
+                                        <th class="th-customer-piutang">Limit Piutang</th>
+                                        <th class="th-customer-piutang">Sisa Limit Piutang</th>
                                         <th>Total Belanja</th>
                                         <th style="text-align: right;">Aksi</th>
                                     </tr>
@@ -1692,7 +1692,7 @@
                                         <th style="text-align: right;" id="th-pl-hpp">HPP</th>
                                         <th style="text-align: right; width: 170px;">Harga Special Price (Rp)</th>
                                         <th style="text-align: right;">Selisih (Rp & %)</th>
-                                        <th style="text-align: center;">Status HPP</th>
+                                        <th style="text-align: center;" id="th-pl-status-hpp">Status HPP</th>
                                         <th style="text-align: center; width: 60px;">Aksi</th>
                                     </tr>
                                 </thead>
@@ -2544,14 +2544,14 @@
                         <span id="detail-customer-total-belanja"
                             style="font-weight: 700; color: var(--gray-800);"></span>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 0.875rem;">
+                    <div id="detail-customer-piutang-row" style="display: flex; justify-content: space-between; font-size: 0.875rem;">
                         <span style="color: var(--gray-500);">Piutang Berjalan</span>
                         <span id="detail-customer-piutang-berjalan"
                             style="font-weight: 700; color: var(--rose-600);"></span>
                     </div>
                 </div>
 
-                <div
+                <div id="detail-customer-limit-container"
                     style="margin-top: 1.25rem; border: 1px solid var(--gray-200); border-radius: 0.75rem; padding: 1rem;">
                     <div
                         style="display: flex; justify-content: space-between; font-size: 0.875rem; color: var(--gray-600); margin-bottom: 0.5rem;">
@@ -4583,7 +4583,7 @@
                         <span style="color: var(--gray-500); display: block; font-size: 0.75rem;">Pelanggan</span>
                         <strong id="sales-return-customer">-</strong>
                     </div>
-                    <div>
+                    <div id="sales-return-sisa-piutang-container">
                         <span style="color: var(--gray-500); display: block; font-size: 0.75rem;">Sisa Piutang Saat Ini</span>
                         <span id="sales-return-sisa-piutang" style="font-weight: 600; color: var(--rose-600);">-</span>
                     </div>
@@ -4637,7 +4637,7 @@
                         <strong>Total Pengembalian Dana:</strong>
                         <strong id="sales-return-sum-total" style="color: var(--amber-700);">Rp 0</strong>
                     </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; background: white; padding: 0.5rem; border-radius: 6px; border: 1px solid #e2e8f0;">
+                    <div id="sales-return-alloc-container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; background: white; padding: 0.5rem; border-radius: 6px; border: 1px solid #e2e8f0;">
                         <div>
                             <span style="font-size: 0.75rem; color: var(--gray-500); display: block;">Mengurangi Piutang:</span>
                             <strong id="sales-return-sum-piutang" style="color: var(--blue-600);">Rp 0</strong>
@@ -4727,7 +4727,7 @@
                         <strong>Total Pengembalian Dana:</strong>
                         <strong id="purchase-return-sum-total" style="color: var(--blue-700);">Rp 0</strong>
                     </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; background: white; padding: 0.5rem; border-radius: 6px; border: 1px solid #e2e8f0;">
+                    <div id="sales-return-alloc-container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; background: white; padding: 0.5rem; border-radius: 6px; border: 1px solid #e2e8f0;">
                         <div>
                             <span style="font-size: 0.75rem; color: var(--gray-500); display: block;">Mengurangi Hutang:</span>
                             <strong id="purchase-return-sum-hutang" style="color: var(--amber-600);">Rp 0</strong>
@@ -4850,7 +4850,7 @@
                         <strong>Total Nilai Retur:</strong>
                         <strong id="ret-detail-total" style="color: var(--amber-700);">Rp 0</strong>
                     </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; background: white; padding: 0.5rem; border-radius: 6px; border: 1px solid #e2e8f0;">
+                    <div id="sales-return-alloc-container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; background: white; padding: 0.5rem; border-radius: 6px; border: 1px solid #e2e8f0;">
                         <div>
                             <span style="font-size: 0.75rem; color: var(--gray-500); display: block;" id="ret-detail-debt-label">Dipotong ke Piutang:</span>
                             <strong id="ret-detail-deducted" style="color: var(--blue-600);">Rp 0</strong>

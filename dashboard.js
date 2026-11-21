@@ -291,6 +291,24 @@ window.addEventListener('storage', (e) => {
     }
 });
 
+window.addEventListener('hashchange', () => {
+    const rawRole = localStorage.getItem('role') || 'kasir';
+    const role = rawRole.toLowerCase();
+    const allowedPages = ROLE_PERMISSIONS[role] || ROLE_PERMISSIONS.kasir;
+    const hPage = (window.location.hash || '').replace('#', '').trim();
+    if (hPage) {
+        if (allowedPages.includes(hPage)) {
+            navigateTo(hPage);
+        } else {
+            const defaultPage = allowedPages[0] || 'dashboard';
+            navigateTo(defaultPage);
+            try {
+                history.replaceState(null, '', window.location.pathname + (window.location.search ? window.location.search : ''));
+            } catch (_) {}
+        }
+    }
+});
+
 let isRefreshingDashboard = false;
 async function refreshDashboardData(silent = false) {
     if (isRefreshingDashboard) return;
@@ -648,7 +666,7 @@ const ROLE_PERMISSIONS = {
     admin: ['dashboard', 'pos', 'products', 'customers', 'vendors', 'purchases', 'proformas', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'reports', 'settings', 'roles', 'master-data', 'customerfee', 'pricelists', 'returns', 'stock-moves'],
     finance: ['dashboard', 'invoices', 'piutang', 'cashflow', 'profitloss', 'balance', 'reports', 'returns'],
     gudang: ['dashboard', 'products', 'purchases', 'vendors', 'hutang', 'stock-moves', 'returns'],
-    kasir: ['dashboard', 'pos', 'customers', 'proformas', 'invoices', 'piutang', 'returns']
+    kasir: ['dashboard', 'pos', 'customers', 'proformas', 'invoices', 'pricelists', 'returns']
 };
 
 function applyRoleRestrictions() {
@@ -706,6 +724,12 @@ function applyRoleRestrictions() {
         recentStockCard.style.display = (role === 'admin' || role === 'gudang') ? '' : 'none';
     }
 
+    // Sembunyikan kolom piutang di tabel customers untuk kasir
+    const canSeePiutangCustomer = role !== 'kasir';
+    document.querySelectorAll('.th-customer-piutang, .td-customer-piutang').forEach(el => {
+        el.style.display = canSeePiutangCustomer ? '' : 'none';
+    });
+
     // Also hide nav groups if all their items are hidden
     document.querySelectorAll('.nav-group').forEach(group => {
         const visibleItems = Array.from(group.querySelectorAll('.nav-item')).filter(item => item.style.display !== 'none');
@@ -731,7 +755,10 @@ function navigateTo(page) {
     const role = rawRole.toLowerCase();
     const allowedPages = ROLE_PERMISSIONS[role] || ROLE_PERMISSIONS.kasir;
     if (!allowedPages.includes(page)) {
-        showToast('Akses ditolak: Anda tidak memiliki wewenang untuk halaman ini.', 'error');
+        const defaultPage = allowedPages[0] || 'dashboard';
+        if (currentPage !== defaultPage) {
+            navigateTo(defaultPage);
+        }
         return;
     }
 
@@ -1443,6 +1470,8 @@ function _renderCustomersLocal_UNUSED(filter = '', type = '') {
     }
 
     grid.innerHTML = filtered.map(c => {
+        const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+        const canSeePiutang = role !== 'kasir';
         const color = limitColor(c.sisaLimitPiutang ?? c.remainingLimit, c.creditLimit);
         const pctUsed = c.creditLimit > 0 ? Math.min(100, Math.round((c.totalPiutangBerjalan ?? c.outstandingReceivables) / c.creditLimit * 100)) : 0;
         return `
@@ -1466,16 +1495,16 @@ function _renderCustomersLocal_UNUSED(filter = '', type = '') {
                     <span class="entity-detail-label">Telepon / WA</span>
                     <span class="entity-detail-value">${c.phone}</span>
                 </div>
-                <div class="entity-detail">
+                ${canSeePiutang ? `<div class="entity-detail">
                     <span class="entity-detail-label">Sisa Limit Piutang</span>
                     <span class="entity-detail-value" style="color:${color}; font-weight:700;">${rpShort(c.sisaLimitPiutang ?? c.remainingLimit)}</span>
-                </div>
+                </div>` : ''}
                 <div class="entity-detail">
                     <span class="entity-detail-label">Total Belanja</span>
                     <span class="entity-detail-value">${rpShort(c.totalBelanja ?? c.totalSpent)}</span>
                 </div>
             </div>
-            <div style="margin-top:0.6rem;">
+            ${canSeePiutang ? `<div style="margin-top:0.6rem;">
                 <div style="display:flex;justify-content:space-between;font-size:0.7rem;color:var(--slate-500);margin-bottom:3px;">
                     <span>Limit terpakai ${pctUsed}%</span>
                     <span>${rpShort(c.creditLimit)}</span>
@@ -1483,7 +1512,7 @@ function _renderCustomersLocal_UNUSED(filter = '', type = '') {
                 <div style="background:var(--slate-200);border-radius:99px;height:5px;overflow:hidden;">
                     <div style="height:100%;width:${pctUsed}%;background:${color};border-radius:99px;transition:width .4s;"></div>
                 </div>
-            </div>
+            </div>` : ''}
         </div>
     `}).join('');
 
@@ -1510,8 +1539,8 @@ function _renderCustomersLocal_UNUSED(filter = '', type = '') {
                 </td>
                 <td>${c.city}</td>
                 <td>${c.phone}</td>
-                <td style="font-weight:700;">${rp(c.creditLimit)}</td>
-                <td style="font-weight:700; color:${color}">${rp(sisa)}</td>
+                <td class="td-customer-piutang" style="font-weight:700;">${rp(c.creditLimit)}</td>
+                <td class="td-customer-piutang" style="font-weight:700; color:${color}">${rp(sisa)}</td>
                 <td style="font-weight:600;">${rp(c.totalBelanja ?? c.totalSpent)}</td>
                 <td style="text-align: right; white-space: nowrap;" onclick="event.stopPropagation()">
                     <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" title="Edit Pelanggan" onclick="openEditCustomerModal('${c.id}')">
@@ -4193,6 +4222,26 @@ async function init() {
     // Apply RBAC UI restrictions
     applyRoleRestrictions();
 
+    // Direct URL navigation support (hash or search param ?page=...)
+    const loggedRole = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    const allowedPages = ROLE_PERMISSIONS[loggedRole] || ROLE_PERMISSIONS.kasir;
+    const urlParams = new URLSearchParams(window.location.search);
+    const hashPage = (window.location.hash || '').replace('#', '').trim();
+    const directPage = urlParams.get('page') || hashPage;
+    if (directPage) {
+        if (allowedPages.includes(directPage)) {
+            navigateTo(directPage);
+        } else {
+            const defaultPage = allowedPages[0] || 'dashboard';
+            navigateTo(defaultPage);
+            if (window.location.hash) {
+                try {
+                    history.replaceState(null, '', window.location.pathname + (window.location.search ? window.location.search : ''));
+                } catch (_) {}
+            }
+        }
+    }
+
     // Logout handler
     const logoutBtn = document.getElementById('logout-btn');
     if (logoutBtn) {
@@ -5062,6 +5111,20 @@ function openEditCustomerModal(id) {
     if (nibEl) nibEl.value = c.nib || '';
     populateCustomerPricelistDropdown('edit-customer-pricelist', c.pricelistId);
     populateCustomerPaymentTypeDropdown('edit-customer-payment-type', c.tipePembayaranId || c.tipe_pembayaran_id || c.payment_type_id || '');
+
+    // Pastikan seluruh field form pelanggan aktif untuk diedit
+    const _ecFieldIds = [
+        'edit-customer-name', 'edit-customer-type', 'edit-customer-city',
+        'edit-customer-address', 'edit-customer-phone', 'edit-customer-limit',
+        'edit-customer-no-hp-2', 'edit-customer-email', 'edit-customer-ktp',
+        'edit-customer-npwp', 'edit-customer-npwp-name', 'edit-customer-npwp-address', 'edit-customer-nib',
+        'edit-customer-payment-type'
+    ];
+    _ecFieldIds.forEach(fid => {
+        const el = document.getElementById(fid);
+        if (el) el.disabled = false;
+    });
+
     openModal('modal-edit-customer');
 }
 
@@ -5110,6 +5173,13 @@ function openCustomerDetail(id) {
     if (ptDetailEl) {
         ptDetailEl.textContent = c.tipePembayaranName || c.tipe_pembayaran_name || '— Belum diatur (default Kredit 30 Hari) —';
     }
+
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    const canSeePiutang = role !== 'kasir';
+    const piutangRow = document.getElementById('detail-customer-piutang-row');
+    if (piutangRow) piutangRow.style.display = canSeePiutang ? 'flex' : 'none';
+    const limitContainer = document.getElementById('detail-customer-limit-container');
+    if (limitContainer) limitContainer.style.display = canSeePiutang ? 'block' : 'none';
 
     const sisa = c.sisaLimitPiutang ?? c.remainingLimit;
     const totalSpent = c.totalBelanja ?? c.totalSpent;
@@ -6284,6 +6354,9 @@ async function fetchInvoices(page) {
 }
 
 async function fetchPiutang(page) {
+    // Kasir tidak memiliki akses ke piutang — abaikan tanpa toast error
+    const _fpRole = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    if (_fpRole === 'kasir') return;
     try {
         if (page !== undefined) paginationState.piutang.page = page;
         const q = document.getElementById('piutang-search')?.value || '';
@@ -10362,6 +10435,8 @@ function renderPricelistItemsTable(items) {
 
     const thHpp = document.getElementById('th-pl-hpp');
     if (thHpp) thHpp.style.display = showHpp ? '' : 'none';
+    const thStatusHpp = document.getElementById('th-pl-status-hpp');
+    if (thStatusHpp) thStatusHpp.style.display = showHpp ? '' : 'none';
 
     // Reset check all
     const chkAll = document.getElementById('check-all-pl-items');
@@ -10370,7 +10445,7 @@ function renderPricelistItemsTable(items) {
 
     if (!tbody) return;
     if (!items || items.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:2.5rem; color:var(--gray-400);">
+        tbody.innerHTML = `<tr><td colspan="${showHpp ? 10 : 8}" style="text-align:center; padding:2.5rem; color:var(--gray-400);">
             <i data-lucide="package" style="width:28px;height:28px;margin-bottom:0.5rem;display:inline-block;opacity:0.6;"></i>
             <div>Belum ada produk di pricelist ini. Klik <strong>Tambah Produk</strong> atau <strong>Import CSV</strong> untuk mulai.</div>
         </td></tr>`;
@@ -10410,7 +10485,7 @@ function renderPricelistItemsTable(items) {
                 ${selisihRp >= 0 ? '+' : ''}${rp(selisihRp)}<br>
                 <span style="font-size:0.75rem;">${selisihPct > 0 ? '+' : ''}${selisihPct}%</span>
             </td>
-            <td style="text-align:center;">
+            <td style="text-align:center; display:${showHpp ? '' : 'none'};">
                 ${hppWarn ? '<span class="badge-hpp-warning" style="font-size:0.68rem; padding:0.15rem 0.4rem;">⚠️ Bawah HPP</span>' : '<span style="color:var(--gray-300); font-size:0.8rem;">—</span>'}
             </td>
             <td style="text-align:center;">
@@ -10855,64 +10930,6 @@ function parsePricelistCsvText(text) {
     plCsvParsedRows = Array.from(dedupMap.values());
 
     if (previewBody) previewBody.innerHTML = htmlRows.join('');
-    if (validBadge) validBadge.textContent = `${validCount} baris valid (${plCsvParsedRows.length} produk unik)`;
-    if (invalidBadge) invalidBadge.textContent = `${invalidCount} baris error`;
-
-    const previewContainer = document.getElementById('pl-csv-preview-container');
-    if (previewContainer) previewContainer.style.display = 'block';
-
-    if (submitBtn) {
-        submitBtn.disabled = plCsvParsedRows.length === 0;
-        submitBtn.innerHTML = `<i data-lucide="check-circle"></i> Simpan ${plCsvParsedRows.length} Item Valid`;
-    }
-    if (window.lucide) lucide.createIcons();
-}
-
-async function submitPricelistCsvItems() {
-    const id = activePricelistId;
-    if (!id || plCsvParsedRows.length === 0) return;
-
-    const items = plCsvParsedRows.map(r => ({ product_id: r.product_id, harga: r.harga }));
-
-    try {
-        const res = await fetch(`/api/pricelists/${id}/items`, {
-            method: 'PUT',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ items })
-        });
-        const data = await res.json();
-        if (res.ok) {
-            closeModal('modal-import-pricelist-csv');
-            showToast(`${items.length} produk berhasil diimpor ke Special Price!`, 'success');
-            plCsvParsedRows = [];
-            await openPricelistDetail(id);
-            await fetchPricelists();
-        } else {
-            showToast(data.error || 'Gagal menyimpan item import', 'error');
-        }
-    } catch (err) {
-        showToast('Gagal mengimpor CSV', 'error');
-    }
-}
-
-// ── Modal Bulk Percent ─────────────────────────────────────────────────────
-function openPricelistBulkPercentModal() {
-    const id = activePricelistId;
-    if (!id) return;
-    const checked = document.querySelectorAll('.pl-item-chk:checked');
-    const targetSelect = document.getElementById('bulk-percent-target');
-    if (targetSelect) {
-        targetSelect.value = checked.length > 0 ? 'selected' : 'all';
-    }
-    const valInp = document.getElementById('bulk-percent-value');
-    if (valInp && !valInp.value) valInp.value = '90';
-    openModal('modal-pricelist-bulk-percent');
-}
-
-async function applyPricelistBulkPercent() {
-    const id = activePricelistId;
-    if (!id || !pricelistDetailData?.items?.length) return;
-
     const target = document.getElementById('bulk-percent-target')?.value || 'all';
     const pct = parseFloat(document.getElementById('bulk-percent-value')?.value || '90');
     const round = parseInt(document.getElementById('bulk-percent-round')?.value || '100', 10);
@@ -11421,19 +11438,25 @@ async function openSalesReturnModal(invId) {
         }
 
         // Fill header info
+        const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+        const canSeeFinance = role === 'admin' || role === 'finance' || role === 'owner';
+
         document.getElementById('sales-return-invoice-id').value = currentSalesReturnInvoice.id;
         document.getElementById('sales-return-inv-number').textContent = currentSalesReturnInvoice.id;
         document.getElementById('sales-return-inv-date').textContent = (currentSalesReturnInvoice.date || '').split('T')[0];
         document.getElementById('sales-return-customer').textContent = currentSalesReturnInvoice.customer_name || '-';
         document.getElementById('sales-return-sisa-piutang').textContent = rp(data.remainingDebt || 0);
 
+        const sisaPiutangContainer = document.getElementById('sales-return-sisa-piutang-container');
+        if (sisaPiutangContainer) {
+            sisaPiutangContainer.style.display = canSeeFinance ? '' : 'none';
+        }
+
         document.getElementById('sales-return-date').value = new Date().toISOString().split('T')[0];
         document.getElementById('sales-return-reason').value = '';
 
         // Render items table
         const tbody = document.getElementById('sales-return-items-body');
-        const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
-        const canSeeFinance = role === 'admin' || role === 'finance' || role === 'owner';
 
         if (currentSalesReturnItems.length === 0) {
             tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:1rem; color:var(--gray-400);">Tidak ada item pada invoice ini.</td></tr>';

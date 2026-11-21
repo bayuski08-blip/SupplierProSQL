@@ -1922,6 +1922,26 @@ app.put('/api/customers/:id', authenticateToken, authorizeRoles('admin', 'kasir'
   }
 });
 
+// PATCH /api/customers/:id/pricelist - Khusus update penetapan Special Price ke pelanggan (Admin, Owner, Kasir)
+app.patch('/api/customers/:id/pricelist', authenticateToken, authorizeRoles('admin', 'kasir', 'owner'), async (req, res) => {
+  const { id } = req.params;
+  const { pricelist_id } = req.body;
+  const plId = (pricelist_id !== undefined && pricelist_id !== null && String(pricelist_id).trim() !== '') ? parseInt(pricelist_id, 10) : null;
+  if (plId) {
+    const plCheck = await pool.query('SELECT id FROM pricelists WHERE id = ? AND is_active = 1', [plId]);
+    if (plCheck.rows.length === 0) {
+      return res.status(400).json({ error: 'Pricelist tidak ditemukan atau tidak aktif' });
+    }
+  }
+  try {
+    const result = await pool.query('UPDATE customers SET pricelist_id = ? WHERE id = ?', [plId, id]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Pelanggan tidak ditemukan' });
+    res.json({ success: true, message: 'Special Price pelanggan berhasil diperbarui', pricelist_id: plId });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.delete('/api/customers/:id', authenticateToken, authorizeRoles('admin', 'kasir', 'owner'), async (req, res) => {
   const { id } = req.params;
   const deleteQuery = 'DELETE FROM customers WHERE id = $1';
@@ -2068,7 +2088,7 @@ app.get('/api/pricelists/effective-prices', authenticateToken, authorizeRoles('a
 });
 
 // POST /api/pricelists - Buat pricelist baru
-app.post('/api/pricelists', authenticateToken, authorizeRoles('admin', 'owner'), async (req, res) => {
+app.post('/api/pricelists', authenticateToken, authorizeRoles('admin', 'owner', 'kasir'), async (req, res) => {
   const { nama, keterangan } = req.body;
   if (!nama || !nama.trim()) {
     return res.status(400).json({ error: 'Nama pricelist wajib diisi' });
@@ -2156,7 +2176,7 @@ app.get('/api/pricelists/:id', authenticateToken, authorizeRoles('admin', 'owner
 });
 
 // PUT /api/pricelists/:id - Ubah nama, keterangan, is_active
-app.put('/api/pricelists/:id', authenticateToken, authorizeRoles('admin', 'owner'), async (req, res) => {
+app.put('/api/pricelists/:id', authenticateToken, authorizeRoles('admin', 'owner', 'kasir'), async (req, res) => {
   const { id } = req.params;
   const { nama, keterangan, is_active } = req.body;
 
@@ -2196,7 +2216,7 @@ app.put('/api/pricelists/:id', authenticateToken, authorizeRoles('admin', 'owner
 });
 
 // DELETE /api/pricelists/:id - Hapus pricelist (R7: tolak 409 jika sedang dipakai customer)
-app.delete('/api/pricelists/:id', authenticateToken, authorizeRoles('admin', 'owner'), async (req, res) => {
+app.delete('/api/pricelists/:id', authenticateToken, authorizeRoles('admin', 'owner', 'kasir'), async (req, res) => {
   const { id } = req.params;
   try {
     const custRes = await pool.query('SELECT COUNT(*) AS total_customers FROM customers WHERE pricelist_id = ?', [id]);
@@ -2221,7 +2241,7 @@ app.delete('/api/pricelists/:id', authenticateToken, authorizeRoles('admin', 'ow
 });
 
 // POST /api/pricelists/:id/duplicate - Duplikat pricelist beserta itemnya
-app.post('/api/pricelists/:id/duplicate', authenticateToken, authorizeRoles('admin', 'owner'), async (req, res) => {
+app.post('/api/pricelists/:id/duplicate', authenticateToken, authorizeRoles('admin', 'owner', 'kasir'), async (req, res) => {
   const { id } = req.params;
   const { nama } = req.body;
 
@@ -2279,7 +2299,7 @@ app.post('/api/pricelists/:id/duplicate', authenticateToken, authorizeRoles('adm
 });
 
 // PUT /api/pricelists/:id/items - Bulk upsert [{ product_id, harga }] (input massal & import CSV)
-app.put('/api/pricelists/:id/items', authenticateToken, authorizeRoles('admin', 'owner'), async (req, res) => {
+app.put('/api/pricelists/:id/items', authenticateToken, authorizeRoles('admin', 'owner', 'kasir'), async (req, res) => {
   const { id } = req.params;
   const { items } = req.body;
 
@@ -2347,7 +2367,7 @@ app.put('/api/pricelists/:id/items', authenticateToken, authorizeRoles('admin', 
 });
 
 // DELETE /api/pricelists/:id/items/:productId - Hapus satu item dari pricelist
-app.delete('/api/pricelists/:id/items/:productId', authenticateToken, authorizeRoles('admin', 'owner'), async (req, res) => {
+app.delete('/api/pricelists/:id/items/:productId', authenticateToken, authorizeRoles('admin', 'owner', 'kasir'), async (req, res) => {
   const { id, productId } = req.params;
   try {
     const result = await pool.query(

@@ -1436,6 +1436,10 @@ document.getElementById('product-category-filter')?.addEventListener('change', (
     paginationState.products.page = 1;
     fetchProducts(1);
 });
+document.getElementById('product-sort')?.addEventListener('change', () => {
+    paginationState.products.page = 1;
+    fetchProducts(1);
+});
 
 // ---------- Customers Page ----------
 let customerViewMode = 'kanban';
@@ -1566,6 +1570,10 @@ document.getElementById('customer-type-filter')?.addEventListener('change', () =
     paginationState.customers.page = 1;
     fetchCustomers(1);
 });
+document.getElementById('customer-sort')?.addEventListener('change', () => {
+    paginationState.customers.page = 1;
+    fetchCustomers(1);
+});
 
 // Customer view toggle bindings
 document.addEventListener('DOMContentLoaded', () => {
@@ -1672,6 +1680,10 @@ document.getElementById('vendor-search')?.addEventListener('input', debounce(() 
     paginationState.vendors.page = 1;
     fetchVendors(1);
 }, 300));
+document.getElementById('vendor-sort')?.addEventListener('change', () => {
+    paginationState.vendors.page = 1;
+    fetchVendors(1);
+});
 
 // Vendor view toggle bindings
 document.addEventListener('DOMContentLoaded', () => {
@@ -4056,9 +4068,11 @@ if (document.readyState === 'loading') {
         initAddPurchaseVendorCombobox();
     });
 } else {
-    initPOSCustomerSearch();
-    initPoProductSearch();
-    initAddPurchaseVendorCombobox();
+    setTimeout(() => {
+        initPOSCustomerSearch();
+        initPoProductSearch();
+        initAddPurchaseVendorCombobox();
+    }, 0);
 }
 
 // ---------- Tab Filter Bindings ----------
@@ -4531,10 +4545,12 @@ async function fetchProducts(page) {
         const q = document.getElementById('product-search')?.value || '';
         const category = document.getElementById('product-category-filter')?.value || '';
         const statusFilter = document.getElementById('product-status-filter')?.value || 'active';
+        const sort = document.getElementById('product-sort')?.value || 'name_asc';
         const pg = paginationState.products.page;
         let url = '/api/products?page=' + pg + '&limit=' + PAGE_SIZE + '&status=' + encodeURIComponent(statusFilter);
         if (q) url += '&q=' + encodeURIComponent(q);
         if (category && category !== 'all') url += '&category=' + encodeURIComponent(category);
+        if (sort) url += '&sort=' + encodeURIComponent(sort);
 
         const res = await fetch(url, { headers: getAuthHeaders() });
         const json = await res.json();
@@ -4875,10 +4891,12 @@ async function fetchCustomers(page) {
         if (page !== undefined) paginationState.customers.page = page;
         const q = document.getElementById('customer-search')?.value || '';
         const type = document.getElementById('customer-type-filter')?.value || '';
+        const sort = document.getElementById('customer-sort')?.value || 'name_asc';
         const pg = paginationState.customers.page;
         let url = '/api/customers?page=' + pg + '&limit=' + PAGE_SIZE;
         if (q) url += '&q=' + encodeURIComponent(q);
         if (type && type !== 'all') url += '&category=' + encodeURIComponent(type);
+        if (sort) url += '&sort=' + encodeURIComponent(sort);
 
         const res = await fetch(url, { headers: getAuthHeaders() });
         const json = await res.json();
@@ -5288,9 +5306,11 @@ async function fetchVendors(page) {
         // Paginated fetch for table
         if (page !== undefined) paginationState.vendors.page = page;
         const q = document.getElementById('vendor-search')?.value || '';
+        const sort = document.getElementById('vendor-sort')?.value || 'name_asc';
         const pg = paginationState.vendors.page;
         let url = '/api/vendors?page=' + pg + '&limit=' + PAGE_SIZE;
         if (q) url += '&q=' + encodeURIComponent(q);
+        if (sort) url += '&sort=' + encodeURIComponent(sort);
 
         const res = await fetch(url, { headers: getAuthHeaders() });
         const json = await res.json();
@@ -5883,7 +5903,7 @@ class ProductAutocomplete {
 }
 
 // ── PO Modal Product Search Instance ──────────────────────────────────────────
-let poProductAutocomplete = null;
+var poProductAutocomplete = null;
 function getPoProductAutocomplete() {
     if (!poProductAutocomplete) {
         poProductAutocomplete = new ProductAutocomplete({
@@ -7744,11 +7764,18 @@ function openEditStaffModal(id) {
     document.getElementById('staff-name').value = u.name;
     document.getElementById('staff-username').value = u.username;
     document.getElementById('staff-username').disabled = true;
-    document.getElementById('staff-password').value = ''; // Leave empty if no change
+    const pwInp = document.getElementById('staff-password');
+    if (pwInp) {
+        pwInp.value = ''; // Leave empty if no change
+        pwInp.type = 'password';
+    }
+    const hint = document.getElementById('staff-password-hint');
+    if (hint) hint.textContent = 'Minimal 6 karakter. Kosongkan jika tidak ingin mengubah password saat edit.';
     document.getElementById('staff-email').value = u.email || '';
     document.getElementById('staff-role').value = u.role;
     document.getElementById('staff-status').value = u.active ? 'true' : 'false';
     openModal('modal-add-staff');
+    if (window.lucide) lucide.createIcons();
 }
 
 function openAddStaffModal() {
@@ -7757,11 +7784,18 @@ function openAddStaffModal() {
     document.getElementById('staff-name').value = '';
     document.getElementById('staff-username').value = '';
     document.getElementById('staff-username').disabled = false;
-    document.getElementById('staff-password').value = '';
+    const pwInp = document.getElementById('staff-password');
+    if (pwInp) {
+        pwInp.value = '';
+        pwInp.type = 'password';
+    }
+    const hint = document.getElementById('staff-password-hint');
+    if (hint) hint.textContent = 'Minimal 6 karakter. Default: 123456 jika dikosongkan.';
     document.getElementById('staff-email').value = '';
     document.getElementById('staff-role').value = 'kasir';
     document.getElementById('staff-status').value = 'true';
     openModal('modal-add-staff');
+    if (window.lucide) lucide.createIcons();
 }
 
 async function saveStaff() {
@@ -7817,6 +7851,119 @@ async function deleteStaff(id) {
     } catch (err) {
         console.error(err);
         showToast('Gagal menghapus staff', 'error');
+    }
+}
+
+// ---------- Change Password Modal & Toggle Handlers ----------
+function togglePasswordVisibility(inputId, btn) {
+    const inp = document.getElementById(inputId);
+    if (!inp) return;
+    const isPw = inp.type === 'password';
+    inp.type = isPw ? 'text' : 'password';
+    if (btn) {
+        btn.innerHTML = isPw
+            ? '<i data-lucide="eye-off" style="width: 16px; height: 16px;"></i>'
+            : '<i data-lucide="eye" style="width: 16px; height: 16px;"></i>';
+        if (window.lucide) lucide.createIcons();
+    }
+}
+
+function openChangePasswordModal(e) {
+    if (e) e.preventDefault();
+    const oldP = document.getElementById('cp-old-password');
+    const newP = document.getElementById('cp-new-password');
+    const confP = document.getElementById('cp-confirm-password');
+    if (oldP) { oldP.value = ''; oldP.type = 'password'; }
+    if (newP) { newP.value = ''; newP.type = 'password'; }
+    if (confP) { confP.value = ''; confP.type = 'password'; }
+
+    // Reset eye toggle icons
+    const modal = document.getElementById('modal-change-password');
+    if (modal) {
+        modal.querySelectorAll('.btn-toggle-pw').forEach(btn => {
+            btn.innerHTML = '<i data-lucide="eye" style="width: 16px; height: 16px;"></i>';
+        });
+    }
+
+    const errBox = document.getElementById('cp-error-msg');
+    if (errBox) {
+        errBox.textContent = '';
+        errBox.style.display = 'none';
+    }
+
+    openModal('modal-change-password');
+    if (window.lucide) lucide.createIcons();
+}
+
+async function submitChangePassword() {
+    const oldPassword = (document.getElementById('cp-old-password')?.value || '');
+    const newPassword = (document.getElementById('cp-new-password')?.value || '');
+    const confirmPassword = (document.getElementById('cp-confirm-password')?.value || '');
+    const errBox = document.getElementById('cp-error-msg');
+    const submitBtn = document.getElementById('btn-submit-change-password');
+
+    function showError(msg) {
+        if (errBox) {
+            errBox.textContent = msg;
+            errBox.style.display = 'block';
+        } else {
+            showToast(msg, 'error');
+        }
+    }
+
+    if (errBox) errBox.style.display = 'none';
+
+    // Client-side validations
+    if (!oldPassword || !newPassword || !confirmPassword) {
+        return showError('Semua field wajib diisi');
+    }
+    if (newPassword.length < 8) {
+        return showError('Password baru minimal 8 karakter');
+    }
+    if (newPassword === oldPassword) {
+        return showError('Password baru tidak boleh sama dengan password lama');
+    }
+    if (confirmPassword !== newPassword) {
+        return showError('Konfirmasi password tidak cocok');
+    }
+
+    try {
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i data-lucide="loader" style="width:16px;height:16px;animation:spin 1s linear infinite;"></i> Menyimpan...';
+            if (window.lucide) lucide.createIcons();
+        }
+
+        const res = await fetch('/api/auth/change-password', {
+            method: 'PUT',
+            headers: {
+                ...getAuthHeaders(),
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                password_lama: oldPassword,
+                password_baru: newPassword,
+                konfirmasi_password: confirmPassword
+            })
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok && data.success) {
+            closeModal('modal-change-password');
+            showToast(data.message || 'Password berhasil diubah!', 'success');
+        } else {
+            showError(data.error || 'Gagal mengubah password');
+        }
+    } catch (err) {
+        console.error(err);
+        showError('Gagal terhubung ke server');
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i data-lucide="check" style="width: 16px; height: 16px;"></i> Simpan Password';
+            if (window.lucide) lucide.createIcons();
+        }
     }
 }
 

@@ -118,17 +118,23 @@
                 </div>
             </nav>
 
-            <a href="#" class="back-to-landing" id="logout-btn">
-                <i data-lucide="log-out"></i> Keluar / Logout
-            </a>
+            <div class="sidebar-actions" style="margin-top: auto; border-top: 1px solid rgba(255,255,255,0.08);">
+                <a href="javascript:void(0)" class="back-to-landing" id="btn-change-password" onclick="openChangePasswordModal(event)" style="margin-top: 0; border-top: none;">
+                    <i data-lucide="key-round"></i> Ganti Password
+                </a>
+                <a href="#" class="back-to-landing" id="logout-btn" style="margin-top: 0; border-top: 1px solid rgba(255,255,255,0.05);">
+                    <i data-lucide="log-out"></i> Keluar / Logout
+                </a>
+            </div>
 
             <div class="sidebar-footer">
-                <div class="sidebar-user">
+                <div class="sidebar-user" style="cursor: pointer;" title="Klik untuk ganti password" onclick="openChangePasswordModal(event)">
                     <div class="sidebar-user-avatar">AJ</div>
-                    <div class="sidebar-user-info">
+                    <div class="sidebar-user-info" style="flex: 1;">
                         <div class="sidebar-user-name">Ahmad Jaya</div>
                         <div class="sidebar-user-role">Admin • Demo Mode</div>
                     </div>
+                    <i data-lucide="key-round" style="width: 15px; height: 15px; color: var(--gray-400); opacity: 0.7;" title="Ganti Password"></i>
                 </div>
             </div>
         </aside>
@@ -452,6 +458,16 @@
                                 <option value="inactive">Status: Nonaktif</option>
                                 <option value="all">Status: Semua</option>
                             </select>
+                            <select class="filter-select" id="product-sort">
+                                <option value="name_asc">Urutkan: Nama Produk (A-Z)</option>
+                                <option value="name_desc">Urutkan: Nama Produk (Z-A)</option>
+                                <option value="sku_asc">Urutkan: SKU (A-Z)</option>
+                                <option value="sku_desc">Urutkan: SKU (Z-A)</option>
+                                <option value="category_asc">Urutkan: Kategori (A-Z)</option>
+                                <option value="category_desc">Urutkan: Kategori (Z-A)</option>
+                                <option value="stock_asc">Urutkan: Stok (Terkecil - Terbesar)</option>
+                                <option value="stock_desc">Urutkan: Stok (Terbesar - Terkecil)</option>
+                            </select>
                         </div>
                         <div class="page-toolbar-right">
                             <button class="btn-toolbar secondary" onclick="openImportModal('produk')">
@@ -503,6 +519,16 @@
                             </div>
                             <select class="filter-select" id="customer-type-filter">
                                 <!-- Filled by JS -->
+                            </select>
+                            <select class="filter-select" id="customer-sort">
+                                <option value="name_asc">Urutkan: Nama Pelanggan (A-Z)</option>
+                                <option value="name_desc">Urutkan: Nama Pelanggan (Z-A)</option>
+                                <option value="id_asc">Urutkan: ID Pelanggan (Naik)</option>
+                                <option value="id_desc">Urutkan: ID Pelanggan (Turun)</option>
+                                <option value="type_asc">Urutkan: Tipe Pelanggan (A-Z)</option>
+                                <option value="type_desc">Urutkan: Tipe Pelanggan (Z-A)</option>
+                                <option value="total_belanja_asc">Urutkan: Total Belanja (Terkecil - Terbesar)</option>
+                                <option value="total_belanja_desc">Urutkan: Total Belanja (Terbesar - Terkecil)</option>
                             </select>
                         </div>
                         <div class="page-toolbar-right" style="display: flex; gap: 0.5rem; align-items: center;">
@@ -566,6 +592,12 @@
                                 <i data-lucide="search"></i>
                                 <input type="text" placeholder="Cari vendor..." id="vendor-search">
                             </div>
+                            <select class="filter-select" id="vendor-sort">
+                                <option value="name_asc">Urutkan: Nama Vendor (A-Z)</option>
+                                <option value="name_desc">Urutkan: Nama Vendor (Z-A)</option>
+                                <option value="id_asc">Urutkan: ID Vendor (Naik)</option>
+                                <option value="id_desc">Urutkan: ID Vendor (Turun)</option>
+                            </select>
                         </div>
                         <div class="page-toolbar-right" style="display: flex; gap: 0.5rem; align-items: center;">
                             <div class="view-toggle"
@@ -3805,7 +3837,13 @@
                 </div>
                 <div class="form-group" id="staff-password-group">
                     <label>Password</label>
-                    <input type="password" id="staff-password" class="form-input" placeholder="Password staff">
+                    <div style="position: relative; display: flex; align-items: center;">
+                        <input type="password" id="staff-password" class="form-input" placeholder="Password staff (kosongkan jika tidak diubah)" style="width: 100%; padding-right: 2.5rem;">
+                        <button type="button" class="btn-toggle-pw" onclick="togglePasswordVisibility('staff-password', this)" style="position: absolute; right: 8px; background: none; border: none; cursor: pointer; color: var(--gray-400); padding: 4px; display: flex; align-items: center;" title="Tampilkan/Sembunyikan password">
+                            <i data-lucide="eye" style="width: 16px; height: 16px;"></i>
+                        </button>
+                    </div>
+                    <small id="staff-password-hint" style="color: var(--gray-500); font-size: 0.75rem; margin-top: 2px; display: block;">Minimal 6 karakter. Kosongkan jika tidak ingin mengubah password saat edit.</small>
                 </div>
                 <div class="form-group">
                     <label>Email</label>
@@ -4868,8 +4906,58 @@
         </div>
     </div>
 
+    <!-- Modal: Ganti Password Sendiri (All Roles) -->
+    <div class="modal-overlay" id="modal-change-password">
+        <div class="modal" style="max-width: 420px;">
+            <div class="modal-header">
+                <h3><i data-lucide="key" style="width: 18px; height: 18px; display: inline-block; vertical-align: middle; margin-right: 6px; color: var(--blue-600);"></i> Ganti Password</h3>
+                <button class="modal-close" onclick="closeModal('modal-change-password')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <div id="cp-error-msg" style="display: none; background: #fee2e2; border: 1px solid #f87171; color: #b91c1c; padding: 0.6rem 0.75rem; border-radius: 6px; font-size: 0.85rem; margin-bottom: 1rem;"></div>
+                
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.35rem; font-size: 0.85rem; font-weight: 500;">Password Lama <span style="color:var(--rose-600);">*</span></label>
+                    <div style="position: relative; display: flex; align-items: center;">
+                        <input type="password" id="cp-old-password" class="form-input" placeholder="Masukkan password saat ini" style="width: 100%; padding-right: 2.5rem;">
+                        <button type="button" class="btn-toggle-pw" onclick="togglePasswordVisibility('cp-old-password', this)" style="position: absolute; right: 8px; background: none; border: none; cursor: pointer; color: var(--gray-400); padding: 4px; display: flex; align-items: center;" title="Tampilkan/Sembunyikan password">
+                            <i data-lucide="eye" style="width: 16px; height: 16px;"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.35rem; font-size: 0.85rem; font-weight: 500;">Password Baru <span style="color:var(--rose-600);">*</span></label>
+                    <div style="position: relative; display: flex; align-items: center;">
+                        <input type="password" id="cp-new-password" class="form-input" placeholder="Minimal 8 karakter" style="width: 100%; padding-right: 2.5rem;">
+                        <button type="button" class="btn-toggle-pw" onclick="togglePasswordVisibility('cp-new-password', this)" style="position: absolute; right: 8px; background: none; border: none; cursor: pointer; color: var(--gray-400); padding: 4px; display: flex; align-items: center;" title="Tampilkan/Sembunyikan password">
+                            <i data-lucide="eye" style="width: 16px; height: 16px;"></i>
+                        </button>
+                    </div>
+                    <small style="color: var(--gray-500); font-size: 0.75rem; margin-top: 2px; display: block;">Minimal 8 karakter, tidak boleh sama dengan password lama</small>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 0.5rem;">
+                    <label style="display: block; margin-bottom: 0.35rem; font-size: 0.85rem; font-weight: 500;">Konfirmasi Password Baru <span style="color:var(--rose-600);">*</span></label>
+                    <div style="position: relative; display: flex; align-items: center;">
+                        <input type="password" id="cp-confirm-password" class="form-input" placeholder="Ulangi password baru" style="width: 100%; padding-right: 2.5rem;">
+                        <button type="button" class="btn-toggle-pw" onclick="togglePasswordVisibility('cp-confirm-password', this)" style="position: absolute; right: 8px; background: none; border: none; cursor: pointer; color: var(--gray-400); padding: 4px; display: flex; align-items: center;" title="Tampilkan/Sembunyikan password">
+                            <i data-lucide="eye" style="width: 16px; height: 16px;"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 1rem 1.25rem; display: flex; justify-content: flex-end; gap: 0.5rem;">
+                <button type="button" class="btn-toolbar secondary" onclick="closeModal('modal-change-password')">Batal</button>
+                <button type="button" class="btn-toolbar primary" id="btn-submit-change-password" onclick="submitChangePassword()">
+                    <i data-lucide="check" style="width: 16px; height: 16px;"></i> Simpan Password
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Application Script -->
-    <script src="dashboard.js?v=12"></script>
+    <script src="dashboard.js?v=13"></script>
 </body>
 
 </html>

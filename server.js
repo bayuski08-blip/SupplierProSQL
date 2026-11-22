@@ -20,6 +20,26 @@ process.on('unhandledRejection', (reason) => {
 
 const SECRET_KEY = process.env.JWT_SECRET || 'supplierpro_secret_key_demo';
 
+// ─── Shared Password Helper (Login, Admin Reset, Ganti Password Sendiri) ─────
+const PASSWORD_SALT_ROUNDS = 10;
+
+async function hashPassword(plaintext) {
+  if (!plaintext || typeof plaintext !== 'string') {
+    throw new Error('Password harus berupa string non-kosong');
+  }
+  return bcrypt.hash(plaintext, PASSWORD_SALT_ROUNDS);
+}
+
+async function verifyPassword(plaintext, hash) {
+  if (!plaintext || !hash) return false;
+  const isBcrypt = typeof hash === 'string' && (hash.startsWith('$2b$') || hash.startsWith('$2a$'));
+  if (isBcrypt) {
+    return bcrypt.compare(plaintext, hash);
+  }
+  // Fallback untuk legacy plaintext password (tidak auto-mengubah DB di helper)
+  return plaintext === hash;
+}
+
 const getTodayWITA = () => {
   try {
     return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Makassar' }).format(new Date());
@@ -890,23 +910,7 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error_code: 'INVALID_CREDENTIALS', error: 'Username atau password salah' });
     }
 
-    const isBcryptHash = user.password_hash.startsWith('$2b$') || user.password_hash.startsWith('$2a$');
-    let isMatch = false;
-
-    if (isBcryptHash) {
-      isMatch = await bcrypt.compare(password, user.password_hash);
-    } else {
-      if (password === user.password_hash) {
-        isMatch = true;
-        try {
-          const newHash = await bcrypt.hash(password, 10);
-          await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [newHash, user.id]);
-        } catch (hashErr) {
-          console.error('Error auto-migrating user password to bcrypt:', hashErr);
-        }
-      }
-    }
-
+    const isMatch = await verifyPassword(password, user.password_hash);
     if (!isMatch) {
       return res.status(401).json({ error_code: 'INVALID_CREDENTIALS', error: 'Username atau password salah' });
     }
@@ -926,6 +930,72 @@ app.post('/api/auth/login', async (req, res) => {
       });
     }
     res.status(500).json({ error_code: 'SERVER_ERROR', error: err.message });
+  }
+});
+
+// PUT /api/auth/change-password — Ganti Password Sendiri untuk SEMUA role
+app.put('/api/auth/change-password', authenticateToken, async (req, res) => {
+  const { password_lama, password_baru, konfirmasi_password } = req.body;
+  const userId = req.user && req.user.id;
+
+  if (!userId) {
+    return res.status(401).json({ error: 'Sesi tidak valid, silakan login ulang' });
+  }
+
+  // 1. Validasi keberadaan semua field
+  if (
+    !password_lama || !password_baru || !konfirmasi_password ||
+    typeof password_lama !== 'string' || typeof password_baru !== 'string' || typeof konfirmasi_password !== 'string' ||
+    password_lama.trim() === '' || password_baru.trim() === '' || konfirmasi_password.trim() === ''
+  ) {
+    return res.status(400).json({ error: 'Semua field wajib diisi' });
+  }
+
+  // 2. Validasi panjang minimal password baru (8 karakter)
+  if (password_baru.length < 8) {
+    return res.status(400).json({ error: 'Password baru minimal 8 karakter' });
+  }
+
+  // 3. Validasi password baru tidak boleh sama dengan password lama
+  if (password_baru === password_lama) {
+    return res.status(400).json({ error: 'Password baru tidak boleh sama dengan password lama' });
+  }
+
+  // 4. Validasi kecocokan konfirmasi password
+  if (password_baru !== konfirmasi_password) {
+    return res.status(400).json({ error: 'Konfirmasi password tidak cocok' });
+  }
+
+  try {
+    // Ambil user dari database berdasarkan ID dari token
+    const userRes = await pool.query('SELECT id, password_hash, active FROM users WHERE id = $1', [userId]);
+    const user = userRes.rows && userRes.rows[0];
+
+    if (!user || !user.active) {
+      return res.status(404).json({ error: 'Pengguna tidak ditemukan atau nonaktif' });
+    }
+
+    // 5. Verifikasi password lama cocok dengan hash di DB
+    const isOldMatch = await verifyPassword(password_lama, user.password_hash);
+    if (!isOldMatch) {
+      return res.status(400).json({ error: 'Password lama salah' });
+    }
+
+    // 6. Hash password baru dengan helper bersama
+    const newHash = await hashPassword(password_baru);
+
+    // 7. Update database baris user ini saja
+    const updateRes = await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [newHash, userId]);
+    const affected = updateRes.affectedRows || updateRes.rowCount || 0;
+
+    if (affected !== 1) {
+      return res.status(500).json({ error: 'Gagal memperbarui password di database' });
+    }
+
+    res.json({ success: true, message: 'Password berhasil diubah' });
+  } catch (err) {
+    console.error('[CHANGE PASSWORD ERROR]', err.message);
+    res.status(500).json({ error: 'Terjadi kesalahan saat mengganti password' });
   }
 });
 
@@ -1347,8 +1417,20 @@ app.get('/api/dashboard/sales-composition', authenticateToken, authorizeRoles('a
 // --- Products Routes ---
 app.get('/api/products', authenticateToken, async (req, res) => {
   try {
-    const { customer_id, page, limit: limitQ, q, search, category, stock_status, status, paginate, all } = req.query;
+    const { customer_id, page, limit: limitQ, q, search, category, stock_status, status, paginate, all, sort } = req.query;
     const isPaginated = (page !== undefined || paginate === 'true') && all !== 'true' && limitQ !== 'all';
+
+    const PRODUCT_SORT_MAP = {
+      name_asc: "CASE WHEN p.name IS NULL OR p.name = '' THEN 1 ELSE 0 END, LOWER(p.name) ASC, p.id ASC",
+      name_desc: "CASE WHEN p.name IS NULL OR p.name = '' THEN 1 ELSE 0 END, LOWER(p.name) DESC, p.id ASC",
+      sku_asc: "CASE WHEN p.sku IS NULL OR p.sku = '' THEN 1 ELSE 0 END, LOWER(REGEXP_REPLACE(p.sku, '[0-9]+$', '')) ASC, CASE WHEN p.sku REGEXP '[0-9]+$' THEN 0 ELSE 1 END, CAST(REGEXP_SUBSTR(p.sku, '[0-9]+$') AS UNSIGNED) ASC, LOWER(p.sku) ASC, LOWER(p.name) ASC, p.id ASC",
+      sku_desc: "CASE WHEN p.sku IS NULL OR p.sku = '' THEN 1 ELSE 0 END, LOWER(REGEXP_REPLACE(p.sku, '[0-9]+$', '')) DESC, CASE WHEN p.sku REGEXP '[0-9]+$' THEN 0 ELSE 1 END, CAST(REGEXP_SUBSTR(p.sku, '[0-9]+$') AS UNSIGNED) DESC, LOWER(p.sku) DESC, LOWER(p.name) ASC, p.id ASC",
+      category_asc: "CASE WHEN c.name IS NULL OR c.name = '' THEN 1 ELSE 0 END, LOWER(c.name) ASC, LOWER(p.name) ASC, p.id ASC",
+      category_desc: "CASE WHEN c.name IS NULL OR c.name = '' THEN 1 ELSE 0 END, LOWER(c.name) DESC, LOWER(p.name) ASC, p.id ASC",
+      stock_asc: "p.stock ASC, LOWER(p.name) ASC, p.id ASC",
+      stock_desc: "p.stock DESC, LOWER(p.name) ASC, p.id ASC"
+    };
+    const sortClause = PRODUCT_SORT_MAP[sort] || "p.name ASC, p.id ASC";
 
     const whereConditions = [];
     const params = [];
@@ -1427,7 +1509,7 @@ app.get('/api/products', authenticateToken, async (req, res) => {
           LEFT JOIN pricelists pl ON pl.id = cust.pricelist_id AND pl.is_active = 1
           LEFT JOIN pricelist_items pi ON pi.pricelist_id = pl.id AND pi.product_id = p.id
           ${whereClause}
-          ORDER BY p.name ASC, p.id ASC
+          ORDER BY ${sortClause}
           LIMIT ? OFFSET ?
         `;
         dataParams = [customer_id, ...params, limitNum, offset];
@@ -1453,7 +1535,7 @@ app.get('/api/products', authenticateToken, async (req, res) => {
           LEFT JOIN product_categories c ON p.category_id = c.id 
           LEFT JOIN product_units u ON p.unit_id = u.id
           ${whereClause}
-          ORDER BY p.name ASC, p.id ASC
+          ORDER BY ${sortClause}
           LIMIT ? OFFSET ?
         `;
         dataParams = [...params, limitNum, offset];
@@ -1501,7 +1583,7 @@ app.get('/api/products', authenticateToken, async (req, res) => {
         LEFT JOIN pricelists pl ON pl.id = cust.pricelist_id AND pl.is_active = 1
         LEFT JOIN pricelist_items pi ON pi.pricelist_id = pl.id AND pi.product_id = p.id
         ${whereClause}
-        ORDER BY p.name ASC, p.id ASC
+        ORDER BY ${sortClause}
       `, [customer_id, ...params]);
     } else {
       result = await pool.query(`
@@ -1525,7 +1607,7 @@ app.get('/api/products', authenticateToken, async (req, res) => {
         LEFT JOIN product_categories c ON p.category_id = c.id 
         LEFT JOIN product_units u ON p.unit_id = u.id
         ${whereClause}
-        ORDER BY p.name ASC, p.id ASC
+        ORDER BY ${sortClause}
       `, params);
     }
     res.json(result.rows);
@@ -1749,8 +1831,20 @@ const CUSTOMER_SELECT_SQL = `
 
 app.get('/api/customers', authenticateToken, authorizeRoles('admin', 'kasir', 'finance', 'owner'), async (req, res) => {
   try {
-    const { page, limit: limitQ, q, search, category, type, paginate, all } = req.query;
+    const { page, limit: limitQ, q, search, category, type, paginate, all, sort } = req.query;
     const isPaginated = (page !== undefined || paginate === 'true') && all !== 'true' && limitQ !== 'all';
+
+    const CUSTOMER_SORT_MAP = {
+      name_asc: "CASE WHEN c.name IS NULL OR c.name = '' THEN 1 ELSE 0 END, LOWER(c.name) ASC, c.id ASC",
+      name_desc: "CASE WHEN c.name IS NULL OR c.name = '' THEN 1 ELSE 0 END, LOWER(c.name) DESC, c.id ASC",
+      id_asc: "CASE WHEN c.id IS NULL OR c.id = '' THEN 1 ELSE 0 END, LOWER(REGEXP_REPLACE(c.id, '[0-9]+$', '')) ASC, CASE WHEN c.id REGEXP '[0-9]+$' THEN 0 ELSE 1 END, CAST(REGEXP_SUBSTR(c.id, '[0-9]+$') AS UNSIGNED) ASC, c.id ASC",
+      id_desc: "CASE WHEN c.id IS NULL OR c.id = '' THEN 1 ELSE 0 END, LOWER(REGEXP_REPLACE(c.id, '[0-9]+$', '')) DESC, CASE WHEN c.id REGEXP '[0-9]+$' THEN 0 ELSE 1 END, CAST(REGEXP_SUBSTR(c.id, '[0-9]+$') AS UNSIGNED) DESC, c.id DESC",
+      type_asc: "CASE WHEN cc.name IS NULL OR cc.name = '' THEN 1 ELSE 0 END, LOWER(cc.name) ASC, LOWER(c.name) ASC, c.id ASC",
+      type_desc: "CASE WHEN cc.name IS NULL OR cc.name = '' THEN 1 ELSE 0 END, LOWER(cc.name) DESC, LOWER(c.name) ASC, c.id ASC",
+      total_belanja_asc: "total_belanja ASC, LOWER(c.name) ASC, c.id ASC",
+      total_belanja_desc: "total_belanja DESC, LOWER(c.name) ASC, c.id ASC"
+    };
+    const sortClause = CUSTOMER_SORT_MAP[sort] || "c.name ASC, c.id ASC";
 
     const whereConditions = [];
     const params = [];
@@ -1787,7 +1881,7 @@ app.get('/api/customers', authenticateToken, authorizeRoles('admin', 'kasir', 'f
       const dataSql = CUSTOMER_SELECT_SQL + `
         ${whereClause}
         GROUP BY c.id, cc.name, pl.nama, pl.kode, pt.name
-        ORDER BY c.name ASC, c.id ASC
+        ORDER BY ${sortClause}
         LIMIT ? OFFSET ?
       `;
       const dataParams = [...params, limitNum, offset];
@@ -1808,7 +1902,7 @@ app.get('/api/customers', authenticateToken, authorizeRoles('admin', 'kasir', 'f
       CUSTOMER_SELECT_SQL + `
       ${whereClause}
       GROUP BY c.id, cc.name, pl.nama, pl.kode, pt.name
-      ORDER BY c.name ASC, c.id ASC
+      ORDER BY ${sortClause}
     `, params);
     res.json(result.rows);
   } catch (err) {
@@ -2386,8 +2480,16 @@ app.delete('/api/pricelists/:id/items/:productId', authenticateToken, authorizeR
 // --- Vendors Routes ---
 app.get('/api/vendors', authenticateToken, authorizeRoles('admin', 'gudang', 'finance'), async (req, res) => {
   try {
-    const { page, limit: limitQ, q, search, category, paginate, all } = req.query;
+    const { page, limit: limitQ, q, search, category, paginate, all, sort } = req.query;
     const isPaginated = (page !== undefined || paginate === 'true') && all !== 'true' && limitQ !== 'all';
+
+    const VENDOR_SORT_MAP = {
+      name_asc: "CASE WHEN v.name IS NULL OR v.name = '' THEN 1 ELSE 0 END, LOWER(v.name) ASC, v.id ASC",
+      name_desc: "CASE WHEN v.name IS NULL OR v.name = '' THEN 1 ELSE 0 END, LOWER(v.name) DESC, v.id ASC",
+      id_asc: "CASE WHEN v.id IS NULL OR v.id = '' THEN 1 ELSE 0 END, LOWER(REGEXP_REPLACE(v.id, '[0-9]+$', '')) ASC, CASE WHEN v.id REGEXP '[0-9]+$' THEN 0 ELSE 1 END, CAST(REGEXP_SUBSTR(v.id, '[0-9]+$') AS UNSIGNED) ASC, v.id ASC",
+      id_desc: "CASE WHEN v.id IS NULL OR v.id = '' THEN 1 ELSE 0 END, LOWER(REGEXP_REPLACE(v.id, '[0-9]+$', '')) DESC, CASE WHEN v.id REGEXP '[0-9]+$' THEN 0 ELSE 1 END, CAST(REGEXP_SUBSTR(v.id, '[0-9]+$') AS UNSIGNED) DESC, v.id DESC"
+    };
+    const sortClause = VENDOR_SORT_MAP[sort] || "v.name ASC, v.id ASC";
 
     const whereConditions = [];
     const params = [];
@@ -2434,7 +2536,7 @@ app.get('/api/vendors', authenticateToken, authorizeRoles('admin', 'gudang', 'fi
           COALESCE(po_agg.total_purchases, 0) AS total_purchases,
           COALESCE(po_agg.outstanding_debt, 0) AS outstanding_debt
         ${baseVendorSql}
-        ORDER BY v.name ASC, v.id ASC
+        ORDER BY ${sortClause}
         LIMIT ? OFFSET ?
       `;
       const result = await pool.query(dataSql, [...params, limitNum, offset]);
@@ -2455,7 +2557,7 @@ app.get('/api/vendors', authenticateToken, authorizeRoles('admin', 'gudang', 'fi
         COALESCE(po_agg.total_purchases, 0) AS total_purchases,
         COALESCE(po_agg.outstanding_debt, 0) AS outstanding_debt
       ${baseVendorSql}
-      ORDER BY v.name ASC, v.id ASC
+      ORDER BY ${sortClause}
     `, params);
     res.json(result.rows);
   } catch (err) {
@@ -6903,7 +7005,7 @@ app.post('/api/users', authenticateToken, authorizeRoles('admin'), async (req, r
     if (targetPassword.length < 6) {
       return res.status(400).json({ error: 'Password minimal 6 karakter' });
     }
-    const hashedPassword = await bcrypt.hash(targetPassword, 10);
+    const hashedPassword = await hashPassword(targetPassword);
     await pool.query(
       'INSERT INTO users (username, name, email, password_hash, role, active) VALUES ($1, $2, $3, $4, $5, $6)',
       [username, name, email, hashedPassword, role || 'kasir', active !== undefined ? active : true]
@@ -6916,12 +7018,29 @@ app.post('/api/users', authenticateToken, authorizeRoles('admin'), async (req, r
 
 app.put('/api/users/:id', authenticateToken, authorizeRoles('admin'), async (req, res) => {
   const { id } = req.params;
-  const { name, email, role, active } = req.body;
+  const { name, email, role, active, password } = req.body;
   try {
-    await pool.query(
-      'UPDATE users SET name = $1, email = $2, role = $3, active = $4 WHERE id = $5',
-      [name, email, role, active, id]
-    );
+    let result;
+    if (password && typeof password === 'string' && password.trim().length > 0) {
+      const cleanPassword = password.trim();
+      if (cleanPassword.length < 6) {
+        return res.status(400).json({ error: 'Password minimal 6 karakter' });
+      }
+      const hashedPassword = await hashPassword(cleanPassword);
+      result = await pool.query(
+        'UPDATE users SET name = $1, email = $2, role = $3, active = $4, password_hash = $5 WHERE id = $6',
+        [name, email, role, active, hashedPassword, id]
+      );
+    } else {
+      result = await pool.query(
+        'UPDATE users SET name = $1, email = $2, role = $3, active = $4 WHERE id = $5',
+        [name, email, role, active, id]
+      );
+    }
+    const affected = result.affectedRows || result.rowCount || 0;
+    if (affected === 0) {
+      return res.status(404).json({ error: 'Staff tidak ditemukan' });
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -6948,9 +7067,8 @@ app.get('/login', (req, res) => {
 // One-time setup function that runs on server start to seed superadmin
 (async () => {
   try {
-    const bcrypt = require('bcryptjs');
     const newAdminPassword = 'Admin@2026';
-    const hashedPassword = await bcrypt.hash(newAdminPassword, 10);
+    const hashedPassword = await hashPassword(newAdminPassword);
     
     await pool.query(`
       INSERT IGNORE INTO users (username, name, email, password_hash, role, active)

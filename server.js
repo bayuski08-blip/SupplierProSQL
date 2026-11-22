@@ -4324,11 +4324,11 @@ pool.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS status VARCHA
     await pool.query(`
       CREATE TABLE IF NOT EXISTS product_conversions (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        number VARCHAR(50) NOT NULL UNIQUE,
+        number VARCHAR(50) NOT NULL,
         date DATE NOT NULL,
-        source_product_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+        source_product_id VARCHAR(255) NOT NULL,
         source_qty DECIMAL(20,4) NOT NULL,
-        target_product_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+        target_product_id VARCHAR(255) NOT NULL,
         target_qty DECIMAL(20,4) NOT NULL,
         source_hpp_snapshot DECIMAL(20,4) NOT NULL DEFAULT 0.0000,
         moved_value DECIMAL(20,4) NOT NULL DEFAULT 0.0000,
@@ -4342,15 +4342,11 @@ pool.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS status VARCHA
         cancelled_by INT NULL,
         cancelled_at DATETIME NULL,
         cancel_reason TEXT NULL,
-        INDEX idx_pc_number (number),
-        INDEX idx_pc_date (date),
-        INDEX idx_pc_status (status),
-        INDEX idx_pc_source (source_product_id),
-        INDEX idx_pc_target (target_product_id),
-        CONSTRAINT fk_pc_source FOREIGN KEY (source_product_id) REFERENCES products(id) ON DELETE RESTRICT ON UPDATE CASCADE,
-        CONSTRAINT fk_pc_target FOREIGN KEY (target_product_id) REFERENCES products(id) ON DELETE RESTRICT ON UPDATE CASCADE,
-        CONSTRAINT fk_pc_creator FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
-        CONSTRAINT fk_pc_canceller FOREIGN KEY (cancelled_by) REFERENCES users(id) ON DELETE SET NULL
+        UNIQUE KEY uq_pc_number (number),
+        KEY idx_pc_date (date),
+        KEY idx_pc_status (status),
+        KEY idx_pc_source (source_product_id),
+        KEY idx_pc_target (target_product_id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
     `);
     await pool.query("INSERT IGNORE INTO settings (`key`, value) VALUES ('prefix_conversion', 'KNV-{YYYY}-')");

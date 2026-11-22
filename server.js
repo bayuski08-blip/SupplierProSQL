@@ -758,6 +758,25 @@ async function generatePurchaseReturnId(pgClient, returnDate) {
 }
 
 /**
+ * Generate Product Conversion ID: KNV-{YYYY}-{NNNNN}
+ */
+async function generateConversionNo(pgClient, conversionDate) {
+  const d = conversionDate ? new Date(conversionDate) : new Date();
+  const year = d.getFullYear();
+
+  await pgClient.query(
+    `INSERT INTO conversion_counters (year, last_number) VALUES (?, LAST_INSERT_ID(1))
+     ON DUPLICATE KEY UPDATE last_number = LAST_INSERT_ID(last_number + 1)`,
+    [year]
+  );
+
+  const result = await pgClient.query('SELECT LAST_INSERT_ID() AS next_number');
+  const nextNum = Number(result.rows[0].next_number);
+  const padded = String(nextNum).padStart(5, '0');
+  return `KNV-${year}-${padded}`;
+}
+
+/**
  * Record stock move entry in the current transaction/connection
  * CRITICAL RULE: NO financial data (price, cost, HPP, cash) stored here!
  */
@@ -1190,7 +1209,7 @@ app.put('/api/pengaturan/landing-demo', authenticateToken, authorizeRoles('admin
 });
 
 // --- Settings Routes ---
-app.get('/api/settings', authenticateToken, authorizeRoles('admin'), async (req, res) => {
+app.get('/api/settings', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM settings');
     const settingsMap = {};
@@ -4294,6 +4313,48 @@ pool.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS status VARCHA
     `);
     await pool.query("INSERT IGNORE INTO settings (`key`, value) VALUES ('prefix_purchase_payment', 'POP-{YYYY}-{MM}-')");
     console.log('[Migration] purchase_order_payments & purchase_payment_counters tables ensured');
+
+    // Auto-migrasi tabel konversi produk & counter
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS conversion_counters (
+        year INT NOT NULL PRIMARY KEY,
+        last_number INT NOT NULL DEFAULT 0
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS product_conversions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        number VARCHAR(50) NOT NULL UNIQUE,
+        date DATE NOT NULL,
+        source_product_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+        source_qty DECIMAL(20,4) NOT NULL,
+        target_product_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+        target_qty DECIMAL(20,4) NOT NULL,
+        source_hpp_snapshot DECIMAL(20,4) NOT NULL DEFAULT 0.0000,
+        moved_value DECIMAL(20,4) NOT NULL DEFAULT 0.0000,
+        target_stock_before DECIMAL(20,4) NOT NULL DEFAULT 0.0000,
+        target_hpp_before DECIMAL(20,4) NOT NULL DEFAULT 0.0000,
+        target_hpp_after DECIMAL(20,4) NOT NULL DEFAULT 0.0000,
+        notes TEXT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'posted',
+        created_by INT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        cancelled_by INT NULL,
+        cancelled_at DATETIME NULL,
+        cancel_reason TEXT NULL,
+        INDEX idx_pc_number (number),
+        INDEX idx_pc_date (date),
+        INDEX idx_pc_status (status),
+        INDEX idx_pc_source (source_product_id),
+        INDEX idx_pc_target (target_product_id),
+        CONSTRAINT fk_pc_source FOREIGN KEY (source_product_id) REFERENCES products(id) ON DELETE RESTRICT ON UPDATE CASCADE,
+        CONSTRAINT fk_pc_target FOREIGN KEY (target_product_id) REFERENCES products(id) ON DELETE RESTRICT ON UPDATE CASCADE,
+        CONSTRAINT fk_pc_creator FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+        CONSTRAINT fk_pc_canceller FOREIGN KEY (cancelled_by) REFERENCES users(id) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+    `);
+    await pool.query("INSERT IGNORE INTO settings (`key`, value) VALUES ('prefix_conversion', 'KNV-{YYYY}-')");
+    console.log('[Migration] product_conversions & conversion_counters tables ensured');
   } catch (err) {
     console.error('[Migration] Failed to execute migrations:', err.message);
   }
@@ -9581,6 +9642,483 @@ app.get('/api/stock-moves', authenticateToken, authorizeRoles('admin', 'gudang',
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// =========================================================================
+// FITUR: KONVERSI PRODUK (Carton -> Kg / Satuan Lain)
+// Akses: Admin & Gudang (Gudang tidak melihat HPP / nilai)
+// =========================================================================
+
+// GET /api/conversions — Daftar dokumen konversi produk
+app.get('/api/conversions', authenticateToken, authorizeRoles('admin', 'gudang'), async (req, res) => {
+  try {
+    const { page, limit, search, status, startDate, endDate, date_from, date_to } = req.query;
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(1, parseInt(limit, 10) || 80);
+    const offset = (pageNum - 1) * limitNum;
+
+    const whereConditions = [];
+    const params = [];
+
+    const searchQuery = (search || '').trim();
+    if (searchQuery) {
+      whereConditions.push('(pc.number LIKE ? OR sp.name LIKE ? OR sp.sku LIKE ? OR tp.name LIKE ? OR tp.sku LIKE ? OR pc.notes LIKE ?)');
+      const pattern = `%${searchQuery}%`;
+      params.push(pattern, pattern, pattern, pattern, pattern, pattern);
+    }
+
+    const filterStatus = (status || '').trim().toLowerCase();
+    if (filterStatus && filterStatus !== 'all') {
+      whereConditions.push('pc.status = ?');
+      params.push(filterStatus);
+    }
+
+    const fromDate = date_from || startDate;
+    if (fromDate) {
+      whereConditions.push('pc.date >= ?');
+      params.push(fromDate);
+    }
+
+    const toDate = date_to || endDate;
+    if (toDate) {
+      whereConditions.push('pc.date <= ?');
+      params.push(toDate);
+    }
+
+    const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
+
+    const countRes = await pool.query(`
+      SELECT COUNT(*) as total
+      FROM product_conversions pc
+      JOIN products sp ON sp.id = pc.source_product_id
+      JOIN products tp ON tp.id = pc.target_product_id
+      ${whereClause}
+    `, params);
+    const total = parseInt(countRes.rows[0]?.total || 0, 10);
+
+    const dataRes = await pool.query(`
+      SELECT pc.id, pc.number, pc.date,
+             pc.source_product_id, pc.source_qty,
+             pc.target_product_id, pc.target_qty,
+             pc.source_hpp_snapshot, pc.moved_value,
+             pc.target_stock_before, pc.target_hpp_before, pc.target_hpp_after,
+             pc.notes, pc.status, pc.created_at, pc.cancelled_at, pc.cancel_reason,
+             sp.name AS source_product_name, sp.sku AS source_product_sku, su.name AS source_unit_name,
+             tp.name AS target_product_name, tp.sku AS target_product_sku, tu.name AS target_unit_name,
+             u.name AS creator_name, cu.name AS canceller_name
+      FROM product_conversions pc
+      JOIN products sp ON sp.id = pc.source_product_id
+      LEFT JOIN product_units su ON su.id = sp.unit_id
+      JOIN products tp ON tp.id = pc.target_product_id
+      LEFT JOIN product_units tu ON tu.id = tp.unit_id
+      LEFT JOIN users u ON u.id = pc.created_by
+      LEFT JOIN users cu ON cu.id = pc.cancelled_by
+      ${whereClause}
+      ORDER BY pc.date DESC, pc.id DESC
+      LIMIT ? OFFSET ?
+    `, [...params, limitNum, offset]);
+
+    const isGudang = (req.user?.role || '').toLowerCase() === 'gudang';
+
+    const data = dataRes.rows.map(r => {
+      const row = {
+        id: r.id,
+        number: r.number,
+        date: r.date ? formatDateStr(r.date) : '',
+        source_product_id: r.source_product_id,
+        source_product_name: r.source_product_name,
+        source_product_sku: r.source_product_sku || '-',
+        source_unit: r.source_unit_name || '-',
+        source_qty: parseFloat(r.source_qty || 0),
+        target_product_id: r.target_product_id,
+        target_product_name: r.target_product_name,
+        target_product_sku: r.target_product_sku || '-',
+        target_unit: r.target_unit_name || '-',
+        target_qty: parseFloat(r.target_qty || 0),
+        notes: r.notes || '-',
+        status: r.status,
+        created_at: r.created_at,
+        created_by_name: r.creator_name || 'Sistem',
+        cancelled_at: r.cancelled_at,
+        cancelled_by_name: r.canceller_name || null,
+        cancel_reason: r.cancel_reason || null
+      };
+
+      // Visibilitas HPP: gudang TIDAK melihat nilai / HPP
+      if (!isGudang) {
+        row.source_hpp_snapshot = parseFloat(r.source_hpp_snapshot || 0);
+        row.moved_value = parseFloat(r.moved_value || 0);
+        row.target_stock_before = parseFloat(r.target_stock_before || 0);
+        row.target_hpp_before = parseFloat(r.target_hpp_before || 0);
+        row.target_hpp_after = parseFloat(r.target_hpp_after || 0);
+      }
+
+      return row;
+    });
+
+    res.json({
+      data,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum)
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/conversions/:id — Detail dokumen konversi
+app.get('/api/conversions/:id', authenticateToken, authorizeRoles('admin', 'gudang'), async (req, res) => {
+  try {
+    const convId = req.params.id;
+    const dataRes = await pool.query(`
+      SELECT pc.id, pc.number, pc.date,
+             pc.source_product_id, pc.source_qty,
+             pc.target_product_id, pc.target_qty,
+             pc.source_hpp_snapshot, pc.moved_value,
+             pc.target_stock_before, pc.target_hpp_before, pc.target_hpp_after,
+             pc.notes, pc.status, pc.created_at, pc.cancelled_at, pc.cancel_reason,
+             sp.name AS source_product_name, sp.sku AS source_product_sku, su.name AS source_unit_name,
+             tp.name AS target_product_name, tp.sku AS target_product_sku, tu.name AS target_unit_name,
+             u.name AS creator_name, cu.name AS canceller_name
+      FROM product_conversions pc
+      JOIN products sp ON sp.id = pc.source_product_id
+      LEFT JOIN product_units su ON su.id = sp.unit_id
+      JOIN products tp ON tp.id = pc.target_product_id
+      LEFT JOIN product_units tu ON tu.id = tp.unit_id
+      LEFT JOIN users u ON u.id = pc.created_by
+      LEFT JOIN users cu ON cu.id = pc.cancelled_by
+      WHERE pc.id = ? OR pc.number = ?
+      LIMIT 1
+    `, [convId, convId]);
+
+    if (dataRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Dokumen konversi tidak ditemukan' });
+    }
+
+    const r = dataRes.rows[0];
+    const isGudang = (req.user?.role || '').toLowerCase() === 'gudang';
+
+    const result = {
+      id: r.id,
+      number: r.number,
+      date: r.date ? formatDateStr(r.date) : '',
+      source_product_id: r.source_product_id,
+      source_product_name: r.source_product_name,
+      source_product_sku: r.source_product_sku || '-',
+      source_unit: r.source_unit_name || '-',
+      source_qty: parseFloat(r.source_qty || 0),
+      target_product_id: r.target_product_id,
+      target_product_name: r.target_product_name,
+      target_product_sku: r.target_product_sku || '-',
+      target_unit: r.target_unit_name || '-',
+      target_qty: parseFloat(r.target_qty || 0),
+      notes: r.notes || '-',
+      status: r.status,
+      created_at: r.created_at,
+      created_by_name: r.creator_name || 'Sistem',
+      cancelled_at: r.cancelled_at,
+      cancelled_by_name: r.canceller_name || null,
+      cancel_reason: r.cancel_reason || null
+    };
+
+    if (!isGudang) {
+      result.source_hpp_snapshot = parseFloat(r.source_hpp_snapshot || 0);
+      result.moved_value = parseFloat(r.moved_value || 0);
+      result.target_stock_before = parseFloat(r.target_stock_before || 0);
+      result.target_hpp_before = parseFloat(r.target_hpp_before || 0);
+      result.target_hpp_after = parseFloat(r.target_hpp_after || 0);
+    }
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/conversions — Simpan dan posting konversi produk baru
+app.post('/api/conversions', authenticateToken, authorizeRoles('admin', 'gudang'), async (req, res) => {
+  const { date, source_product_id, source_qty, target_product_id, target_qty, notes } = req.body;
+
+  // 1. Validasi input dasar
+  if (!source_product_id || !target_product_id) {
+    return res.status(400).json({ error: 'Produk sumber dan produk tujuan wajib dipilih' });
+  }
+  if (source_product_id === target_product_id) {
+    return res.status(400).json({ error: 'Produk sumber dan produk tujuan tidak boleh sama' });
+  }
+
+  const sQty = parseFloat(source_qty);
+  const tQty = parseFloat(target_qty);
+  if (isNaN(sQty) || sQty <= 0) {
+    return res.status(400).json({ error: 'Qty sumber harus berupa angka lebih besar dari 0' });
+  }
+  if (isNaN(tQty) || tQty <= 0) {
+    return res.status(400).json({ error: 'Qty tujuan harus berupa angka lebih besar dari 0' });
+  }
+
+  const convDate = date ? formatDateStr(date) : getTodayWITA();
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 2. Kunci (lock) kedua produk dengan urutan ID konsisten untuk mencegah deadlock
+    const sortedIds = [source_product_id, target_product_id].sort();
+    const prodsRes = await client.query(
+      'SELECT id, name, sku, stock, cost_price FROM products WHERE id IN (?, ?) FOR UPDATE',
+      [sortedIds[0], sortedIds[1]]
+    );
+
+    const prodMap = {};
+    prodsRes.rows.forEach(p => { prodMap[p.id] = p; });
+
+    const sourceProd = prodMap[source_product_id];
+    const targetProd = prodMap[target_product_id];
+
+    if (!sourceProd) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Produk sumber tidak ditemukan' });
+    }
+    if (!targetProd) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Produk tujuan tidak ditemukan' });
+    }
+
+    const currentSourceStock = parseFloat(sourceProd.stock || 0);
+    const currentSourceCost = parseFloat(sourceProd.cost_price || 0);
+    const currentTargetStock = parseFloat(targetProd.stock || 0);
+    const currentTargetCost = parseFloat(targetProd.cost_price || 0);
+
+    // 3. Validasi stok sumber mencukupi
+    if (currentSourceStock < sQty) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: `Stok sumber tidak mencukupi untuk '${sourceProd.name}' (Tersedia: ${currentSourceStock}, Diminta: ${sQty})`
+      });
+    }
+
+    // 4. Perhitungan nilai & HPP rata-rata tertimbang
+    const movedValue = currentSourceCost * sQty;
+    const newSourceStock = currentSourceStock - sQty;
+
+    let newTargetCost = 0;
+    if (currentTargetStock <= 0) {
+      newTargetCost = movedValue / tQty;
+    } else {
+      newTargetCost = ((currentTargetStock * currentTargetCost) + movedValue) / (currentTargetStock + tQty);
+    }
+    const newTargetStock = currentTargetStock + tQty;
+
+    // 5. Update stok & HPP kedua produk
+    // Stok sumber berkurang, HPP sumber TIDAK berubah
+    await client.query('UPDATE products SET stock = ? WHERE id = ?', [newSourceStock, source_product_id]);
+    // Stok tujuan bertambah, HPP tujuan disesuaikan dengan weighted average
+    await client.query('UPDATE products SET stock = ?, cost_price = ? WHERE id = ?', [newTargetStock, newTargetCost, target_product_id]);
+
+    // 6. Generate nomor dokumen KNV-{YYYY}-{NNNNN}
+    const convNo = await generateConversionNo(client, convDate);
+
+    // 7. Simpan dokumen product_conversions
+    const insRes = await client.query(`
+      INSERT INTO product_conversions (
+        number, date, source_product_id, source_qty, target_product_id, target_qty,
+        source_hpp_snapshot, moved_value, target_stock_before, target_hpp_before, target_hpp_after,
+        notes, status, created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'posted', ?)
+    `, [
+      convNo, convDate, source_product_id, sQty, target_product_id, tQty,
+      currentSourceCost, movedValue, currentTargetStock, currentTargetCost, newTargetCost,
+      notes ? notes.trim() : null, req.user.id
+    ]);
+    const convId = insRes.insertId || insRes.rows?.[0]?.id;
+
+    // 8. Catat 2 baris Stock Moves (tanpa nilai uang, hanya mutasi fisik)
+    // a. Keluar dari sumber
+    await recordStockMove(client, {
+      product_id: source_product_id,
+      tanggal: convDate + ' 12:00:00',
+      tipe: 'konversi_keluar',
+      ref_type: 'product_conversion',
+      ref_id: String(convNo),
+      ref_no: convNo,
+      qty_masuk: 0,
+      qty_keluar: sQty,
+      qty_sebelum: currentSourceStock,
+      qty_sesudah: newSourceStock,
+      keterangan: `Konversi keluar ke ${targetProd.name} (${convNo})`,
+      created_by: req.user.id
+    });
+
+    // b. Masuk ke tujuan
+    await recordStockMove(client, {
+      product_id: target_product_id,
+      tanggal: convDate + ' 12:00:00',
+      tipe: 'konversi_masuk',
+      ref_type: 'product_conversion',
+      ref_id: String(convNo),
+      ref_no: convNo,
+      qty_masuk: tQty,
+      qty_keluar: 0,
+      qty_sebelum: currentTargetStock,
+      qty_sesudah: newTargetStock,
+      keterangan: `Konversi masuk dari ${sourceProd.name} (${convNo})`,
+      created_by: req.user.id
+    });
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      id: convId,
+      number: convNo,
+      message: `Konversi produk ${convNo} berhasil disimpan`
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/conversions/:id/cancel — Batalkan dokumen konversi
+app.post('/api/conversions/:id/cancel', authenticateToken, authorizeRoles('admin', 'gudang'), async (req, res) => {
+  const { cancel_reason } = req.body;
+  if (!cancel_reason || typeof cancel_reason !== 'string' || !cancel_reason.trim()) {
+    return res.status(400).json({ error: 'Alasan pembatalan wajib diisi' });
+  }
+
+  const convId = req.params.id;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Ambil data dokumen konversi
+    const convRes = await client.query(
+      'SELECT * FROM product_conversions WHERE id = ? OR number = ? FOR UPDATE',
+      [convId, convId]
+    );
+    if (convRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Dokumen konversi tidak ditemukan' });
+    }
+
+    const conv = convRes.rows[0];
+    if (conv.status !== 'posted') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: `Hanya konversi berstatus 'posted' yang dapat dibatalkan (Status saat ini: ${conv.status})`
+      });
+    }
+
+    // 2. Kunci kedua produk dengan urutan ID konsisten
+    const sortedIds = [conv.source_product_id, conv.target_product_id].sort();
+    const prodsRes = await client.query(
+      'SELECT id, name, sku, stock, cost_price FROM products WHERE id IN (?, ?) FOR UPDATE',
+      [sortedIds[0], sortedIds[1]]
+    );
+
+    const prodMap = {};
+    prodsRes.rows.forEach(p => { prodMap[p.id] = p; });
+
+    const sourceProd = prodMap[conv.source_product_id];
+    const targetProd = prodMap[conv.target_product_id];
+
+    if (!sourceProd || !targetProd) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Produk sumber atau produk tujuan tidak ditemukan di master produk' });
+    }
+
+    const currentTargetStock = parseFloat(targetProd.stock || 0);
+    const currentTargetCost = parseFloat(targetProd.cost_price || 0);
+    const currentSourceStock = parseFloat(sourceProd.stock || 0);
+
+    const tQty = parseFloat(conv.target_qty);
+    const sQty = parseFloat(conv.source_qty);
+    const movedVal = parseFloat(conv.moved_value);
+    const targetHppBefore = parseFloat(conv.target_hpp_before);
+
+    // 3. GUARD: Stok produk tujuan saat ini tidak boleh lebih kecil dari target_qty
+    if (currentTargetStock < tQty) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: `Stok produk tujuan '${targetProd.name}' saat ini (${currentTargetStock}) lebih kecil dari qty hasil konversi (${tQty}). Stok hasil konversi sudah terpakai sebagian.`
+      });
+    }
+
+    // 4. Balikkan stok produk sumber (+ source_qty, HPP tetap)
+    const newSourceStock = currentSourceStock + sQty;
+    await client.query('UPDATE products SET stock = ? WHERE id = ?', [newSourceStock, conv.source_product_id]);
+
+    // 5. Balikkan stok & HPP produk tujuan
+    const remainingTargetStock = currentTargetStock - tQty;
+    let newTargetCost = 0;
+    if (remainingTargetStock === 0) {
+      newTargetCost = targetHppBefore;
+    } else {
+      newTargetCost = ((currentTargetStock * currentTargetCost) - movedVal) / remainingTargetStock;
+      if (newTargetCost < 0) newTargetCost = targetHppBefore;
+    }
+    await client.query('UPDATE products SET stock = ?, cost_price = ? WHERE id = ?', [remainingTargetStock, newTargetCost, conv.target_product_id]);
+
+    // 6. Update status dokumen konversi ke cancelled
+    const nowDt = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    await client.query(`
+      UPDATE product_conversions
+      SET status = 'cancelled',
+          cancelled_by = ?,
+          cancelled_at = ?,
+          cancel_reason = ?
+      WHERE id = ?
+    `, [req.user.id, nowDt, cancel_reason.trim(), conv.id]);
+
+    // 7. Catat 2 baris Stock Moves pembalik
+    // a. Tujuan keluar (batal_konversi)
+    await recordStockMove(client, {
+      product_id: conv.target_product_id,
+      tanggal: nowDt,
+      tipe: 'batal_konversi',
+      ref_type: 'product_conversion',
+      ref_id: String(conv.number),
+      ref_no: conv.number,
+      qty_masuk: 0,
+      qty_keluar: tQty,
+      qty_sebelum: currentTargetStock,
+      qty_sesudah: remainingTargetStock,
+      keterangan: `Pembatalan Konversi ${conv.number}: ${cancel_reason.trim()}`,
+      created_by: req.user.id
+    });
+
+    // b. Sumber masuk (batal_konversi)
+    await recordStockMove(client, {
+      product_id: conv.source_product_id,
+      tanggal: nowDt,
+      tipe: 'batal_konversi',
+      ref_type: 'product_conversion',
+      ref_id: String(conv.number),
+      ref_no: conv.number,
+      qty_masuk: sQty,
+      qty_keluar: 0,
+      qty_sebelum: currentSourceStock,
+      qty_sesudah: newSourceStock,
+      keterangan: `Pembatalan Konversi ${conv.number}: ${cancel_reason.trim()}`,
+      created_by: req.user.id
+    });
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      message: `Konversi ${conv.number} berhasil dibatalkan`
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 // =========================================================================

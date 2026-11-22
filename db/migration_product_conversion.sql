@@ -1,0 +1,47 @@
+-- ==============================================================
+-- Migration: Fitur Konversi Produk (Carton -> Kg / Satuan Lain)
+-- File: db/migration_product_conversion.sql
+-- Collation: utf8mb4_general_ci (matching products table)
+-- Idempoten: aman dijalankan berkali-kali di production & clone
+-- ==============================================================
+
+-- 1. Tabel counter konversi produk (atomic yearly counter)
+CREATE TABLE IF NOT EXISTS conversion_counters (
+  year INT NOT NULL PRIMARY KEY,
+  last_number INT NOT NULL DEFAULT 0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- 2. Tabel dokumen konversi produk
+CREATE TABLE IF NOT EXISTS product_conversions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  number VARCHAR(50) NOT NULL UNIQUE,
+  date DATE NOT NULL,
+  source_product_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  source_qty DECIMAL(20,4) NOT NULL,
+  target_product_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  target_qty DECIMAL(20,4) NOT NULL,
+  source_hpp_snapshot DECIMAL(20,4) NOT NULL DEFAULT 0.0000,
+  moved_value DECIMAL(20,4) NOT NULL DEFAULT 0.0000,
+  target_stock_before DECIMAL(20,4) NOT NULL DEFAULT 0.0000,
+  target_hpp_before DECIMAL(20,4) NOT NULL DEFAULT 0.0000,
+  target_hpp_after DECIMAL(20,4) NOT NULL DEFAULT 0.0000,
+  notes TEXT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'posted',
+  created_by INT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  cancelled_by INT NULL,
+  cancelled_at DATETIME NULL,
+  cancel_reason TEXT NULL,
+  INDEX idx_pc_number (number),
+  INDEX idx_pc_date (date),
+  INDEX idx_pc_status (status),
+  INDEX idx_pc_source (source_product_id),
+  INDEX idx_pc_target (target_product_id),
+  CONSTRAINT fk_pc_source FOREIGN KEY (source_product_id) REFERENCES products(id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT fk_pc_target FOREIGN KEY (target_product_id) REFERENCES products(id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT fk_pc_creator FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_pc_canceller FOREIGN KEY (cancelled_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- 3. Setting prefix konversi
+INSERT IGNORE INTO settings (`key`, value) VALUES ('prefix_conversion', 'KNV-{YYYY}-');

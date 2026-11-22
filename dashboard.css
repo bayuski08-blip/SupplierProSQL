@@ -2946,3 +2946,31 @@ body.modal-open {
     display: inline-block;
     margin-top: 3px;
 }
+
+/* Badges for Product Conversion */
+.badge-status.posted {
+    background: #dcfce7;
+    color: #15803d;
+    border: 1px solid #bbf7d0;
+}
+
+.badge-status.cancelled {
+    background: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+}
+
+.badge-status.konversi_keluar {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+.badge-status.konversi_masuk {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+.badge-status.batal_konversi {
+    background: #fef3c7;
+    color: #92400e;
+}

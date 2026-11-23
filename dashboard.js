@@ -48,7 +48,7 @@ function addPurchaseItemRow(containerId) {
     row.className = `form-row ${prefix}-purchase-item`;
     row.style.marginBottom = '0.5rem';
 
-    const productOptions = PRODUCTS.map(p => `<option value="${p.id}">${p.name} (Stok: ${p.stock})</option>`).join('');
+    const productOptions = PRODUCTS.map(p => `<option value="${p.id}">${p.name} (Stok: ${formatNumberTrim(p.stock)})</option>`).join('');
 
     row.innerHTML = `
         <div class="form-group" style="flex: 2;">
@@ -2595,7 +2595,7 @@ function renderPOSProducts(searchTerm = '', category = '') {
                 <div class="pos-product-emoji">${p.emoji}</div>
                 <div class="pos-product-name">${p.name}</div>
                 <div class="pos-product-price">${rp(p.price)}</div>
-                <div class="pos-product-stock">Stok: ${p.stock} ${p.unit}</div>
+                <div class="pos-product-stock">Stok: ${formatNumberTrim(p.stock)} ${p.unit}</div>
             </div>
             `).join('')}
         </div>`;
@@ -2632,7 +2632,7 @@ function renderPOSProducts(searchTerm = '', category = '') {
             <div class="pos-product-emoji">${p.emoji}</div>
             <div class="pos-product-name">${p.name}</div>
             <div class="pos-product-price">${rp(p.price)}</div>
-            <div class="pos-product-stock">Stok: ${p.stock} ${p.unit}</div>
+            <div class="pos-product-stock">Stok: ${formatNumberTrim(p.stock)} ${p.unit}</div>
         </div>
     `).join('');
 }
@@ -2689,11 +2689,40 @@ function addToCart(productId) {
 function updateCartQty(productId, delta) {
     const item = cart.find(c => c.id === productId);
     if (!item) return;
-    item.qty += delta;
+    item.qty = Math.round((item.qty + delta) * 1000) / 1000;
     if (item.qty <= 0) {
         cart = cart.filter(c => c.id !== productId);
     }
     renderCart();
+}
+
+function updateCartQtyDirect(productId, rawValue) {
+    // Normalisasi: koma → titik, lalu parse float
+    const val = parseFloat(String(rawValue).replace(',', '.'));
+    const item = cart.find(c => c.id === productId);
+    if (!item) return;
+    if (isNaN(val) || val <= 0) {
+        // Hapus item jika qty tidak valid atau 0
+        cart = cart.filter(c => c.id !== productId);
+        renderCart();
+        return;
+    }
+    // Batasi 3 desimal untuk menghindari floating point drift
+    const qty = Math.round(val * 1000) / 1000;
+    // Validasi stok
+    const product = PRODUCTS.find(p => p.id === productId);
+    if (product && qty > parseFloat(product.stock || 0)) {
+        showToast(`Qty melebihi stok tersedia (${formatNumberTrim(product.stock)} ${product.unit || ''})`, 'warning');
+        item.qty = parseFloat(product.stock || 0);
+    } else {
+        item.qty = qty;
+    }
+    // Update total display tanpa rebuild DOM penuh (agar input tidak kehilangan fokus)
+    const cartItemTotal = document.querySelector(`.cart-item-qty input[data-id="${productId}"]`)
+        ?.closest('.cart-item-row')?.querySelector('.cart-item-total');
+    if (cartItemTotal) cartItemTotal.textContent = rp(item.price * item.qty);
+    // Update subtotal + total di panel bawah
+    updateCartTotals();
 }
 
 function removeFromCart(productId) {
@@ -2744,7 +2773,12 @@ function renderCart() {
                 </div>
                 <div class="cart-item-qty">
                     <button class="cart-qty-btn" onclick="updateCartQty('${item.id}', -1)">-</button>
-                    <span class="cart-qty-val">${formatNumberTrim(item.qty)}</span>
+                    <input type="text" inputmode="decimal" class="cart-qty-input" data-id="${item.id}"
+                        value="${formatNumberTrim(item.qty)}"
+                        style="width:52px; text-align:center; padding:0.1rem 0.2rem; font-size:0.9rem; border:1px solid var(--gray-300); border-radius:0.25rem;"
+                        onkeydown="if(event.key==='Enter'){this.blur();}"
+                        onblur="updateCartQtyDirect(this.dataset.id, this.value)"
+                        onclick="this.select()" />
                     <button class="cart-qty-btn" onclick="updateCartQty('${item.id}', 1)">+</button>
                 </div>
                 <div class="cart-item-total">${rp(item.price * item.qty)}</div>
@@ -2818,6 +2852,23 @@ function renderCart() {
 }
 
 // Old Settings PPN binding removed
+
+// Helper: update subtotal/ppn/total di panel bawah keranjang tanpa rebuild DOM
+function updateCartTotals() {
+    if (typeof cart === 'undefined') return;
+    const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
+    const afterDiscount = subtotal;
+    const ppnAmount = currentPpnEnabled ? afterDiscount * (currentPpnRate / 100) : 0;
+    const total = afterDiscount + ppnAmount;
+    const countEl = document.getElementById('cart-count');
+    if (countEl) countEl.textContent = cart.reduce((s, c) => s + c.qty, 0);
+    const subEl = document.getElementById('cart-subtotal');
+    if (subEl) subEl.textContent = rp(subtotal);
+    const ppnEl = document.getElementById('cart-ppn');
+    if (ppnEl) ppnEl.textContent = rp(ppnAmount);
+    const totalEl = document.getElementById('cart-total');
+    if (totalEl) totalEl.textContent = rp(total);
+}
 
 // POS search
 document.getElementById('pos-search')?.addEventListener('input', (e) => {
@@ -5720,7 +5771,7 @@ function addProductToPo(prod) {
     if (!prod) return;
     const existing = addPurchaseItems.find(i => String(i.product_id) === String(prod.id));
     if (existing) {
-        existing.quantity = (parseInt(existing.quantity) || 0) + 1;
+        existing.quantity = (parseFloat(existing.quantity) || 0) + 1;
     } else {
         addPurchaseItems.push({
             product_id: prod.id,
@@ -6914,7 +6965,7 @@ async function saveInvoiceEdits(bypassSoftLock = false, correctionReason = null)
     const inv = INVOICES.find(x => x.id === id);
     const customer_id = inv ? inv.customerId : null;
 
-    const subtotal = editInvoiceItems.reduce((s, i) => s + (parseFloat(i.price || i.sell_price || 0) * parseInt(i.quantity || i.qty || 0)), 0);
+    const subtotal = editInvoiceItems.reduce((s, i) => s + (parseFloat(i.price || i.sell_price || 0) * parseFloat(i.quantity || i.qty || 0)), 0);
     const ppnRate = (typeof currentPpnEnabled !== 'undefined' && !currentPpnEnabled) ? 0 : ((typeof currentPpnRate !== 'undefined' ? currentPpnRate : 11) / 100);
     const newTotal = subtotal + Math.round(subtotal * ppnRate);
 
@@ -11805,9 +11856,9 @@ async function openSalesReturnModal(invId) {
                         <td style="text-align:right;">
                             <input type="number" class="form-input sales-ret-qty-input" 
                                 style="width: 80px; text-align:right; padding: 0.25rem 0.4rem; font-size: 0.85rem;"
-                                min="0" max="${maxReturn}" value="0" 
+                                min="0" max="${maxReturn}" step="any" value="0" 
                                 data-idx="${idx}" ${isAllReturned ? 'disabled' : ''}
-                                oninput="updateSalesReturnCalc()">
+                                oninput="this.value=this.value.replace(',','.'); updateSalesReturnCalc()">
                         </td>
                         <td>
                             <select class="form-input sales-ret-cond-select" style="padding: 0.25rem 0.4rem; font-size: 0.8rem;" data-idx="${idx}" ${isAllReturned ? 'disabled' : ''}>
@@ -12036,9 +12087,9 @@ async function openPurchaseReturnModal(poId) {
                         <td style="text-align:right;">
                             <input type="number" class="form-input purchase-ret-qty-input" 
                                 style="width: 80px; text-align:right; padding: 0.25rem 0.4rem; font-size: 0.85rem;"
-                                min="0" max="${maxReturn}" value="0" 
+                                min="0" max="${maxReturn}" step="any" value="0" 
                                 data-idx="${idx}" ${isAllReturned ? 'disabled' : ''}
-                                oninput="updatePurchaseReturnCalc()">
+                                oninput="this.value=this.value.replace(',','.'); updatePurchaseReturnCalc()">
                         </td>
                         <td class="th-purchase-return-finance" style="text-align:right; font-weight:600; ${canSeeFinance ? '' : 'display:none;'}">
                             <span id="purchase-ret-item-subtotal-${idx}">Rp 0</span>

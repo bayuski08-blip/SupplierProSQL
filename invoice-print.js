@@ -315,7 +315,7 @@ function renderInvoice(data, ppnEnabled, isProforma = false) {
                 <td style="text-align: center;">${rowNo}</td>
                 <td style="text-align: left; white-space: normal; word-break: break-word; font-size: 8pt; line-height: 1.25;">${productName}</td>
                 <td style="text-align: center;">${it.unit_name || '-'}</td>
-                <td style="text-align: center;">${it.quantity}</td>
+                <td style="text-align: center;">${(+it.quantity % 1 === 0) ? (+it.quantity).toFixed(0) : parseFloat(it.quantity).toString()}</td>
                 <td style="text-align: right;">${rp(it.price).replace('Rp', '').trim()}</td>
                 <td style="text-align: right;">${rp(it.total).replace('Rp', '').trim()}</td>
             </tr>`;

@@ -1,9 +1,9 @@
 -- ==============================================================
 -- Migration: Fitur Konversi Produk (Carton -> Kg / Satuan Lain)
 -- File: db/migration_product_conversion.sql
--- Collation: utf8mb4_general_ci (matching products table)
+-- Collation: utf8mb4_unicode_ci (matching Hostinger products table)
 -- Idempoten: aman dijalankan berkali-kali di production & clone
--- Catatan: Tanpa FOREIGN KEY agar kompatibel di Hostinger
+-- Catatan: Tanpa FOREIGN KEY agar kompatibel di Hostinger shared hosting
 -- ==============================================================
 
 -- 1. Tabel counter konversi produk (atomic yearly counter)
@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS `conversion_counters` (
   `year` INT NOT NULL,
   `last_number` INT NOT NULL DEFAULT 0,
   PRIMARY KEY (`year`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 2. Tabel dokumen konversi produk
 CREATE TABLE IF NOT EXISTS `product_conversions` (
@@ -19,8 +19,8 @@ CREATE TABLE IF NOT EXISTS `product_conversions` (
   `number`               VARCHAR(50) NOT NULL,
   `date`                 DATE NOT NULL,
   `source_product_id`    VARCHAR(255) NOT NULL,
-  `source_qty`           DECIMAL(20,4) NOT NULL,
   `target_product_id`    VARCHAR(255) NOT NULL,
+  `source_qty`           DECIMAL(20,4) NOT NULL,
   `target_qty`           DECIMAL(20,4) NOT NULL,
   `source_hpp_snapshot`  DECIMAL(20,4) NOT NULL DEFAULT 0.0000,
   `moved_value`          DECIMAL(20,4) NOT NULL DEFAULT 0.0000,
@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS `product_conversions` (
   KEY `idx_pc_status` (`status`),
   KEY `idx_pc_source` (`source_product_id`),
   KEY `idx_pc_target` (`target_product_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 3. Setting prefix konversi
 INSERT IGNORE INTO `settings` (`key`, `value`) VALUES ('prefix_conversion', 'KNV-{YYYY}-');

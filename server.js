@@ -871,6 +871,49 @@ const authorizeRoles = (...allowedRoles) => {
 
 // ======================= API ROUTES =======================
 
+// ─── Price & Cost Access Control Helpers ─────────────────────────────────────
+// Role kasir tidak boleh menerima field HPP / harga pokok
+const HPP_RESTRICTED_ROLES = ['kasir'];
+function isHppRestricted(req) {
+  return HPP_RESTRICTED_ROLES.includes((req.user?.role || '').toLowerCase());
+}
+function stripHppFields(row) {
+  const r = { ...row };
+  delete r.cost_price;
+  delete r.cost_price_snapshot;
+  delete r.hpp;
+  delete r.cost;
+  delete r.total_cost;
+  delete r.total_stock_value;
+  return r;
+}
+
+// Role gudang tidak boleh menerima field Harga Jual produk
+const SELL_PRICE_RESTRICTED_ROLES = ['gudang'];
+function isSellPriceRestricted(req) {
+  return SELL_PRICE_RESTRICTED_ROLES.includes((req.user?.role || '').toLowerCase());
+}
+function stripSellPriceFields(row) {
+  const r = { ...row };
+  delete r.sell_price;
+  delete r.harga_efektif;
+  delete r.harga_master;
+  delete r.harga_pricelist;
+  return r;
+}
+
+function sanitizeProductRow(row, req) {
+  let r = { ...row };
+  if (isHppRestricted(req)) {
+    r = stripHppFields(r);
+  }
+  if (isSellPriceRestricted(req)) {
+    r = stripSellPriceFields(r);
+  }
+  return r;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ─── Health Check Endpoints (tanpa auth, untuk diagnostik hosting) ───────────
 // Buka di browser: https://yourdomain.com/health
 app.get('/health', (req, res) => {
@@ -1561,8 +1604,10 @@ app.get('/api/products', authenticateToken, async (req, res) => {
       }
 
       const result = await pool.query(dataSql, dataParams);
+      const hppRestricted = isHppRestricted(req);
+      const sanitizedRows = result.rows.map(r => sanitizeProductRow(r, req));
       return res.json({
-        data: result.rows,
+        data: sanitizedRows,
         pagination: {
           page: pageNum,
           limit: limitNum,
@@ -1570,7 +1615,7 @@ app.get('/api/products', authenticateToken, async (req, res) => {
           totalPages: Math.ceil(total / limitNum) || 1
         },
         summary: {
-          totalStockValue
+          totalStockValue: hppRestricted ? undefined : totalStockValue
         }
       });
     }
@@ -1629,7 +1674,8 @@ app.get('/api/products', authenticateToken, async (req, res) => {
         ORDER BY ${sortClause}
       `, params);
     }
-    res.json(result.rows);
+    // Sanitize product rows for restricted roles (kasir: no HPP, gudang: no sell_price)
+    res.json(result.rows.map(r => sanitizeProductRow(r, req)));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1648,7 +1694,8 @@ app.get('/api/products/:id', authenticateToken, async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Produk tidak ditemukan' });
     }
-    res.json(result.rows[0]);
+    const productRow = sanitizeProductRow(result.rows[0], req);
+    res.json(productRow);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1662,7 +1709,9 @@ app.post('/api/products', authenticateToken, authorizeRoles('admin', 'gudang'), 
     const prefix = await getSetting('prefix_product', 'P');
     const nextId = await generateNextId(pool, 'products', prefix);
     const targetId = id || nextId;
-    await pool.query(insertQuery, [targetId, sku, brandVal, name, category_id, cost_price, sell_price, stock, min_stock, unit_id || 'PU-1']);
+    const targetCostPrice = isHppRestricted(req) ? 0 : (parseFloat(cost_price) || 0);
+    const targetSellPrice = isSellPriceRestricted(req) ? 0 : (parseFloat(sell_price) || 0);
+    await pool.query(insertQuery, [targetId, sku, brandVal, name, category_id, targetCostPrice, targetSellPrice, stock, min_stock, unit_id || 'PU-1']);
     if (parseFloat(stock || 0) > 0) {
       await recordStockMove(pool, {
         product_id: targetId,
@@ -1690,10 +1739,15 @@ app.put('/api/products/:id', authenticateToken, authorizeRoles('admin', 'gudang'
   const brandVal = (brand !== undefined && brand !== null && String(brand).trim() !== '') ? String(brand).trim() : null;
   const updateQuery = 'UPDATE products SET sku = $1, brand = $2, name = $3, category_id = $4, cost_price = $5, sell_price = $6, stock = $7, min_stock = $8, unit_id = $9 WHERE id = $10';
   try {
-    const curRes = await pool.query('SELECT stock FROM products WHERE id = $1', [id]);
+    const curRes = await pool.query('SELECT stock, cost_price, sell_price FROM products WHERE id = $1', [id]);
+    if (curRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Produk tidak ditemukan' });
+    }
     const oldStock = parseFloat(curRes.rows[0]?.stock || 0);
     const newStock = parseFloat(stock !== undefined ? stock : oldStock);
-    const result = await pool.query(updateQuery, [sku, brandVal, name, category_id, cost_price, sell_price, stock, min_stock, unit_id, id]);
+    const targetCostPrice = (isHppRestricted(req) || cost_price === undefined) ? curRes.rows[0].cost_price : cost_price;
+    const targetSellPrice = (isSellPriceRestricted(req) || sell_price === undefined) ? curRes.rows[0].sell_price : sell_price;
+    const result = await pool.query(updateQuery, [sku, brandVal, name, category_id, targetCostPrice, targetSellPrice, stock, min_stock, unit_id, id]);
     if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Produk tidak ditemukan' });
     }
@@ -2752,13 +2806,12 @@ app.get('/api/invoices/:id/items', authenticateToken, authorizeRoles('admin', 'k
       LEFT JOIN products p ON p.id = ii.product_id
       WHERE ii.invoice_id = $1
     `, [req.params.id]);
-    // Security: strip fee fields from non-admin responses
+    // Security: strip fee fields from non-admin responses; strip HPP for restricted roles
     const rows = result.rows.map(row => {
-      if (req.user.role !== 'admin') {
-        const { customer_fee, fee_notes, ...rest } = row;
-        return rest;
-      }
-      return row;
+      let r = { ...row };
+      if (req.user.role !== 'admin') { const { customer_fee, fee_notes, ...rest } = r; r = rest; }
+      if (isHppRestricted(req)) { delete r.cost_price_snapshot; }
+      return r;
     });
     res.json(rows);
   } catch (err) {
@@ -4315,6 +4368,7 @@ pool.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS status VARCHA
     console.log('[Migration] purchase_order_payments & purchase_payment_counters tables ensured');
 
     // Auto-migrasi tabel konversi produk & counter
+    // Collation: utf8mb4_general_ci (default lokal); di Hostinger tabel sudah dibuat via SQL import
     await pool.query(`
       CREATE TABLE IF NOT EXISTS conversion_counters (
         year INT NOT NULL PRIMARY KEY,
@@ -4327,8 +4381,8 @@ pool.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS status VARCHA
         number VARCHAR(50) NOT NULL,
         date DATE NOT NULL,
         source_product_id VARCHAR(255) NOT NULL,
-        source_qty DECIMAL(20,4) NOT NULL,
         target_product_id VARCHAR(255) NOT NULL,
+        source_qty DECIMAL(20,4) NOT NULL,
         target_qty DECIMAL(20,4) NOT NULL,
         source_hpp_snapshot DECIMAL(20,4) NOT NULL DEFAULT 0.0000,
         moved_value DECIMAL(20,4) NOT NULL DEFAULT 0.0000,
@@ -9687,8 +9741,8 @@ app.get('/api/conversions', authenticateToken, authorizeRoles('admin', 'gudang')
     const countRes = await pool.query(`
       SELECT COUNT(*) as total
       FROM product_conversions pc
-      JOIN products sp ON sp.id = pc.source_product_id
-      JOIN products tp ON tp.id = pc.target_product_id
+      JOIN products sp ON sp.id = pc.source_product_id COLLATE utf8mb4_unicode_ci
+      JOIN products tp ON tp.id = pc.target_product_id COLLATE utf8mb4_unicode_ci
       ${whereClause}
     `, params);
     const total = parseInt(countRes.rows[0]?.total || 0, 10);
@@ -9704,9 +9758,9 @@ app.get('/api/conversions', authenticateToken, authorizeRoles('admin', 'gudang')
              tp.name AS target_product_name, tp.sku AS target_product_sku, tu.name AS target_unit_name,
              u.name AS creator_name, cu.name AS canceller_name
       FROM product_conversions pc
-      JOIN products sp ON sp.id = pc.source_product_id
+      JOIN products sp ON sp.id = pc.source_product_id COLLATE utf8mb4_unicode_ci
       LEFT JOIN product_units su ON su.id = sp.unit_id
-      JOIN products tp ON tp.id = pc.target_product_id
+      JOIN products tp ON tp.id = pc.target_product_id COLLATE utf8mb4_unicode_ci
       LEFT JOIN product_units tu ON tu.id = tp.unit_id
       LEFT JOIN users u ON u.id = pc.created_by
       LEFT JOIN users cu ON cu.id = pc.cancelled_by
@@ -9782,9 +9836,9 @@ app.get('/api/conversions/:id', authenticateToken, authorizeRoles('admin', 'guda
              tp.name AS target_product_name, tp.sku AS target_product_sku, tu.name AS target_unit_name,
              u.name AS creator_name, cu.name AS canceller_name
       FROM product_conversions pc
-      JOIN products sp ON sp.id = pc.source_product_id
+      JOIN products sp ON sp.id = pc.source_product_id COLLATE utf8mb4_unicode_ci
       LEFT JOIN product_units su ON su.id = sp.unit_id
-      JOIN products tp ON tp.id = pc.target_product_id
+      JOIN products tp ON tp.id = pc.target_product_id COLLATE utf8mb4_unicode_ci
       LEFT JOIN product_units tu ON tu.id = tp.unit_id
       LEFT JOIN users u ON u.id = pc.created_by
       LEFT JOIN users cu ON cu.id = pc.cancelled_by

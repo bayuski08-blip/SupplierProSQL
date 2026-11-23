@@ -1,4 +1,4 @@
-﻿// ==========================================================================
+// ==========================================================================
 // SupplierPro Dashboard — JavaScript
 // ==========================================================================
 
@@ -728,6 +728,12 @@ function applyRoleRestrictions() {
     const canSeeHpp = role === 'admin' || role === 'owner' || role === 'gudang';
     document.querySelectorAll('.th-product-hpp, .td-product-hpp, .form-group-product-cost').forEach(el => {
         el.style.display = canSeeHpp ? '' : 'none';
+    });
+
+    // Sembunyikan Harga Jual untuk gudang
+    const canSeeSellPrice = role !== 'gudang';
+    document.querySelectorAll('.th-product-price, .td-product-price, .form-group-product-price').forEach(el => {
+        el.style.display = canSeeSellPrice ? '' : 'none';
     });
 
     // Sembunyikan nilai / HPP konversi untuk selain Admin (misal Gudang)
@@ -2134,6 +2140,9 @@ async function fetchHutang(page) {
 
 // ---------- Cash Flow Page ----------
 function renderCashFlow(filter = '') {
+    // Gudang tidak punya akses ke halaman kas/keuangan
+    const _role = (localStorage.getItem('role') || '').toLowerCase();
+    if (!['admin', 'finance', 'owner', 'kasir'].includes(_role)) return;
     if (filter && filter !== '') currentCashFlowFilter = filter;
     paginationState.cashflow.page = 1;
     fetchCashTransactions(1);
@@ -2195,6 +2204,9 @@ function _renderCashFlowLocal_UNUSED(filter = '') {
 
 // ---------- Profit & Loss Page ----------
 async function renderProfitLoss() {
+    // Gudang tidak punya akses ke laporan laba-rugi
+    const _role = (localStorage.getItem('role') || '').toLowerCase();
+    if (!['admin', 'finance', 'owner'].includes(_role)) return;
     const bulanSelect = document.getElementById('filter-bulan');
     const tahunSelect = document.getElementById('filter-tahun');
 
@@ -2339,6 +2351,9 @@ async function renderProfitLoss() {
 
 // ---------- Balance Sheet Page ----------
 async function renderBalance() {
+    // Gudang tidak punya akses ke neraca keuangan
+    const _role = (localStorage.getItem('role') || '').toLowerCase();
+    if (!['admin', 'finance', 'owner'].includes(_role)) return;
     const bulanSelect = document.getElementById('balance-filter-bulan');
     const tahunSelect = document.getElementById('balance-filter-tahun');
 
@@ -2441,6 +2456,9 @@ async function renderBalance() {
 
 // ---------- Reports Page ----------
 async function renderReports() {
+    // Gudang tidak punya akses ke halaman laporan performa
+    const _role = (localStorage.getItem('role') || '').toLowerCase();
+    if (!['admin', 'finance', 'owner', 'kasir'].includes(_role)) return;
     const bulanSelect = document.getElementById('reports-filter-bulan');
     const tahunSelect = document.getElementById('reports-filter-tahun');
 
@@ -4604,6 +4622,7 @@ async function fetchProducts(page) {
 
         const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
         const canSeeHpp = role === 'admin' || role === 'owner' || role === 'gudang';
+        const canSeeSellPrice = role !== 'gudang';
 
         const tbody = document.getElementById('products-body');
         if (!tbody) return;
@@ -4645,7 +4664,7 @@ async function fetchProducts(page) {
                 <td style="font-weight:600;">${pr.name}</td>
                 <td>${pr.category || '-'}</td>
                 <td class="td-product-hpp" style="${canSeeHpp ? '' : 'display:none;'}">${canSeeHpp ? rp(pr.cost) : ''}</td>
-                <td style="font-weight:700;">${rp(pr.price)}</td>
+                <td class="td-product-price" style="${canSeeSellPrice ? '' : 'display:none; '}font-weight:700;">${canSeeSellPrice ? rp(pr.price) : ''}</td>
                 <td style="font-weight:700;">${pr.stock}</td>
                 <td>${pr.unit}</td>
                 <td>${pr.minStock}</td>
@@ -4692,11 +4711,15 @@ async function saveProduct(isEdit) {
         sku: document.getElementById(`${prefix}-product-sku`).value,
         category_id: categoryValue,   // FIX: backend expects category_id not category
         cost_price: parseFloat(document.getElementById(`${prefix}-product-cost`).value) || 0,
-        sell_price: parseFloat(document.getElementById(`${prefix}-product-price`).value) || 0,
         stock: isEdit ? parseFloat(document.getElementById('edit-product-stock').value) || 0 : parseFloat(document.getElementById('add-product-stock').value) || 0,
         min_stock: parseFloat(document.getElementById(`${prefix}-product-minstock`).value) || 0,
         unit_id: isEdit ? document.getElementById('edit-product-unit').value : document.getElementById('add-product-unit').value
     };
+
+    const priceVal = document.getElementById(`${prefix}-product-price`)?.value;
+    if (priceVal !== undefined && priceVal !== null && String(priceVal).trim() !== '') {
+        payload.sell_price = parseFloat(priceVal) || 0;
+    }
 
     if (!payload.name || !payload.sku) {
         showToast('Nama produk dan SKU wajib diisi!', 'warning');
@@ -4770,8 +4793,9 @@ async function openEditProductModal(id) {
     }
     const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
     const canSeeHpp = role === 'admin' || role === 'owner' || role === 'gudang';
+    const canSeeSellPrice = role !== 'gudang';
     document.getElementById('edit-product-cost').value = (p.cost != null && !isNaN(p.cost) && canSeeHpp) ? formatNumberTrim(p.cost) : '';
-    document.getElementById('edit-product-price').value = formatNumberTrim(p.price);
+    document.getElementById('edit-product-price').value = (p.price != null && !isNaN(p.price) && canSeeSellPrice) ? formatNumberTrim(p.price) : '';
     document.getElementById('edit-product-stock').value = formatNumberTrim(p.stock);
     document.getElementById('edit-product-minstock').value = formatNumberTrim(p.minStock);
     const unitEl = document.getElementById('edit-product-unit');
@@ -4873,6 +4897,9 @@ function deleteProduct(id) {
 }
 
 async function fetchCustomers(page) {
+    // Gudang tidak punya akses ke data pelanggan
+    const _role = (localStorage.getItem('role') || '').toLowerCase();
+    if (!['admin', 'kasir', 'finance', 'owner'].includes(_role)) return;
     try {
         const mapCustomer = c => ({
             ...c,
@@ -5605,6 +5632,30 @@ function highlightMatch(text, query) {
     return result;
 }
 
+// Helper: hitung ulang subtotal Add PO tanpa rebuild DOM
+function _recalcAddPurchaseTotals() {
+    const container = document.getElementById('add-purchase-items-container');
+    if (!container) return;
+    let subtotal = 0;
+    addPurchaseItems.forEach((item, index) => {
+        const qty   = parseFloat(item.quantity) || 0;
+        const price = parseFloat(item.price)    || 0;
+        const itemTotal = qty * price;
+        subtotal += itemTotal;
+        // Update kolom "Total" baris ke-index tanpa rebuild
+        const rows = container.querySelectorAll('tr[data-po-index]');
+        const row  = rows[index];
+        if (row) {
+            const totalCell = row.querySelector('[data-po-total]');
+            if (totalCell) totalCell.textContent = rp(itemTotal);
+        }
+    });
+    const subtotalEl = document.getElementById('add-purchase-subtotal-display');
+    const totalEl    = document.getElementById('add-purchase-total-display');
+    if (subtotalEl) subtotalEl.textContent = rp(subtotal);
+    if (totalEl)    totalEl.textContent    = rp(subtotal);
+}
+
 function renderAddPurchaseItems(highlightProductId = null) {
     const container = document.getElementById('add-purchase-items-container');
     if (!container) return;
@@ -5624,22 +5675,23 @@ function renderAddPurchaseItems(highlightProductId = null) {
             setTimeout(() => tr.classList.remove('po-row-highlight'), 1500);
         }
         tr.dataset.productId = item.product_id;
+        tr.dataset.poIndex = index;  // untuk targeted update
 
         tr.innerHTML = `
             <td style="padding: 0.5rem 0.75rem;">
                 <div style="font-weight: 500; color: var(--gray-900);">${escapeHtml(product.name)}</div>
             </td>
             <td style="padding: 0.5rem; text-align: center; white-space: nowrap;">
-                <input type="number" min="1" value="${formatNumberTrim(item.quantity)}" oninput="updateAddPurchaseItemQty(${index}, this.value)" onchange="updateAddPurchaseItemQty(${index}, this.value)" step="any" min="0.001" style="width: 80px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: center;">
+                <input type="number" min="1" value="${formatNumberTrim(item.quantity)}" onchange="updateAddPurchaseItemQty(${index}, this.value)" step="any" style="width: 80px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: center;">
                 <span style="font-size: 0.8rem; color: var(--gray-500); margin-left: 0.25rem;">${escapeHtml(product.unit || 'pcs')}</span>
             </td>
             <td style="padding: 0.5rem; text-align: right;">
                 <div style="display:flex; align-items:center; justify-content:flex-end; gap:0.25rem;">
                     <span style="font-size:0.75rem; color:var(--gray-500);">Rp</span>
-                    <input type="number" value="${formatNumberTrim(item.price)}" oninput="updateAddPurchaseItemPrice(${index}, this.value)" onchange="updateAddPurchaseItemPrice(${index}, this.value)" step="any" style="width: 90px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: right;">
+                    <input type="number" value="${formatNumberTrim(item.price)}" onchange="updateAddPurchaseItemPrice(${index}, this.value)" step="any" style="width: 90px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: right;">
                 </div>
             </td>
-            <td style="padding: 0.5rem; text-align: right; font-weight: 600; color: var(--gray-900);">
+            <td style="padding: 0.5rem; text-align: right; font-weight: 600; color: var(--gray-900);" data-po-total>
                 ${rp(itemTotal)}
             </td>
             <td style="padding: 0.5rem; text-align: center;">
@@ -5675,7 +5727,7 @@ function addProductToPo(prod) {
             product_name: prod.name,
             unit: prod.unit || 'pcs',
             quantity: 1,
-            price: prod.cost || prod.price || 0
+            price: prod.cost || 0
         });
     }
     renderAddPurchaseItems(prod.id);
@@ -5935,7 +5987,7 @@ function getPoProductAutocomplete() {
             inputId: 'add-purchase-product-search',
             dropdownId: 'add-purchase-product-dropdown',
             modalSelector: '#modal-add-purchase .modal',
-            getPrice: function(p) { return p.cost || p.price || 0; },
+            getPrice: function(p) { return p.cost || 0; },
             onSelect: function(p) { addProductToPo(p); }
         });
     }
@@ -5979,13 +6031,15 @@ window.removeAddPurchaseItem = (index) => {
 window.updateAddPurchaseItemQty = (index, val) => {
     const qty = parseFloat(val);
     addPurchaseItems[index].quantity = qty > 0 ? qty : 1;
-    renderAddPurchaseItems();
+    // Targeted update: hanya total baris + subtotal, tanpa rebuild DOM
+    _recalcAddPurchaseTotals();
 };
 
 window.updateAddPurchaseItemPrice = (index, val) => {
     const price = parseFloat(val);
     if (price >= 0) addPurchaseItems[index].price = price;
-    renderAddPurchaseItems();
+    // Targeted update: hanya total baris + subtotal, tanpa rebuild DOM
+    _recalcAddPurchaseTotals();
 };
 
 // FIX: open add-purchase modal with cleared form
@@ -6034,6 +6088,27 @@ function openAddPurchaseModal() {
 
 let editPurchaseItems = [];
 
+// Helper: hitung ulang subtotal Edit PO tanpa rebuild DOM
+function _recalcEditPurchaseTotals() {
+    const container = document.getElementById('edit-purchase-items-container');
+    if (!container) return;
+    let subtotal = 0;
+    editPurchaseItems.forEach((item, index) => {
+        const qty   = parseFloat(item.quantity) || 0;
+        const price = parseFloat(item.price ?? item.cost ?? 0);
+        const itemTotal = qty * price;
+        subtotal += itemTotal;
+        const rows = container.querySelectorAll('tr[data-po-index]');
+        const row  = rows[index];
+        if (row) {
+            const totalCell = row.querySelector('[data-po-total]');
+            if (totalCell) totalCell.textContent = rp(itemTotal);
+        }
+    });
+    const totalEl = document.getElementById('edit-purchase-total');
+    if (totalEl) totalEl.textContent = rp(subtotal);
+}
+
 function renderEditPurchaseItems() {
     const container = document.getElementById('edit-purchase-items-container');
     if (!container) return;
@@ -6048,12 +6123,13 @@ function renderEditPurchaseItems() {
         subtotal += itemTotal;
 
         const tr = document.createElement('tr');
+        tr.dataset.poIndex = index;  // untuk targeted update
         tr.innerHTML = `
             <td style="padding: 0.5rem;">
                 <div style="font-weight: 500; color: var(--gray-900);">${product.name}</div>
             </td>
             <td style="padding: 0.5rem; text-align: center; white-space: nowrap;">
-                <input type="number" min="1" value="${formatNumberTrim(item.quantity)}" onchange="updateEditPurchaseItemQty(${index}, this.value)" step="any" min="0.001" style="width: 80px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: center;">
+                <input type="number" min="1" value="${formatNumberTrim(item.quantity)}" onchange="updateEditPurchaseItemQty(${index}, this.value)" step="any" style="width: 80px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: center;">
                 <span style="font-size: 0.8rem; color: var(--gray-500); margin-left: 0.25rem;">${product.unit || 'pcs'}</span>
             </td>
             <td style="padding: 0.5rem; text-align: right;">
@@ -6062,7 +6138,7 @@ function renderEditPurchaseItems() {
                     <input type="number" value="${formatNumberTrim(itemPrice)}" onchange="updateEditPurchaseItemPrice(${index}, this.value)" step="any" style="width: 90px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: right;">
                 </div>
             </td>
-            <td style="padding: 0.5rem; text-align: right; font-weight: 600; color: var(--gray-900);">
+            <td style="padding: 0.5rem; text-align: right; font-weight: 600; color: var(--gray-900);" data-po-total>
                 ${rp(itemTotal)}
             </td>
             <td style="padding: 0.5rem; text-align: center;">
@@ -6115,7 +6191,8 @@ window.updateEditPurchaseItemQty = (index, val) => {
     } else {
         editPurchaseItems[index].quantity = 1;
     }
-    renderEditPurchaseItems();
+    // Targeted update: hanya total baris + subtotal, tanpa rebuild DOM
+    _recalcEditPurchaseTotals();
 };
 
 window.updateEditPurchaseItemPrice = (index, val) => {
@@ -6123,7 +6200,8 @@ window.updateEditPurchaseItemPrice = (index, val) => {
     if (price >= 0) {
         editPurchaseItems[index].price = price;
     }
-    renderEditPurchaseItems();
+    // Targeted update: hanya total baris + subtotal, tanpa rebuild DOM
+    _recalcEditPurchaseTotals();
 };
 
 let originalEditPurchaseItems = [];
@@ -6158,8 +6236,13 @@ async function openEditPurchaseModal(id) {
     // Populate product select
     const select = document.getElementById('edit-purchase-product-select');
     if (select) {
+        const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+        const canSeeSellPrice = role !== 'gudang';
         select.innerHTML = '<option value="" disabled selected>- Pilih Produk -</option>' +
-            PRODUCTS.map(p => `<option value="${p.id}">${p.name} (${rp(p.cost || p.price)})</option>`).join('');
+            PRODUCTS.map(p => {
+                const labelPrice = (p.cost != null && p.cost > 0) ? rp(p.cost) : (canSeeSellPrice ? rp(p.price) : '');
+                return `<option value="${p.id}">${p.name}${labelPrice ? ' (' + labelPrice + ')' : ''}</option>`;
+            }).join('');
     }
 
     // Reset items and show loading
@@ -7054,6 +7137,9 @@ window.cancelPurchaseFromEdit = () => {
 // ==========================================================================
 
 async function fetchCashTransactions(page) {
+    // Gudang tidak punya akses ke data kas/keuangan
+    const _role = (localStorage.getItem('role') || '').toLowerCase();
+    if (!['admin', 'finance', 'owner', 'kasir'].includes(_role)) return;
     try {
         // Full data for CASH_TRANSACTIONS global cache
         const resAll = await fetch('/api/finance/cash-flow?all=true', { headers: getAuthHeaders() });
@@ -9852,13 +9938,20 @@ async function exportSection(section) {
         if (section === 'produk') {
             const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
             const canSeeHpp = role === 'admin' || role === 'owner' || role === 'gudang';
-            if (canSeeHpp) {
-                headers = ["SKU", "Nama Produk", "Brand/Merk", "Kategori", "Harga Beli", "Harga Jual", "Stok", "Stok Minimum", "Satuan"];
-                rows = PRODUCTS.map(p => [p.sku||'', p.name||'', p.brand||'', p.category||'', p.cost||0, p.price||0, p.stock||0, p.minStock||0, p.unit||'']);
-            } else {
-                headers = ["SKU", "Nama Produk", "Brand/Merk", "Kategori", "Harga Jual", "Stok", "Stok Minimum", "Satuan"];
-                rows = PRODUCTS.map(p => [p.sku||'', p.name||'', p.brand||'', p.category||'', p.price||0, p.stock||0, p.minStock||0, p.unit||'']);
-            }
+            const canSeeSellPrice = role !== 'gudang';
+
+            headers = ["SKU", "Nama Produk", "Brand/Merk", "Kategori"];
+            if (canSeeHpp) headers.push("Harga Beli");
+            if (canSeeSellPrice) headers.push("Harga Jual");
+            headers.push("Stok", "Stok Minimum", "Satuan");
+
+            rows = PRODUCTS.map(p => {
+                const row = [p.sku||'', p.name||'', p.brand||'', p.category||''];
+                if (canSeeHpp) row.push(p.cost||0);
+                if (canSeeSellPrice) row.push(p.price||0);
+                row.push(p.stock||0, p.minStock||0, p.unit||'');
+                return row;
+            });
             filename = "export_produk.xlsx";
         } else if (section === 'pelanggan') {
             headers = ["Nama", "Tipe", "Telepon", "Kota", "Alamat", "Limit Piutang"];

@@ -98,6 +98,9 @@
                     <div class="nav-item" data-page="balance" id="nav-balance">
                         <i data-lucide="scale"></i> Neraca
                     </div>
+                    <div class="nav-item" data-page="sales-report" id="nav-sales-report">
+                        <i data-lucide="file-bar-chart-2"></i> Laporan Penjualan
+                    </div>
                     <div class="nav-item" data-page="customerfee" id="nav-customerfee">
                         <i data-lucide="lock"></i> Fee Customer
                     </div>
@@ -798,6 +801,8 @@
                                     <th>Dibayar</th>
                                     <th>Tipe</th>
                                     <th>Status</th>
+                                    <th class="th-invoice-laba" style="text-align: right; display: none;">Laba</th>
+                                    <th class="th-invoice-margin" style="text-align: right; display: none;">Margin</th>
                                     <th style="text-align: right;">Aksi</th>
                                 </tr>
                             </thead>
@@ -1592,6 +1597,93 @@
                         </div>
                     </div>
                     <div id="pagination-customers" class="pagination-container"></div>
+                </section>
+
+                <!-- ============================================================
+                 PAGE: LAPORAN PENJUALAN & LABA (Admin Only)
+                 ============================================================ -->
+                <section class="page-section" id="page-sales-report">
+                    <div class="sales-report-filter-card">
+                        <div class="sales-report-filter-top">
+                            <div class="sales-report-presets" id="sales-report-presets">
+                                <button type="button" class="sr-preset-btn" data-preset="today" onclick="setSalesReportPreset('today')">Hari Ini</button>
+                                <button type="button" class="sr-preset-btn" data-preset="last7" onclick="setSalesReportPreset('last7')">7 Hari Terakhir</button>
+                                <button type="button" class="sr-preset-btn active" data-preset="this_month" onclick="setSalesReportPreset('this_month')">Bulan Ini</button>
+                                <button type="button" class="sr-preset-btn" data-preset="last_month" onclick="setSalesReportPreset('last_month')">Bulan Lalu</button>
+                                <button type="button" class="sr-preset-btn" data-preset="this_year" onclick="setSalesReportPreset('this_year')">Tahun Ini</button>
+                                <button type="button" class="sr-preset-btn" data-preset="custom" onclick="setSalesReportPreset('custom')">Kustom</button>
+                            </div>
+                            <div class="sales-report-segmented" id="sales-report-group-control" role="group" aria-label="Kelompokkan">
+                                <button type="button" class="sr-seg-btn active" data-group="day" onclick="setSalesReportGroup('day')">Per Hari</button>
+                                <button type="button" class="sr-seg-btn" data-group="month" onclick="setSalesReportGroup('month')">Per Bulan</button>
+                                <button type="button" class="sr-seg-btn" data-group="invoice" onclick="setSalesReportGroup('invoice')">Per Invoice</button>
+                            </div>
+                        </div>
+
+                        <div class="sales-report-filter-grid">
+                            <div class="sr-field">
+                                <label for="sr-from">Dari</label>
+                                <input type="date" id="sr-from" class="form-input" onchange="onSalesReportDateInput()">
+                            </div>
+                            <div class="sr-field">
+                                <label for="sr-to">Sampai</label>
+                                <input type="date" id="sr-to" class="form-input" onchange="onSalesReportDateInput()">
+                            </div>
+                            <div class="sr-field">
+                                <label for="sr-customer">Pelanggan</label>
+                                <select id="sr-customer" class="filter-select">
+                                    <option value="all">Semua Pelanggan</option>
+                                </select>
+                            </div>
+                            <div class="sr-field">
+                                <label for="sr-payment-type">Tipe Pembayaran</label>
+                                <select id="sr-payment-type" class="filter-select">
+                                    <option value="all">Semua Tipe</option>
+                                </select>
+                            </div>
+                            <div class="sr-field">
+                                <label for="sr-status">Status</label>
+                                <select id="sr-status" class="filter-select">
+                                    <option value="all">Semua (Non-Cancel)</option>
+                                    <option value="Lunas">Lunas</option>
+                                    <option value="Belum Lunas">Belum Lunas</option>
+                                    <option value="Sebagian">Sebagian</option>
+                                    <option value="Belum Bayar">Belum Bayar</option>
+                                </select>
+                            </div>
+                            <div class="sr-actions">
+                                <button type="button" class="btn-toolbar primary" id="btn-sr-apply" onclick="fetchSalesReport(1)">
+                                    <i data-lucide="search"></i> Tampilkan
+                                </button>
+                                <button type="button" class="btn-toolbar secondary" onclick="exportSalesReportExcel()" title="Export Excel (XLSX)">
+                                    <i data-lucide="file-spreadsheet"></i> Excel
+                                </button>
+                                <button type="button" class="btn-toolbar secondary" onclick="exportSalesReportPdf()" title="Export PDF">
+                                    <i data-lucide="file-text"></i> PDF
+                                </button>
+                            </div>
+                        </div>
+                        <div id="sr-error-banner" class="sr-error-banner" style="display:none;"></div>
+                    </div>
+
+                    <!-- Ringkasan Kartu -->
+                    <div class="sales-report-summary-grid" id="sr-summary-cards">
+                        <!-- Filled by JS -->
+                    </div>
+
+                    <div id="sr-drilldown-bar" class="sr-drilldown-bar" style="display:none;"></div>
+
+                    <!-- Tabel Hasil -->
+                    <div class="data-table-wrapper">
+                        <table class="data-table" id="sales-report-table">
+                            <thead id="sr-table-head"></thead>
+                            <tbody id="sr-table-body">
+                                <tr><td colspan="9" style="text-align:center; padding:2.5rem; color:var(--gray-400);">Pilih filter lalu klik <b>Tampilkan</b></td></tr>
+                            </tbody>
+                            <tfoot id="sr-table-foot"></tfoot>
+                        </table>
+                    </div>
+                    <div id="pagination-sales-report" class="pagination-container"></div>
                 </section>
 
                 <!-- ============================================================

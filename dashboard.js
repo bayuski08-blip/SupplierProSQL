@@ -75,7 +75,10 @@ function addPurchaseItemRow(containerId) {
 
 // ---------- Currency Formatter ----------
 function rp(n) {
-    return 'Rp ' + Number(n).toLocaleString('id-ID');
+    const num = Number(n);
+    const clean = (!isFinite(num) || Object.is(num, -0) || Math.abs(num) < 0.0001) ? 0 : num;
+    if (clean < 0) return '-Rp ' + Math.abs(clean).toLocaleString('id-ID');
+    return 'Rp ' + clean.toLocaleString('id-ID');
 }
 
 
@@ -99,10 +102,14 @@ function formatNumberTrim(val) {
 const formatNumTrim = formatNumberTrim;
 
 function rpShort(n) {
-    if (n >= 1_000_000_000) return 'Rp ' + (n / 1_000_000_000).toFixed(1) + 'M';
-    if (n >= 1_000_000) return 'Rp ' + (n / 1_000_000).toFixed(1) + 'jt';
-    if (n >= 1_000) return 'Rp ' + (n / 1_000).toFixed(0) + 'rb';
-    return rp(n);
+    const num = Number(n);
+    const clean = (!isFinite(num) || Object.is(num, -0) || Math.abs(num) < 0.0001) ? 0 : num;
+    const sign = clean < 0 ? '-' : '';
+    const abs = Math.abs(clean);
+    if (abs >= 1_000_000_000) return sign + 'Rp ' + (abs / 1_000_000_000).toFixed(1) + 'M';
+    if (abs >= 1_000_000) return sign + 'Rp ' + (abs / 1_000_000).toFixed(1) + 'jt';
+    if (abs >= 1_000) return sign + 'Rp ' + (abs / 1_000).toFixed(0) + 'rb';
+    return rp(clean);
 }
 
 // ---------- Date Formatter (DD/MM/YYYY, timezone-safe) ----------
@@ -656,6 +663,7 @@ const PAGE_TITLES = {
     cashflow: { title: 'Arus Kas', subtitle: 'Mutasi kas masuk dan keluar' },
     profitloss: { title: 'Laba Rugi', subtitle: 'Laporan pendapatan dan beban' },
     balance: { title: 'Neraca', subtitle: 'Posisi keuangan bisnis Anda' },
+    'sales-report': { title: 'Laporan Penjualan', subtitle: 'Analisis penjualan, HPP, dan laba per hari, bulan, atau invoice' },
     reports: { title: 'Laporan & Insight', subtitle: 'Analisis performa bisnis' },
     settings: { title: 'Pengaturan', subtitle: 'Konfigurasi profil dan preferensi' },
     roles: { title: 'Otoritas Akses', subtitle: 'Kelola hak akses dan peran staff' },
@@ -668,7 +676,7 @@ const PAGE_TITLES = {
 
 // ---------- Role Based Access Control (RBAC) ----------
 const ROLE_PERMISSIONS = {
-    admin: ['dashboard', 'pos', 'products', 'customers', 'vendors', 'purchases', 'proformas', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'reports', 'settings', 'roles', 'master-data', 'customerfee', 'pricelists', 'returns', 'stock-moves', 'conversions'],
+    admin: ['dashboard', 'pos', 'products', 'customers', 'vendors', 'purchases', 'proformas', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'sales-report', 'reports', 'settings', 'roles', 'master-data', 'customerfee', 'pricelists', 'returns', 'stock-moves', 'conversions'],
     finance: ['dashboard', 'invoices', 'piutang', 'cashflow', 'profitloss', 'balance', 'reports', 'returns'],
     gudang: ['dashboard', 'products', 'purchases', 'vendors', 'hutang', 'stock-moves', 'returns', 'conversions'],
     kasir: ['dashboard', 'pos', 'customers', 'proformas', 'invoices', 'pricelists', 'returns']
@@ -724,10 +732,16 @@ function applyRoleRestrictions() {
         el.style.display = canSeeFinance ? '' : 'none';
     });
 
-    // Sembunyikan HPP untuk kasir
-    const canSeeHpp = role === 'admin' || role === 'owner' || role === 'gudang';
+    // Sembunyikan HPP untuk kasir dan gudang
+    const canSeeHpp = role === 'admin' || role === 'owner';
     document.querySelectorAll('.th-product-hpp, .td-product-hpp, .form-group-product-cost').forEach(el => {
         el.style.display = canSeeHpp ? '' : 'none';
+    });
+
+    // Kolom Laba & Margin di list Transaksi / Invoice hanya untuk admin
+    const isAdminOnly = role === 'admin';
+    document.querySelectorAll('.th-invoice-laba, .th-invoice-margin, .td-invoice-laba, .td-invoice-margin').forEach(el => {
+        el.style.display = isAdminOnly ? '' : 'none';
     });
 
     // Sembunyikan Harga Jual untuk gudang
@@ -859,6 +873,9 @@ function navigateTo(page) {
     }
     if (page === 'conversions') {
         if (typeof loadConversionsPage === 'function') loadConversionsPage(1);
+    }
+    if (page === 'sales-report') {
+        if (typeof initSalesReportPage === 'function') initSalesReportPage();
     }
 
     // Close mobile sidebar
@@ -2237,10 +2254,21 @@ async function renderProfitLoss() {
 
         const d = dataRes.data;
         const fmtAmt = (amt, isSubtotal = false) => {
-            if (amt < 0) return `<span style="color:var(--rose-600);">- ${rp(Math.abs(amt))}</span>`;
-            if (amt > 0 && isSubtotal) return `<span style="color:var(--emerald-600);">${rp(amt)}</span>`;
-            return `<span>${rp(amt)}</span>`;
+            const raw = Number(amt);
+            const clean = (!isFinite(raw) || Object.is(raw, -0) || Math.abs(raw) < 0.005) ? 0 : raw;
+            if (clean < 0) return `<span style="color:var(--rose-600);">- ${rp(Math.abs(clean))}</span>`;
+            if (clean > 0 && isSubtotal) return `<span style="color:var(--emerald-600);">${rp(clean)}</span>`;
+            return `<span>${rp(clean)}</span>`;
         };
+        const returDanDiskon = parseFloat(d.pendapatan.returDanDiskon ?? ((parseFloat(d.pendapatan.diskon) || 0) + (parseFloat(d.pendapatan.retur) || 0)));
+        const diskonVal = parseFloat(d.pendapatan.diskon || 0);
+        const returVal = parseFloat(d.pendapatan.retur || 0);
+        const returDiskonDetail = (diskonVal > 0 || returVal > 0)
+            ? ` <small style="color:var(--gray-400);">(Diskon: ${rp(diskonVal)}, Retur: ${rp(returVal)})</small>`
+            : '';
+        const marginText = (d.marginPersen !== null && d.marginPersen !== undefined && isFinite(d.marginPersen))
+            ? `${Number(d.marginPersen).toFixed(1)}%`
+            : '-';
 
         const rowStyle = "display:flex; justify-content:space-between; padding:0.5rem 0; border-bottom:1px dashed var(--gray-200);";
         const titleStyle = "font-weight:600; color:var(--indigo-600); margin-bottom:0.75rem; text-transform:uppercase; letter-spacing:0.05em; font-size:1.1rem; margin-top:1.5rem;";
@@ -2251,14 +2279,14 @@ async function renderProfitLoss() {
         const html = `
             <!-- 1. PENDAPATAN -->
             <div>
-                <div style="${titleStyle}">Pendapatan</div>
+                <div style="${titleStyle}">Pendapatan <small style="font-size:0.75rem; font-weight:400; color:var(--gray-400); text-transform:none;">(Basis DPP / Tanpa PPN)</small></div>
                 <div style="${rowStyle}">
                     <span>Penjualan Kotor</span>
                     ${fmtAmt(d.pendapatan.kotor)}
                 </div>
                 <div style="${rowStyle} color:var(--gray-500); padding-left:1.5rem;">
-                    <span>Dikurangi: Retur & Diskon</span>
-                    ${fmtAmt(-d.pendapatan.diskon)}
+                    <span>Dikurangi: Retur & Diskon${returDiskonDetail}</span>
+                    ${fmtAmt(returDanDiskon > 0 ? -returDanDiskon : 0)}
                 </div>
                 <div style="${rowStyle} font-weight:600; border-bottom:none; padding-top:1rem;">
                     <span>Penjualan Bersih</span>
@@ -2270,14 +2298,15 @@ async function renderProfitLoss() {
             <div>
                 <div style="${titleStyle}">Harga Pokok Penjualan (HPP)</div>
                 <div style="${rowStyle}">
-                    <span>Total Pembelian / HPP</span>
-                    ${fmtAmt(-d.hpp)}
+                    <span>HPP Barang Terjual</span>
+                    ${fmtAmt(d.hpp > 0 ? -d.hpp : 0)}
                 </div>
+                ${d.hppReturRusak > 0 ? `<div style="font-size:0.78rem; color:var(--amber-700); padding:0.25rem 0 0 1.5rem;">Catatan: Kerugian HPP dari retur barang rusak sebesar ${rp(d.hppReturRusak)} tetap termasuk dalam HPP.</div>` : ''}
             </div>
 
             <!-- LABA KOTOR -->
             <div style="${highlightStyle}">
-                <span>Laba Kotor</span>
+                <span>Laba Kotor <small style="font-size:0.8rem; font-weight:500; color:var(--gray-500);">(Margin: ${marginText})</small></span>
                 ${fmtAmt(d.labaKotor, true)}
             </div>
 
@@ -2497,11 +2526,21 @@ async function renderReports() {
         if (noDataEl) noDataEl.style.display = d.has_data ? 'none' : 'block';
 
         // 1. Insight Cards
+        const avgDayTooltip = d.divisor_days
+            ? `Penjualan bersih (DPP) ÷ ${d.divisor_days} hari${d.is_current_month ? ' berjalan bulan ini' : ' kalender'}`
+            : 'Rata-rata penjualan per hari';
+        const avgDayDesc = d.divisor_days
+            ? `Dari ${d.divisor_days} hari ${d.is_current_month ? 'berjalan' : 'kalender'}`
+            : 'Berdasarkan data bulan ini';
+        const marginDisplay = (d.margin !== null && d.margin !== undefined && isFinite(d.margin))
+            ? `${Number(d.margin).toFixed(1)}%`
+            : '-';
+
         insightsEl.innerHTML = `
-            <div class="insight-card">
+            <div class="insight-card" title="${avgDayTooltip}">
                 <div class="insight-card-title"><i data-lucide="trending-up"></i> Rata-rata Penjualan/Hari</div>
                 <div class="insight-card-value">${rpShort(d.rata_hari)}</div>
-                <div class="insight-card-desc">Berdasarkan data bulan ini</div>
+                <div class="insight-card-desc">${avgDayDesc}</div>
             </div>
             <div class="insight-card">
                 <div class="insight-card-title"><i data-lucide="receipt"></i> Rata-rata Nilai Invoice</div>
@@ -2510,8 +2549,8 @@ async function renderReports() {
             </div>
             <div class="insight-card">
                 <div class="insight-card-title"><i data-lucide="percent"></i> Margin Rata-rata</div>
-                <div class="insight-card-value">${d.margin.toFixed(1)}%</div>
-                <div class="insight-card-desc">Laba kotor dibanding omzet</div>
+                <div class="insight-card-value">${marginDisplay}</div>
+                <div class="insight-card-desc">Laba kotor ÷ penjualan bersih</div>
             </div>
             <div class="insight-card">
                 <div class="insight-card-title"><i data-lucide="users"></i> Customer Retention</div>
@@ -4500,7 +4539,7 @@ async function ensureProductsLoadedForPOS() {
             name: p.name,
             category: p.category,
             category_id: p.category_id,
-            cost: parseFloat(p.cost_price),
+            cost: (p.cost_price != null && !isNaN(p.cost_price)) ? parseFloat(p.cost_price) : 0,
             price: parseFloat(p.sell_price),
             stock: parseFloat(p.stock),
             minStock: parseFloat(p.min_stock),
@@ -4672,7 +4711,7 @@ async function fetchProducts(page) {
         CURRENT_PAGE_PRODUCTS.clear();
 
         const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
-        const canSeeHpp = role === 'admin' || role === 'owner' || role === 'gudang';
+        const canSeeHpp = role === 'admin' || role === 'owner';
         const canSeeSellPrice = role !== 'gudang';
 
         const tbody = document.getElementById('products-body');
@@ -4843,7 +4882,7 @@ async function openEditProductModal(id) {
         if (!catEl.value && p.category_id) catEl.value = p.category_id;
     }
     const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
-    const canSeeHpp = role === 'admin' || role === 'owner' || role === 'gudang';
+    const canSeeHpp = role === 'admin' || role === 'owner';
     const canSeeSellPrice = role !== 'gudang';
     document.getElementById('edit-product-cost').value = (p.cost != null && !isNaN(p.cost) && canSeeHpp) ? formatNumberTrim(p.cost) : '';
     document.getElementById('edit-product-price').value = (p.price != null && !isNaN(p.price) && canSeeSellPrice) ? formatNumberTrim(p.price) : '';
@@ -5905,10 +5944,14 @@ class ProductAutocomplete {
 
         const displayed = matches.slice(0, 8);
         const self = this;
+        const acRole = (localStorage.getItem('role') || 'kasir').toLowerCase();
+        const hideAcPrice = acRole === 'gudang';
         const itemsHtml = displayed.map((p, idx) => {
             const highlightedName = highlightMatch(p.name, q);
             const price = self.getPrice(p);
-            const metaText = 'Stok ' + (p.stock != null ? p.stock : 0) + ' · ' + rp(price);
+            const metaText = hideAcPrice
+                ? ('Stok ' + (p.stock != null ? p.stock : 0))
+                : ('Stok ' + (p.stock != null ? p.stock : 0) + ' · ' + rp(price));
             const selectedClass = idx === self.activeIndex ? 'po-item-selected' : '';
 
             return '<div class="po-dropdown-item ' + selectedClass + '" data-index="' + idx + '" data-product-id="' + escapeHtml(p.id) + '">' +
@@ -6224,7 +6267,7 @@ window.addEditPurchaseItem = () => {
         editPurchaseItems.push({
             product_id: prod.id,
             quantity: 1,
-            price: prod.cost || prod.price
+            price: prod.cost || prod.price || 0
         });
     }
     renderEditPurchaseItems();
@@ -6476,7 +6519,11 @@ async function fetchInvoices(page) {
 
         const today = new Date().toISOString().split('T')[0];
         const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+        const isAdminInv = role === 'admin';
         const canEdit = role === 'admin' || role === 'finance' || role === 'kasir';
+        document.querySelectorAll('.th-invoice-laba, .th-invoice-margin').forEach(el => {
+            el.style.display = isAdminInv ? '' : 'none';
+        });
         const tbody = document.getElementById('invoices-body');
         if (tbody) {
             tbody.innerHTML = rows.map(inv => {
@@ -6486,6 +6533,19 @@ async function fetchInvoices(page) {
                 const overdueBadge = isOverdue ? '<span class="badge-status overdue" style="margin-left:4px; font-size:0.7rem; padding:2px 7px;">Lewat JT</span>' : '';
                 const retAmount = parseFloat(inv.return_amount || inv.returnAmount || 0);
                 const retBadge = retAmount > 0 ? `<span class="badge-retur-indicator" title="Total Retur: ${rp(retAmount)}">Ada Retur</span>` : '';
+                const isCancelledInv = statusLower === 'batal' || statusLower === 'cancel' || statusLower === 'dibatalkan';
+                let labaCells = '';
+                if (isAdminInv) {
+                    if (isCancelledInv || inv.laba === undefined || inv.laba === null) {
+                        labaCells = `<td class="td-invoice-laba" style="text-align:right; color:var(--gray-400);">-</td><td class="td-invoice-margin" style="text-align:right; color:var(--gray-400);">-</td>`;
+                    } else {
+                        const labaVal = parseFloat(inv.laba || 0);
+                        const marginStr = (inv.marginPct !== null && inv.marginPct !== undefined && isFinite(inv.marginPct)) ? `${Number(inv.marginPct).toFixed(1)}%` : '-';
+                        const isNeg = labaVal < 0 || (inv.marginPct !== null && inv.marginPct < 0);
+                        const estBadge = inv.hppEstimasi ? `<span class="badge-hpp-estimasi" title="HPP berasal dari estimasi/backfill atau import outstanding">Est</span>` : '';
+                        labaCells = `<td class="td-invoice-laba ${isNeg ? 'sr-neg' : ''}" style="text-align:right; font-weight:600;">${rp(labaVal)}${estBadge}</td><td class="td-invoice-margin ${isNeg ? 'sr-neg' : ''}" style="text-align:right;">${marginStr}</td>`;
+                    }
+                }
                 return `
                 <tr>
                     <td style="font-weight:600; color: var(--blue-600);">${inv.id}${retBadge ? ' ' + retBadge : ''}</td>
@@ -6495,6 +6555,7 @@ async function fetchInvoices(page) {
                     <td>${rp(inv.paid)}</td>
                     <td>${inv.type || '-'}</td>
                     <td><span class="badge-status ${statusLower.includes('belum') ? 'belum' : statusLower.replace(/\s+/g, '-')}">${capitalize(inv.status)}</span></td>
+                    ${labaCells}
                     <td style="text-align: right; white-space: nowrap;">
                         <button class="btn-toolbar secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem;" title="Cetak Invoice" onclick="printInvoice('${inv.id}')">
                             <i data-lucide="printer" style="width: 14px; height: 14px; margin: 0;"></i>
@@ -9988,7 +10049,7 @@ async function exportSection(section) {
     try {
         if (section === 'produk') {
             const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
-            const canSeeHpp = role === 'admin' || role === 'owner' || role === 'gudang';
+            const canSeeHpp = role === 'admin' || role === 'owner';
             const canSeeSellPrice = role !== 'gudang';
 
             headers = ["SKU", "Nama Produk", "Brand/Merk", "Kategori"];
@@ -10753,7 +10814,7 @@ async function openPricelistDetail(id) {
 function renderPricelistItemsTable(items) {
     const tbody = document.getElementById('detail-pl-items-body');
     const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
-    const showHpp = role === 'admin' || role === 'owner' || role === 'gudang';
+    const showHpp = role === 'admin' || role === 'owner';
 
     const thHpp = document.getElementById('th-pl-hpp');
     if (thHpp) thHpp.style.display = showHpp ? '' : 'none';
@@ -13262,3 +13323,611 @@ window.viewConversionDetail = viewConversionDetail;
 window.promptCancelConversion = promptCancelConversion;
 window.submitCancelConversion = submitCancelConversion;
 
+
+// ==========================================================================
+// LAPORAN PENJUALAN & LABA (Admin Only)
+// ==========================================================================
+let salesReportState = {
+    initialized: false,
+    group: 'day',
+    preset: 'this_month',
+    page: 1,
+    lastQueryFrom: '',
+    lastQueryTo: '',
+    drillStack: []
+};
+
+function _srFormatDateLocal(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+function _srComputePresetDates(preset) {
+    const todayStr = typeof getTodayWITA === 'function' ? getTodayWITA() : _srFormatDateLocal(new Date());
+    const [ty, tm, td] = todayStr.split('-').map(Number);
+    const todayDt = new Date(ty, tm - 1, td);
+
+    if (preset === 'today') {
+        return { from: todayStr, to: todayStr };
+    }
+    if (preset === 'last7') {
+        const startDt = new Date(ty, tm - 1, td - 6);
+        return { from: _srFormatDateLocal(startDt), to: todayStr };
+    }
+    if (preset === 'this_month') {
+        const lastDay = new Date(ty, tm, 0).getDate();
+        return {
+            from: `${ty}-${String(tm).padStart(2, '0')}-01`,
+            to: `${ty}-${String(tm).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+        };
+    }
+    if (preset === 'last_month') {
+        const firstPrev = new Date(ty, tm - 2, 1);
+        const lastPrev = new Date(ty, tm - 1, 0);
+        return { from: _srFormatDateLocal(firstPrev), to: _srFormatDateLocal(lastPrev) };
+    }
+    if (preset === 'this_year') {
+        return { from: `${ty}-01-01`, to: `${ty}-12-31` };
+    }
+    return null;
+}
+
+async function _srPopulateFilterDropdowns() {
+    const custEl = document.getElementById('sr-customer');
+    const ptEl = document.getElementById('sr-payment-type');
+
+    if (custEl) {
+        let custs = Array.isArray(CUSTOMERS) && CUSTOMERS.length > 0 ? CUSTOMERS : [];
+        if (custs.length === 0) {
+            try {
+                const r = await fetch('/api/customers?all=true', { headers: getAuthHeaders() });
+                if (r.ok) {
+                    const data = await r.json();
+                    custs = Array.isArray(data) ? data : (data.data || []);
+                }
+            } catch (_) {}
+        }
+        const curVal = custEl.value || 'all';
+        custEl.innerHTML = '<option value="all">Semua Pelanggan</option>' +
+            custs.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
+        custEl.value = curVal;
+    }
+
+    if (ptEl) {
+        let pts = (typeof ALL_PAYMENT_TYPES !== 'undefined' && Array.isArray(ALL_PAYMENT_TYPES) && ALL_PAYMENT_TYPES.length > 0)
+            ? ALL_PAYMENT_TYPES : [];
+        if (pts.length === 0) {
+            try {
+                const r = await fetch('/api/master/payment-types', { headers: getAuthHeaders() });
+                if (r.ok) pts = await r.json();
+            } catch (_) {}
+        }
+        const curPt = ptEl.value || 'all';
+        ptEl.innerHTML = '<option value="all">Semua Tipe</option>' +
+            pts.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join('');
+        ptEl.value = curPt;
+    }
+}
+
+async function initSalesReportPage() {
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    if (role !== 'admin') return;
+
+    await _srPopulateFilterDropdowns();
+
+    if (!salesReportState.initialized) {
+        salesReportState.initialized = true;
+        setSalesReportPreset('this_month', false);
+        setSalesReportGroup('day', false);
+        await fetchSalesReport(1);
+    }
+}
+
+function setSalesReportPreset(preset, autoFetch = false) {
+    salesReportState.preset = preset;
+    document.querySelectorAll('#sales-report-presets .sr-preset-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.preset === preset);
+    });
+    const dates = _srComputePresetDates(preset);
+    if (dates) {
+        const fromEl = document.getElementById('sr-from');
+        const toEl = document.getElementById('sr-to');
+        if (fromEl) fromEl.value = dates.from;
+        if (toEl) toEl.value = dates.to;
+    }
+    if (autoFetch) fetchSalesReport(1);
+}
+
+function onSalesReportDateInput() {
+    salesReportState.preset = 'custom';
+    document.querySelectorAll('#sales-report-presets .sr-preset-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.preset === 'custom');
+    });
+}
+
+function setSalesReportGroup(group, autoFetch = true) {
+    salesReportState.group = group;
+    document.querySelectorAll('#sales-report-group-control .sr-seg-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.group === group);
+    });
+    if (autoFetch && salesReportState.initialized) {
+        salesReportState.drillStack = [];
+        _renderSalesReportDrillBar();
+        fetchSalesReport(1);
+    }
+}
+
+function _srValidateInputs() {
+    const fromEl = document.getElementById('sr-from');
+    const toEl = document.getElementById('sr-to');
+    const errEl = document.getElementById('sr-error-banner');
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+
+    const from = fromEl?.value || '';
+    const to = toEl?.value || '';
+    if (!from || !to) {
+        return { error: 'Tanggal "Dari" dan "Sampai" wajib diisi.' };
+    }
+    if (from > to) {
+        return { error: 'Tanggal "Dari" tidak boleh lebih besar dari tanggal "Sampai".' };
+    }
+    const [fy, fm, fd] = from.split('-').map(Number);
+    const [ty, tm, td] = to.split('-').map(Number);
+    const diffDays = Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86400000) + 1;
+    const monthSpan = (ty - fy) * 12 + (tm - fm) + 1;
+
+    if (salesReportState.group === 'day' && diffDays > 366) {
+        return { error: `Rentang tanggal untuk pengelompokan Per Hari maksimal 366 hari (saat ini ${diffDays} hari). Gunakan pengelompokan Per Bulan atau Per Invoice.` };
+    }
+    if (salesReportState.group === 'month' && monthSpan > 60) {
+        return { error: `Rentang tanggal untuk pengelompokan Per Bulan maksimal 60 bulan (saat ini ${monthSpan} bulan).` };
+    }
+
+    return {
+        from,
+        to,
+        group: salesReportState.group,
+        customer_id: document.getElementById('sr-customer')?.value || 'all',
+        payment_type_id: document.getElementById('sr-payment-type')?.value || 'all',
+        status: document.getElementById('sr-status')?.value || 'all'
+    };
+}
+
+function _srShowError(msg) {
+    const errEl = document.getElementById('sr-error-banner');
+    if (errEl) {
+        errEl.textContent = msg;
+        errEl.style.display = 'block';
+    }
+    if (typeof showToast === 'function') showToast(msg, 'warning');
+}
+
+function _srBuildQueryString(params, extra = {}) {
+    const qs = new URLSearchParams();
+    if (params.group) qs.set('group', params.group);
+    qs.set('from', params.from);
+    qs.set('to', params.to);
+    if (params.customer_id && params.customer_id !== 'all') qs.set('customer_id', params.customer_id);
+    if (params.payment_type_id && params.payment_type_id !== 'all') qs.set('payment_type_id', params.payment_type_id);
+    if (params.status && params.status !== 'all') qs.set('status', params.status);
+    Object.entries(extra).forEach(([k, v]) => {
+        if (v !== undefined && v !== null) qs.set(k, String(v));
+    });
+    return qs.toString();
+}
+
+function _srFormatMargin(m) {
+    if (m === null || m === undefined || !isFinite(Number(m))) return '-';
+    return `${Number(m).toFixed(1)}%`;
+}
+
+function _srFormatMonthLabel(ym) {
+    const MONTHS_ID = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agt', 'Sep', 'Okt', 'Nov', 'Des'];
+    const [y, m] = String(ym).split('-');
+    const idx = parseInt(m, 10) - 1;
+    return `${MONTHS_ID[idx] || m} ${y}`;
+}
+
+function _renderSalesReportDrillBar() {
+    const bar = document.getElementById('sr-drilldown-bar');
+    if (!bar) return;
+    if (!salesReportState.drillStack || salesReportState.drillStack.length === 0) {
+        bar.style.display = 'none';
+        bar.innerHTML = '';
+        return;
+    }
+    const prev = salesReportState.drillStack[salesReportState.drillStack.length - 1];
+    const label = prev.group === 'month' ? 'Per Bulan' : 'Per Hari';
+    bar.style.display = 'flex';
+    bar.innerHTML = `
+        <span>Menampilkan rincian hasil drill-down (${formatDate(salesReportState.lastQueryFrom)} s/d ${formatDate(salesReportState.lastQueryTo)}).</span>
+        <button type="button" class="btn-toolbar secondary" style="padding:0.3rem 0.7rem; font-size:0.78rem;" onclick="popSalesReportDrill()">
+            ← Kembali ke ${label}
+        </button>
+    `;
+}
+
+function popSalesReportDrill() {
+    const prev = salesReportState.drillStack.pop();
+    if (!prev) return;
+    document.getElementById('sr-from').value = prev.from;
+    document.getElementById('sr-to').value = prev.to;
+    salesReportState.group = prev.group;
+    document.querySelectorAll('#sales-report-group-control .sr-seg-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.group === prev.group);
+    });
+    _renderSalesReportDrillBar();
+    fetchSalesReport(1);
+}
+
+function drillDownSalesReportDay(dateStr) {
+    const fromEl = document.getElementById('sr-from');
+    const toEl = document.getElementById('sr-to');
+    salesReportState.drillStack.push({
+        group: salesReportState.group,
+        from: fromEl.value,
+        to: toEl.value
+    });
+    fromEl.value = dateStr;
+    toEl.value = dateStr;
+    onSalesReportDateInput();
+    salesReportState.group = 'invoice';
+    document.querySelectorAll('#sales-report-group-control .sr-seg-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.group === 'invoice');
+    });
+    _renderSalesReportDrillBar();
+    fetchSalesReport(1);
+}
+
+function drillDownSalesReportMonth(ymStr) {
+    const fromEl = document.getElementById('sr-from');
+    const toEl = document.getElementById('sr-to');
+    const activeFrom = fromEl.value;
+    const activeTo = toEl.value;
+    salesReportState.drillStack.push({
+        group: salesReportState.group,
+        from: activeFrom,
+        to: activeTo
+    });
+    const [yy, mm] = ymStr.split('-').map(Number);
+    const monthStart = `${yy}-${String(mm).padStart(2, '0')}-01`;
+    const lastDay = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+    const monthEnd = `${yy}-${String(mm).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+    const clampedFrom = activeFrom > monthStart ? activeFrom : monthStart;
+    const clampedTo = activeTo < monthEnd ? activeTo : monthEnd;
+
+    fromEl.value = clampedFrom;
+    toEl.value = clampedTo;
+    onSalesReportDateInput();
+    salesReportState.group = 'day';
+    document.querySelectorAll('#sales-report-group-control .sr-seg-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.group === 'day');
+    });
+    _renderSalesReportDrillBar();
+    fetchSalesReport(1);
+}
+
+async function fetchSalesReport(page = 1) {
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    if (role !== 'admin') return;
+
+    const validated = _srValidateInputs();
+    if (validated.error) {
+        _srShowError(validated.error);
+        return;
+    }
+
+    salesReportState.page = page;
+    salesReportState.lastQueryFrom = validated.from;
+    salesReportState.lastQueryTo = validated.to;
+
+    const cardsEl = document.getElementById('sr-summary-cards');
+    const tbody = document.getElementById('sr-table-body');
+    const tfoot = document.getElementById('sr-table-foot');
+    const thead = document.getElementById('sr-table-head');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:2rem; color:var(--gray-400);">Memuat laporan...</td></tr>';
+    if (tfoot) tfoot.innerHTML = '';
+
+    try {
+        const ringQs = _srBuildQueryString({ ...validated, group: undefined });
+        const listQs = _srBuildQueryString(validated, { page, limit: 80 });
+
+        const [ringRes, listRes] = await Promise.all([
+            fetch(`/api/laporan/penjualan/ringkasan?${ringQs}`, { headers: getAuthHeaders() }),
+            fetch(`/api/laporan/penjualan?${listQs}`, { headers: getAuthHeaders() })
+        ]);
+
+        const ringJson = await ringRes.json();
+        const listJson = await listRes.json();
+
+        if (!ringRes.ok || !ringJson.success) throw new Error(ringJson.error || `HTTP ${ringRes.status}`);
+        if (!listRes.ok || !listJson.success) throw new Error(listJson.error || `HTTP ${listRes.status}`);
+
+        const s = ringJson.data;
+        const d = listJson.data;
+
+        if (cardsEl) {
+            const marginStr = _srFormatMargin(s.margin_pct);
+            const labaNeg = s.laba_kotor < 0;
+            const avgDayTooltip = `Penjualan bersih (${rp(s.penjualan_bersih)}) ÷ ${s.hari_pembagi} hari dalam rentang (dibatasi s/d hari ini)`;
+            cardsEl.innerHTML = `
+                <div class="sr-summary-card" title="Kotor: ${rp(s.penjualan_kotor)} | Diskon: ${rp(s.diskon)} | Retur: ${rp(s.retur)}">
+                    <div class="sr-summary-label">Penjualan Bersih (DPP)</div>
+                    <div class="sr-summary-value">${rp(s.penjualan_bersih)}</div>
+                    <div class="sr-summary-sub" title="${avgDayTooltip}">Rata-rata/hari: ${rp(s.rata_penjualan_hari)} (${s.hari_pembagi} hr)</div>
+                </div>
+                <div class="sr-summary-card">
+                    <div class="sr-summary-label">HPP Terjual</div>
+                    <div class="sr-summary-value">${rp(s.hpp)}</div>
+                    <div class="sr-summary-sub">${s.hpp_retur_rusak > 0 ? 'Termasuk retur rusak: ' + rp(s.hpp_retur_rusak) : 'Snapshot saat penjualan'}</div>
+                </div>
+                <div class="sr-summary-card">
+                    <div class="sr-summary-label">Laba Kotor</div>
+                    <div class="sr-summary-value ${labaNeg ? 'sr-neg' : ''}" style="${labaNeg ? '' : 'color:var(--emerald-600);'}">${rp(s.laba_kotor)}</div>
+                    <div class="sr-summary-sub">Penjualan Bersih − HPP</div>
+                </div>
+                <div class="sr-summary-card">
+                    <div class="sr-summary-label">Margin %</div>
+                    <div class="sr-summary-value ${s.margin_pct !== null && s.margin_pct < 0 ? 'sr-neg' : ''}">${marginStr}</div>
+                    <div class="sr-summary-sub">Laba Kotor ÷ Penjualan Bersih</div>
+                </div>
+                <div class="sr-summary-card">
+                    <div class="sr-summary-label">Jumlah Invoice</div>
+                    <div class="sr-summary-value">${s.jumlah_invoice.toLocaleString('id-ID')}</div>
+                    <div class="sr-summary-sub">Tidak termasuk Cancel/Batal</div>
+                </div>
+                <div class="sr-summary-card">
+                    <div class="sr-summary-label">Rata-rata Nilai Invoice</div>
+                    <div class="sr-summary-value">${rp(s.rata_nilai_invoice)}</div>
+                    <div class="sr-summary-sub">Penjualan Bersih ÷ Jml Invoice</div>
+                </div>
+            `;
+        }
+
+        if (d.group === 'day' || d.group === 'month') {
+            const isDay = d.group === 'day';
+            if (thead) {
+                thead.innerHTML = `
+                    <tr>
+                        <th>${isDay ? 'Tanggal' : 'Bulan'}</th>
+                        <th style="text-align:right;">Jml Invoice</th>
+                        <th style="text-align:right;">Penjualan Kotor</th>
+                        <th style="text-align:right;">Diskon</th>
+                        <th style="text-align:right;">Retur</th>
+                        <th style="text-align:right;">Penjualan Bersih</th>
+                        <th style="text-align:right;">HPP</th>
+                        <th style="text-align:right;">Laba Kotor</th>
+                        <th style="text-align:right;">Margin %</th>
+                    </tr>
+                `;
+            }
+
+            if (!d.rows || d.rows.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:2.5rem; color:var(--gray-400);">Tidak ada transaksi pada rentang & filter ini</td></tr>';
+            } else {
+                tbody.innerHTML = d.rows.map(r => {
+                    const isNeg = r.laba_kotor < 0 || (r.margin_pct !== null && r.margin_pct < 0);
+                    const periodDisp = isDay
+                        ? formatDate(r.period)
+                        : `${_srFormatMonthLabel(r.period)}${r.is_partial ? ' <span class="badge-partial-period">(sebagian)</span>' : ''}`;
+                    const clickFn = isDay
+                        ? `drillDownSalesReportDay('${escapeJsString(r.period)}')`
+                        : `drillDownSalesReportMonth('${escapeJsString(r.period)}')`;
+                    const titleHint = isDay ? 'Klik untuk lihat daftar invoice tanggal ini' : 'Klik untuk lihat rincian harian bulan ini';
+                    return `
+                        <tr class="sr-row-clickable ${isNeg ? 'sr-row-neg' : ''}" onclick="${clickFn}" title="${titleHint}">
+                            <td style="font-weight:600; color:var(--blue-600);">${periodDisp}</td>
+                            <td style="text-align:right;">${r.jml_invoice}</td>
+                            <td style="text-align:right;">${rp(r.penjualan_kotor)}</td>
+                            <td style="text-align:right;">${rp(r.diskon)}</td>
+                            <td style="text-align:right;">${rp(r.retur)}</td>
+                            <td style="text-align:right; font-weight:600;">${rp(r.penjualan_bersih)}</td>
+                            <td style="text-align:right;">${rp(r.hpp)}</td>
+                            <td style="text-align:right; font-weight:700;" class="${isNeg ? 'sr-neg' : ''}">${rp(r.laba_kotor)}</td>
+                            <td style="text-align:right;" class="${isNeg ? 'sr-neg' : ''}">${_srFormatMargin(r.margin_pct)}</td>
+                        </tr>
+                    `;
+                }).join('');
+
+                const tot = d.totals;
+                const totNeg = tot.laba_kotor < 0 || (tot.margin_pct !== null && tot.margin_pct < 0);
+                tfoot.innerHTML = `
+                    <tr>
+                        <td>TOTAL</td>
+                        <td style="text-align:right;">${tot.jml_invoice}</td>
+                        <td style="text-align:right;">${rp(tot.penjualan_kotor)}</td>
+                        <td style="text-align:right;">${rp(tot.diskon)}</td>
+                        <td style="text-align:right;">${rp(tot.retur)}</td>
+                        <td style="text-align:right;">${rp(tot.penjualan_bersih)}</td>
+                        <td style="text-align:right;">${rp(tot.hpp)}</td>
+                        <td style="text-align:right;" class="${totNeg ? 'sr-neg' : ''}">${rp(tot.laba_kotor)}</td>
+                        <td style="text-align:right;" class="${totNeg ? 'sr-neg' : ''}">${_srFormatMargin(tot.margin_pct)}</td>
+                    </tr>
+                `;
+            }
+            const pagEl = document.getElementById('pagination-sales-report');
+            if (pagEl) pagEl.innerHTML = '';
+        } else {
+            // group === 'invoice'
+            if (thead) {
+                thead.innerHTML = `
+                    <tr>
+                        <th>No. Invoice</th>
+                        <th>Tanggal</th>
+                        <th>Pelanggan</th>
+                        <th style="text-align:right;">Penjualan Bersih</th>
+                        <th style="text-align:right;">HPP</th>
+                        <th style="text-align:right;">Laba</th>
+                        <th style="text-align:right;">Margin %</th>
+                        <th>Tipe Pembayaran</th>
+                        <th>Status</th>
+                    </tr>
+                `;
+            }
+
+            if (!d.rows || d.rows.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:2.5rem; color:var(--gray-400);">Tidak ada invoice pada rentang & filter ini</td></tr>';
+            } else {
+                tbody.innerHTML = d.rows.map(r => {
+                    const isNeg = r.laba < 0 || (r.margin_pct !== null && r.margin_pct < 0);
+                    const estBadge = r.hpp_estimasi
+                        ? `<span class="badge-hpp-estimasi" title="HPP berasal dari estimasi/backfill atau invoice import outstanding">HPP estimasi</span>`
+                        : '';
+                    const statusLower = (r.status || '').toLowerCase();
+                    return `
+                        <tr class="${isNeg ? 'sr-row-neg' : ''}">
+                            <td style="font-weight:600; color:var(--blue-600);">${escapeHtml(r.id)}${estBadge}</td>
+                            <td>${formatDate(r.date)}</td>
+                            <td>${escapeHtml(r.customer_name)}</td>
+                            <td style="text-align:right; font-weight:600;">${rp(r.penjualan_bersih)}</td>
+                            <td style="text-align:right;">${rp(r.hpp)}</td>
+                            <td style="text-align:right; font-weight:700;" class="${isNeg ? 'sr-neg' : ''}">${rp(r.laba)}</td>
+                            <td style="text-align:right;" class="${isNeg ? 'sr-neg' : ''}">${_srFormatMargin(r.margin_pct)}</td>
+                            <td>${escapeHtml(r.payment_type_name)}</td>
+                            <td><span class="badge-status ${statusLower.includes('belum') ? 'belum' : statusLower.replace(/\s+/g, '-')}">${capitalize(r.status)}</span></td>
+                        </tr>
+                    `;
+                }).join('');
+
+                const tot = d.totals;
+                const totNeg = tot.laba_kotor < 0 || (tot.margin_pct !== null && tot.margin_pct < 0);
+                tfoot.innerHTML = `
+                    <tr>
+                        <td>TOTAL</td>
+                        <td colspan="2">${tot.jml_invoice} invoice</td>
+                        <td style="text-align:right;">${rp(tot.penjualan_bersih)}</td>
+                        <td style="text-align:right;">${rp(tot.hpp)}</td>
+                        <td style="text-align:right;" class="${totNeg ? 'sr-neg' : ''}">${rp(tot.laba_kotor)}</td>
+                        <td style="text-align:right;" class="${totNeg ? 'sr-neg' : ''}">${_srFormatMargin(tot.margin_pct)}</td>
+                        <td colspan="2"></td>
+                    </tr>
+                `;
+            }
+
+            if (d.pagination && typeof renderPagination === 'function') {
+                renderPagination({
+                    containerId: 'pagination-sales-report',
+                    currentPage: d.pagination.page,
+                    totalItems: d.pagination.total,
+                    pageSize: d.pagination.limit,
+                    onPageChange: (p) => fetchSalesReport(p)
+                });
+            }
+        }
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    } catch (err) {
+        console.error('fetchSalesReport error:', err);
+        _srShowError(err.message || 'Gagal memuat laporan penjualan');
+        if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:2rem; color:var(--rose-600);">${escapeHtml(err.message)}</td></tr>`;
+    }
+}
+
+async function exportSalesReportExcel() {
+    const validated = _srValidateInputs();
+    if (validated.error) {
+        _srShowError(validated.error);
+        return;
+    }
+    try {
+        const qs = _srBuildQueryString(validated, { all: '1' });
+        const res = await fetch(`/api/laporan/penjualan?${qs}`, { headers: getAuthHeaders() });
+        const json = await res.json();
+        if (!res.ok || !json.success) throw new Error(json.error || 'Gagal export Excel');
+
+        const d = json.data;
+        const groupLabel = d.group === 'day' ? 'Per Hari' : (d.group === 'month' ? 'Per Bulan' : 'Per Invoice');
+        const aoa = [
+            [`Laporan Penjualan & Laba (${groupLabel})`],
+            [`Periode: ${formatDate(d.from)} s/d ${formatDate(d.to)} (Basis DPP / Tanpa PPN)`],
+            []
+        ];
+
+        if (d.group === 'invoice') {
+            aoa.push(['No. Invoice', 'Tanggal', 'Pelanggan', 'Penjualan Bersih', 'HPP', 'Laba', 'Margin %', 'Tipe Pembayaran', 'Status', 'HPP Estimasi']);
+            for (const r of d.rows) {
+                aoa.push([
+                    r.id,
+                    r.date,
+                    r.customer_name,
+                    r.penjualan_bersih,
+                    r.hpp,
+                    r.laba,
+                    r.margin_pct !== null ? Number(r.margin_pct.toFixed(1)) : '-',
+                    r.payment_type_name,
+                    r.status,
+                    r.hpp_estimasi ? 'Ya' : 'Tidak'
+                ]);
+            }
+            aoa.push(['TOTAL', '', `${d.totals.jml_invoice} invoice`, d.totals.penjualan_bersih, d.totals.hpp, d.totals.laba_kotor, d.totals.margin_pct !== null ? Number(d.totals.margin_pct.toFixed(1)) : '-', '', '', '']);
+        } else {
+            aoa.push([d.group === 'day' ? 'Tanggal' : 'Bulan', 'Jml Invoice', 'Penjualan Kotor', 'Diskon', 'Retur', 'Penjualan Bersih', 'HPP', 'Laba Kotor', 'Margin %']);
+            for (const r of d.rows) {
+                const lbl = d.group === 'month' && r.is_partial ? `${r.period} (sebagian)` : r.period;
+                aoa.push([
+                    lbl,
+                    r.jml_invoice,
+                    r.penjualan_kotor,
+                    r.diskon,
+                    r.retur,
+                    r.penjualan_bersih,
+                    r.hpp,
+                    r.laba_kotor,
+                    r.margin_pct !== null ? Number(r.margin_pct.toFixed(1)) : '-'
+                ]);
+            }
+            aoa.push(['TOTAL', d.totals.jml_invoice, d.totals.penjualan_kotor, d.totals.diskon, d.totals.retur, d.totals.penjualan_bersih, d.totals.hpp, d.totals.laba_kotor, d.totals.margin_pct !== null ? Number(d.totals.margin_pct.toFixed(1)) : '-']);
+        }
+
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Laporan Penjualan');
+        XLSX.writeFile(wb, `Laporan_Penjualan_${d.group}_${d.from}_${d.to}.xlsx`);
+        if (typeof showToast === 'function') showToast('File Excel berhasil di-download', 'success');
+    } catch (err) {
+        console.error('exportSalesReportExcel error:', err);
+        if (typeof showToast === 'function') showToast('Gagal export Excel: ' + err.message, 'error');
+    }
+}
+
+async function exportSalesReportPdf() {
+    const validated = _srValidateInputs();
+    if (validated.error) {
+        _srShowError(validated.error);
+        return;
+    }
+    try {
+        const qs = _srBuildQueryString(validated);
+        const res = await fetch(`/api/laporan/penjualan/export-pdf?${qs}`, { headers: getAuthHeaders() });
+        if (!res.ok) {
+            const errJson = await res.json().catch(() => ({}));
+            throw new Error(errJson.error || `HTTP ${res.status}`);
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Laporan_Penjualan_${validated.group}_${validated.from}_${validated.to}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        if (typeof showToast === 'function') showToast('File PDF berhasil di-download', 'success');
+    } catch (err) {
+        console.error('exportSalesReportPdf error:', err);
+        if (typeof showToast === 'function') showToast('Gagal export PDF: ' + err.message, 'error');
+    }
+}
+
+window.initSalesReportPage = initSalesReportPage;
+window.setSalesReportPreset = setSalesReportPreset;
+window.setSalesReportGroup = setSalesReportGroup;
+window.onSalesReportDateInput = onSalesReportDateInput;
+window.fetchSalesReport = fetchSalesReport;
+window.drillDownSalesReportDay = drillDownSalesReportDay;
+window.drillDownSalesReportMonth = drillDownSalesReportMonth;
+window.popSalesReportDrill = popSalesReportDrill;
+window.exportSalesReportExcel = exportSalesReportExcel;
+window.exportSalesReportPdf = exportSalesReportPdf;

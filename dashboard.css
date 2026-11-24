@@ -673,6 +673,228 @@
     border-bottom: none;
 }
 
+/* ---------- Laporan Penjualan (Admin Only) ---------- */
+.sales-report-filter-card {
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--border-radius);
+    padding: 1.1rem 1.25rem;
+    margin-bottom: 1.25rem;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.sales-report-filter-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.85rem;
+    border-bottom: 1px solid var(--gray-100);
+}
+
+.sales-report-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.sr-preset-btn {
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    color: var(--gray-700);
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.sr-preset-btn:hover {
+    background: var(--gray-100);
+}
+
+.sr-preset-btn.active {
+    background: var(--blue-600);
+    border-color: var(--blue-600);
+    color: white;
+}
+
+.sales-report-segmented {
+    display: inline-flex;
+    background: var(--gray-100);
+    padding: 3px;
+    border-radius: 8px;
+    border: 1px solid var(--gray-200);
+}
+
+.sr-seg-btn {
+    border: none;
+    background: transparent;
+    padding: 0.4rem 0.9rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--gray-600);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.sr-seg-btn.active {
+    background: white;
+    color: var(--blue-600);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.sales-report-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0.75rem;
+    align-items: end;
+}
+
+.sr-field label {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--gray-600);
+    margin-bottom: 0.3rem;
+}
+
+.sr-field .form-input,
+.sr-field .filter-select {
+    width: 100%;
+    height: 38px;
+}
+
+.sr-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.sr-error-banner {
+    margin-top: 0.75rem;
+    padding: 0.65rem 0.9rem;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #b91c1c;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 500;
+}
+
+.sales-report-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.sr-summary-card {
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--border-radius);
+    padding: 1rem 1.15rem;
+}
+
+.sr-summary-label {
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: var(--gray-500);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-bottom: 0.35rem;
+}
+
+.sr-summary-value {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--gray-900);
+}
+
+.sr-summary-sub {
+    font-size: 0.74rem;
+    color: var(--gray-500);
+    margin-top: 0.25rem;
+}
+
+.sr-drilldown-bar {
+    margin-bottom: 0.75rem;
+    padding: 0.55rem 0.9rem;
+    background: var(--blue-50);
+    border: 1px solid var(--blue-200);
+    border-radius: 8px;
+    font-size: 0.82rem;
+    color: var(--blue-800);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.sr-row-clickable {
+    cursor: pointer;
+}
+
+.sr-row-clickable:hover td {
+    background: var(--blue-50);
+}
+
+.sr-neg {
+    color: var(--rose-600) !important;
+    font-weight: 600;
+}
+
+.sr-row-neg {
+    background: rgba(244, 63, 94, 0.04);
+}
+
+.badge-hpp-estimasi {
+    display: inline-block;
+    font-size: 0.68rem;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fde68a;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+
+.badge-partial-period {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 500;
+    padding: 1px 6px;
+    border-radius: 6px;
+    background: var(--gray-100);
+    color: var(--gray-600);
+    margin-left: 4px;
+}
+
+#sales-report-table tfoot td {
+    background: var(--gray-50);
+    border-top: 2px solid var(--gray-300);
+    font-weight: 700;
+    color: var(--gray-900);
+}
+
+@media (max-width: 768px) {
+    .sales-report-filter-grid {
+        grid-template-columns: 1fr;
+    }
+    .sr-actions .btn-toolbar {
+        flex: 1;
+        justify-content: center;
+    }
+}
+
 /* ---------- Status Badges ---------- */
 .badge-status {
     display: inline-flex;

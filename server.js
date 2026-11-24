@@ -58,7 +58,7 @@ const getMaxOrderDateWITA = (maxDays = 7) => {
     const today = getTodayWITA(); // 'YYYY-MM-DD'
     const [y, m, d] = today.split('-').map(Number);
     const dt = new Date(y, m - 1, d + maxDays);
-    return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
   } catch (e) {
     const d = new Date(Date.now() + 8 * 3600 * 1000 + maxDays * 86400 * 1000);
     return d.toISOString().split('T')[0];
@@ -158,9 +158,9 @@ const dbUrl = process.env.DATABASE_URL
 const urlParsed = new URL(dbUrl);
 
 const mysqlPool = mysql.createPool({
-  host:     urlParsed.hostname,
-  port:     parseInt(urlParsed.port) || 3306,
-  user:     urlParsed.username,
+  host: urlParsed.hostname,
+  port: parseInt(urlParsed.port) || 3306,
+  user: urlParsed.username,
   password: urlParsed.password,
   database: urlParsed.pathname.replace('/', ''),
   waitForConnections: true,
@@ -189,9 +189,9 @@ function pgify(conn) {
 
     // Intercept transaction keywords
     const trimmed = mysqlSql.trim().toUpperCase();
-    if (trimmed === 'BEGIN')    { await conn.query('START TRANSACTION'); return { rows: [], rowCount: 0 }; }
-    if (trimmed === 'COMMIT')   { await conn.query('COMMIT');            return { rows: [], rowCount: 0 }; }
-    if (trimmed === 'ROLLBACK') { await conn.query('ROLLBACK');          return { rows: [], rowCount: 0 }; }
+    if (trimmed === 'BEGIN') { await conn.query('START TRANSACTION'); return { rows: [], rowCount: 0 }; }
+    if (trimmed === 'COMMIT') { await conn.query('COMMIT'); return { rows: [], rowCount: 0 }; }
+    if (trimmed === 'ROLLBACK') { await conn.query('ROLLBACK'); return { rows: [], rowCount: 0 }; }
 
     const [result] = await conn.query(mysqlSql, params);
 
@@ -200,8 +200,8 @@ function pgify(conn) {
       return { rows: result, rowCount: result.length };
     } else {
       // INSERT / UPDATE / DELETE
-      const insertId  = result.insertId  || 0;
-      const affected  = result.affectedRows || 0;
+      const insertId = result.insertId || 0;
+      const affected = result.affectedRows || 0;
       // If RETURNING was requested expose id so callers using result.rows[0].id still work
       const rows = returningMatch ? [{ id: insertId || (params[0] ?? null) }] : [];
       return { rows, rowCount: affected, affectedRows: affected, insertId };
@@ -209,7 +209,7 @@ function pgify(conn) {
   };
 
   return {
-    query:   execQuery,
+    query: execQuery,
     release: () => (typeof conn.release === 'function' ? conn.release() : null),
   };
 }
@@ -336,8 +336,20 @@ pool.query(`
 
 // Auto-migrate: Batch B tables, counters, and deposit/return columns
 (async () => {
+  const ensureTable = async (name, ddlWithFk, ddlNoFk) => {
+    try {
+      await mysqlPool.query(ddlWithFk);
+    } catch (err) {
+      if (ddlNoFk) {
+        console.warn(`[Startup] ${name} FK DDL failed (${err.message}), retrying without FK...`);
+        await mysqlPool.query(ddlNoFk);
+      } else {
+        throw err;
+      }
+    }
+  };
   try {
-    await mysqlPool.query(`
+    await ensureTable('stock_moves', `
       CREATE TABLE IF NOT EXISTS stock_moves (
         id INT AUTO_INCREMENT PRIMARY KEY,
         product_id VARCHAR(255) NOT NULL,
@@ -360,18 +372,40 @@ pool.query(`
         INDEX idx_stock_moves_ref (ref_type, ref_id),
         FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
         FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `, `
+      CREATE TABLE IF NOT EXISTS stock_moves (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        product_id VARCHAR(255) NOT NULL,
+        tanggal DATETIME NOT NULL,
+        tipe VARCHAR(50) NOT NULL,
+        ref_type VARCHAR(50) NULL,
+        ref_id VARCHAR(255) NULL,
+        ref_no VARCHAR(255) NULL,
+        qty_masuk DECIMAL(20,4) NOT NULL DEFAULT 0,
+        qty_keluar DECIMAL(20,4) NOT NULL DEFAULT 0,
+        qty_sebelum DECIMAL(20,4) NOT NULL DEFAULT 0,
+        qty_sesudah DECIMAL(20,4) NOT NULL DEFAULT 0,
+        keterangan TEXT NULL,
+        created_by INT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        is_backfill TINYINT(1) NOT NULL DEFAULT 0,
+        INDEX idx_stock_moves_product (product_id),
+        INDEX idx_stock_moves_tanggal (tanggal),
+        INDEX idx_stock_moves_tipe (tipe),
+        INDEX idx_stock_moves_ref (ref_type, ref_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
-    await mysqlPool.query(`
+    await ensureTable('return_counters', `
       CREATE TABLE IF NOT EXISTS return_counters (
         year INT NOT NULL PRIMARY KEY,
         last_sales_number INT NOT NULL DEFAULT 0,
         last_purchase_number INT NOT NULL DEFAULT 0
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
-    await mysqlPool.query(`
+    await ensureTable('sales_returns', `
       CREATE TABLE IF NOT EXISTS sales_returns (
         id VARCHAR(255) PRIMARY KEY,
         invoice_id VARCHAR(255) NOT NULL,
@@ -389,10 +423,26 @@ pool.query(`
         FOREIGN KEY (invoice_id) REFERENCES sales_invoices(id) ON DELETE RESTRICT,
         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `, `
+      CREATE TABLE IF NOT EXISTS sales_returns (
+        id VARCHAR(255) PRIMARY KEY,
+        invoice_id VARCHAR(255) NOT NULL,
+        customer_id VARCHAR(255) NULL,
+        date DATE NOT NULL,
+        total_refund DECIMAL(20,4) NOT NULL DEFAULT 0,
+        piutang_deduction DECIMAL(20,4) NOT NULL DEFAULT 0,
+        customer_deposit_amount DECIMAL(20,4) NOT NULL DEFAULT 0,
+        reason TEXT NOT NULL,
+        user_id INT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_sr_invoice (invoice_id),
+        INDEX idx_sr_customer (customer_id),
+        INDEX idx_sr_date (date)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
-    await mysqlPool.query(`
+    await ensureTable('sales_return_items', `
       CREATE TABLE IF NOT EXISTS sales_return_items (
         id INT AUTO_INCREMENT PRIMARY KEY,
         return_id VARCHAR(255) NOT NULL,
@@ -407,10 +457,24 @@ pool.query(`
         INDEX idx_sri_product (product_id),
         FOREIGN KEY (return_id) REFERENCES sales_returns(id) ON DELETE CASCADE,
         FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE RESTRICT
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `, `
+      CREATE TABLE IF NOT EXISTS sales_return_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        return_id VARCHAR(255) NOT NULL,
+        product_id VARCHAR(255) NOT NULL,
+        quantity DECIMAL(20,4) NOT NULL,
+        condition_type VARCHAR(50) NOT NULL,
+        price DECIMAL(20,4) NOT NULL,
+        cost_price_snapshot DECIMAL(20,4) NOT NULL DEFAULT 0,
+        subtotal DECIMAL(20,4) NOT NULL DEFAULT 0,
+        refund_amount DECIMAL(20,4) NOT NULL DEFAULT 0,
+        INDEX idx_sri_return (return_id),
+        INDEX idx_sri_product (product_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
-    await mysqlPool.query(`
+    await ensureTable('purchase_returns', `
       CREATE TABLE IF NOT EXISTS purchase_returns (
         id VARCHAR(255) PRIMARY KEY,
         purchase_order_id VARCHAR(255) NOT NULL,
@@ -428,10 +492,26 @@ pool.query(`
         FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE RESTRICT,
         FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE SET NULL,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `, `
+      CREATE TABLE IF NOT EXISTS purchase_returns (
+        id VARCHAR(255) PRIMARY KEY,
+        purchase_order_id VARCHAR(255) NOT NULL,
+        vendor_id VARCHAR(255) NULL,
+        date DATE NOT NULL,
+        total_refund DECIMAL(20,4) NOT NULL DEFAULT 0,
+        hutang_deduction DECIMAL(20,4) NOT NULL DEFAULT 0,
+        vendor_deposit_amount DECIMAL(20,4) NOT NULL DEFAULT 0,
+        reason TEXT NOT NULL,
+        user_id INT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_pr_po (purchase_order_id),
+        INDEX idx_pr_vendor (vendor_id),
+        INDEX idx_pr_date (date)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
-    await mysqlPool.query(`
+    await ensureTable('purchase_return_items', `
       CREATE TABLE IF NOT EXISTS purchase_return_items (
         id INT AUTO_INCREMENT PRIMARY KEY,
         return_id VARCHAR(255) NOT NULL,
@@ -444,7 +524,19 @@ pool.query(`
         INDEX idx_pri_product (product_id),
         FOREIGN KEY (return_id) REFERENCES purchase_returns(id) ON DELETE CASCADE,
         FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE RESTRICT
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `, `
+      CREATE TABLE IF NOT EXISTS purchase_return_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        return_id VARCHAR(255) NOT NULL,
+        product_id VARCHAR(255) NOT NULL,
+        quantity DECIMAL(20,4) NOT NULL,
+        cost DECIMAL(20,4) NOT NULL,
+        subtotal DECIMAL(20,4) NOT NULL DEFAULT 0,
+        refund_amount DECIMAL(20,4) NOT NULL DEFAULT 0,
+        INDEX idx_pri_return (return_id),
+        INDEX idx_pri_product (product_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
     const [custCols] = await mysqlPool.query("SHOW COLUMNS FROM customers LIKE 'deposit'");
@@ -497,7 +589,7 @@ pool.query(`
       );
     }
     // Clean up old unused payment type IDs PT-4 and PT-8
-    await pool.query(`DELETE FROM payment_types WHERE id IN ('PT-4', 'PT-8')`).catch(() => {});
+    await pool.query(`DELETE FROM payment_types WHERE id IN ('PT-4', 'PT-8')`).catch(() => { });
     console.log('[Startup] payment_types seeded/upgraded successfully.');
   } catch (err) {
     console.error('[Startup] Failed to seed payment_types:', err.message);
@@ -526,23 +618,23 @@ pool.query(`
 (async () => {
   // MySQL: UNIQUE constraint already defined in schema — no pg_constraint check needed
   const defaults = [
-    { name: 'Penjualan',              type: 'IN',   is_system: 1 },
-    { name: 'Pelunasan Piutang',      type: 'IN',   is_system: 1 },
-    { name: 'Pembelian Stok',         type: 'OUT',  is_system: 1 },
-    { name: 'Penyesuaian Stok',       type: 'OUT',  is_system: 1 },
-    { name: 'Pelunasan Hutang',       type: 'OUT',  is_system: 1 },
-    { name: 'Gaji & Tunjangan',       type: 'OUT',  is_system: 0 },
-    { name: 'Sewa',                   type: 'OUT',  is_system: 0 },
-    { name: 'Operasional',            type: 'OUT',  is_system: 0 },
-    { name: 'Marketing',              type: 'OUT',  is_system: 0 },
-    { name: 'Pajak',                  type: 'OUT',  is_system: 0 },
-    { name: 'Pembelian Aset',         type: 'OUT',  is_system: 0 },
-    { name: 'Prive Pemilik',          type: 'OUT',  is_system: 0 },
-    { name: 'Pengeluaran Lainnya',    type: 'OUT',  is_system: 0 },
-    { name: 'Pendapatan Lainnya',     type: 'IN',   is_system: 0 },
-    { name: 'Pinjaman Masuk',         type: 'IN',   is_system: 0 },
-    { name: 'Setoran Modal',          type: 'IN',   is_system: 0 },
-    { name: 'Transfer Antar Kas/Bank',type: 'BOTH', is_system: 0 },
+    { name: 'Penjualan', type: 'IN', is_system: 1 },
+    { name: 'Pelunasan Piutang', type: 'IN', is_system: 1 },
+    { name: 'Pembelian Stok', type: 'OUT', is_system: 1 },
+    { name: 'Penyesuaian Stok', type: 'OUT', is_system: 1 },
+    { name: 'Pelunasan Hutang', type: 'OUT', is_system: 1 },
+    { name: 'Gaji & Tunjangan', type: 'OUT', is_system: 0 },
+    { name: 'Sewa', type: 'OUT', is_system: 0 },
+    { name: 'Operasional', type: 'OUT', is_system: 0 },
+    { name: 'Marketing', type: 'OUT', is_system: 0 },
+    { name: 'Pajak', type: 'OUT', is_system: 0 },
+    { name: 'Pembelian Aset', type: 'OUT', is_system: 0 },
+    { name: 'Prive Pemilik', type: 'OUT', is_system: 0 },
+    { name: 'Pengeluaran Lainnya', type: 'OUT', is_system: 0 },
+    { name: 'Pendapatan Lainnya', type: 'IN', is_system: 0 },
+    { name: 'Pinjaman Masuk', type: 'IN', is_system: 0 },
+    { name: 'Setoran Modal', type: 'IN', is_system: 0 },
+    { name: 'Transfer Antar Kas/Bank', type: 'BOTH', is_system: 0 },
   ];
   try {
     for (const item of defaults) {
@@ -565,7 +657,7 @@ pool.query(`
             )
           ) sub
         )
-    `).catch(() => {}); // non-fatal
+    `).catch(() => { }); // non-fatal
     console.log('[Startup] cash_categories seeded/upgraded successfully.');
   } catch (err) {
     console.error('[Startup] Failed to seed cash_categories:', err.message);
@@ -2908,7 +3000,7 @@ app.get('/api/invoices/:id/items', authenticateToken, authorizeRoles('admin', 'k
 app.get('/api/invoices/:id/print-data', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const invRes = await pool.query(`
       SELECT si.*, c.name as customer_name, c.address as customer_address,
              c.phone as customer_phone, c.no_hp_2 as customer_no_hp_2,
@@ -2918,13 +3010,13 @@ app.get('/api/invoices/:id/print-data', authenticateToken, async (req, res) => {
       LEFT JOIN payment_types pt ON si.payment_type_id = pt.id
       WHERE si.id = $1
     `, [id]);
-    
+
     if (invRes.rows.length === 0) {
       return res.status(404).json({ error: 'Invoice tidak ditemukan' });
     }
-    
+
     const invoiceRow = invRes.rows[0];
-    
+
     const itemsRes = await pool.query(`
       SELECT ii.*, p.name as product_name, pu.name as unit_name
       FROM invoice_items ii
@@ -2932,7 +3024,7 @@ app.get('/api/invoices/:id/print-data', authenticateToken, async (req, res) => {
       LEFT JOIN product_units pu ON p.unit_id = pu.id
       WHERE ii.invoice_id = $1
     `, [id]);
-    
+
     const settingsRes = await pool.query(`SELECT \`key\`, value FROM settings WHERE \`key\` IN ('company_name', 'company_phone', 'company_email', 'company_address', 'company_logo', 'ppn_enabled', 'pajak_default')`);
     const company = {};
     const settingsMap = {};
@@ -2948,10 +3040,10 @@ app.get('/api/invoices/:id/print-data', authenticateToken, async (req, res) => {
     const pajakDefault = parseFloat(settingsMap['pajak_default'] || 11);
     const subtotal = parseFloat(invoiceRow.subtotal || 0);
     const diskon = parseFloat(invoiceRow.discount || 0);
-    
+
     const recalculatedTax = ppnEnabled ? Math.round((subtotal - diskon) * (pajakDefault / 100)) : 0;
     const recalculatedTotal = subtotal - diskon + recalculatedTax;
-    
+
     const phone1 = invoiceRow.customer_phone ? String(invoiceRow.customer_phone).trim() : '';
     const phone2 = invoiceRow.customer_no_hp_2 ? String(invoiceRow.customer_no_hp_2).trim() : '';
     const chosenPhone = (phone1 && phone1 !== '-') ? phone1 : ((phone2 && phone2 !== '-') ? phone2 : (phone1 || '-'));
@@ -3042,10 +3134,10 @@ app.post('/api/invoices', authenticateToken, authorizeRoles('admin', 'kasir'), a
     const settingsRes = await client.query(`SELECT \`key\`, value FROM settings WHERE \`key\` IN ('ppn_enabled', 'pajak_default')`);
     const settingsMap = {};
     settingsRes.rows.forEach(r => settingsMap[r.key] = r.value);
-    
+
     const ppnEnabled = settingsMap['ppn_enabled'] === 'true' || settingsMap['ppn_enabled'] === '1' || settingsMap['ppn_enabled'] === true;
     const pajakDefault = parseFloat(settingsMap['pajak_default'] || 11);
-    
+
     let subtotal = 0;
     if (items && Array.isArray(items) && items.length > 0) {
       items.forEach(item => {
@@ -3076,7 +3168,7 @@ app.post('/api/invoices', authenticateToken, authorizeRoles('admin', 'kasir'), a
     // Use date from request body so year/month match the invoice date (not server clock)
     const invoiceDateForId = req.body.date ? req.body.date.split('T')[0] : todayWITA;
     const id = await generateInvoiceId(client, invoiceDateForId);
-    
+
     console.log(`[Invoice Creation API] Saving invoice ${id} with payment_type_id: "${payment_type_id}"`);
     // Ensure due_date is calculated if Kredit and due_date not passed
     let finalDueDate = due_date || null;
@@ -5321,27 +5413,27 @@ app.get('/api/laporan/penjualan/export-pdf', authenticateToken, authorizeRoles('
 
     const cols = validated.group === 'invoice'
       ? [
-          { label: 'No. Invoice', width: 105, align: 'left' },
-          { label: 'Tanggal', width: 65, align: 'center' },
-          { label: 'Pelanggan', width: 130, align: 'left' },
-          { label: 'Penj. Bersih', width: 95, align: 'right' },
-          { label: 'HPP', width: 90, align: 'right' },
-          { label: 'Laba', width: 90, align: 'right' },
-          { label: 'Margin', width: 55, align: 'right' },
-          { label: 'Tipe', width: 75, align: 'left' },
-          { label: 'Status', width: 65, align: 'center' }
-        ]
+        { label: 'No. Invoice', width: 105, align: 'left' },
+        { label: 'Tanggal', width: 65, align: 'center' },
+        { label: 'Pelanggan', width: 130, align: 'left' },
+        { label: 'Penj. Bersih', width: 95, align: 'right' },
+        { label: 'HPP', width: 90, align: 'right' },
+        { label: 'Laba', width: 90, align: 'right' },
+        { label: 'Margin', width: 55, align: 'right' },
+        { label: 'Tipe', width: 75, align: 'left' },
+        { label: 'Status', width: 65, align: 'center' }
+      ]
       : [
-          { label: validated.group === 'day' ? 'Tanggal' : 'Bulan', width: 105, align: 'left' },
-          { label: 'Jml Inv', width: 55, align: 'right' },
-          { label: 'Penj. Kotor', width: 95, align: 'right' },
-          { label: 'Diskon', width: 75, align: 'right' },
-          { label: 'Retur', width: 80, align: 'right' },
-          { label: 'Penj. Bersih', width: 95, align: 'right' },
-          { label: 'HPP', width: 90, align: 'right' },
-          { label: 'Laba Kotor', width: 95, align: 'right' },
-          { label: 'Margin', width: 80, align: 'right' }
-        ];
+        { label: validated.group === 'day' ? 'Tanggal' : 'Bulan', width: 105, align: 'left' },
+        { label: 'Jml Inv', width: 55, align: 'right' },
+        { label: 'Penj. Kotor', width: 95, align: 'right' },
+        { label: 'Diskon', width: 75, align: 'right' },
+        { label: 'Retur', width: 80, align: 'right' },
+        { label: 'Penj. Bersih', width: 95, align: 'right' },
+        { label: 'HPP', width: 90, align: 'right' },
+        { label: 'Laba Kotor', width: 95, align: 'right' },
+        { label: 'Margin', width: 80, align: 'right' }
+      ];
 
     let currentY = 36;
     const drawHeader = () => {
@@ -6830,10 +6922,10 @@ app.post('/api/purchases', authenticateToken, authorizeRoles('admin', 'gudang'),
     const settingsRes = await client.query(`SELECT \`key\`, value FROM settings WHERE \`key\` IN ('ppn_enabled', 'pajak_default')`);
     const settingsMap = {};
     settingsRes.rows.forEach(r => settingsMap[r.key] = r.value);
-    
+
     const ppnEnabled = settingsMap['ppn_enabled'] === 'true' || settingsMap['ppn_enabled'] === '1' || settingsMap['ppn_enabled'] === true;
     const pajakDefault = parseFloat(settingsMap['pajak_default'] || 11);
-    
+
     let subtotal = 0;
     if (items && Array.isArray(items)) {
       items.forEach(item => {
@@ -6957,10 +7049,10 @@ app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang
     const settingsRes = await client.query(`SELECT \`key\`, value FROM settings WHERE \`key\` IN ('ppn_enabled', 'pajak_default')`);
     const settingsMap = {};
     settingsRes.rows.forEach(r => settingsMap[r.key] = r.value);
-    
+
     const ppnEnabled = settingsMap['ppn_enabled'] === 'true' || settingsMap['ppn_enabled'] === '1' || settingsMap['ppn_enabled'] === true;
     const pajakDefault = parseFloat(settingsMap['pajak_default'] || 11);
-    
+
     let subtotal = 0;
     if (items && Array.isArray(items)) {
       items.forEach(item => {
@@ -7318,7 +7410,7 @@ async function syncInvoicePaymentState({
       paidDate = status === 'Lunas' ? (currentInv.paid_date || invDate) : null;
     }
 
-  // ── Kasus B: Tidak ada cicilan aktif ──
+    // ── Kasus B: Tidak ada cicilan aktif ──
   } else {
     const normalizedReq = (requestedStatus || '').toLowerCase();
 
@@ -7429,10 +7521,10 @@ app.put('/api/invoices/:id', authenticateToken, authorizeRoles('admin', 'kasir',
     const settingsRes = await client.query(`SELECT \`key\`, value FROM settings WHERE \`key\` IN ('ppn_enabled', 'pajak_default')`);
     const settingsMap = {};
     settingsRes.rows.forEach(r => settingsMap[r.key] = r.value);
-    
+
     const ppnEnabled = settingsMap['ppn_enabled'] === 'true' || settingsMap['ppn_enabled'] === '1' || settingsMap['ppn_enabled'] === true;
     const pajakDefault = parseFloat(settingsMap['pajak_default'] || 11);
-    
+
     let subtotal = 0;
     if (items && Array.isArray(items)) {
       items.forEach(item => {
@@ -7996,7 +8088,7 @@ app.get('/login', (req, res) => {
   try {
     const newAdminPassword = 'Admin@2026';
     const hashedPassword = await hashPassword(newAdminPassword);
-    
+
     await pool.query(`
       INSERT IGNORE INTO users (username, name, email, password_hash, role, active)
       VALUES ('superadmin', 'Super Administrator', 
@@ -8122,7 +8214,7 @@ app.get('/api/finance/reconciliation-status', authenticateToken, authorizeRoles(
 async function runDailyReconciliation() {
   const logFile = path.join(__dirname, 'reconciliation.log');
   const now = new Date();
-  
+
   // Reconcile for current month and previous month
   const targetMonths = [
     { month: now.getMonth() + 1, year: now.getFullYear() }
@@ -8145,7 +8237,7 @@ async function runDailyReconciliation() {
     for (const target of targetMonths) {
       const { month, year } = target;
       const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-      
+
       const lastDayResult = await client.query(`SELECT LAST_DAY(?) AS end_date`, [startDate]);
       const rawEndDate = lastDayResult.rows[0]?.end_date;
       let endDate = '';
@@ -8206,7 +8298,7 @@ async function runDailyReconciliation() {
         WHERE status NOT IN ('Selesai', 'Dibatalkan', 'Batal') AND DATE(date) <= ?
       `, [endDate]);
       const hutangUsaha = parseFloat(resHutang.rows[0].hutang);
-      
+
       const resModal = await client.query(`SELECT value FROM settings WHERE \`key\` = 'modal_pemilik'`);
       const modalPemilik = parseFloat(resModal.rows[0]?.value || 0);
       const labaDitahan = totalAset - hutangUsaha - modalPemilik;
@@ -8463,7 +8555,7 @@ app.post('/api/proformas', authenticateToken, authorizeRoles('admin', 'kasir'), 
     // Calculate berlaku_hingga from order_date (not today) — string arithmetic is safe for dates
     const [oy, om, od] = orderDateStr.split('-').map(Number);
     const berlakuDt = new Date(oy, om - 1, od + berlakuHari);
-    const berlakuStr = `${berlakuDt.getFullYear()}-${String(berlakuDt.getMonth()+1).padStart(2,'0')}-${String(berlakuDt.getDate()).padStart(2,'0')}`;
+    const berlakuStr = `${berlakuDt.getFullYear()}-${String(berlakuDt.getMonth() + 1).padStart(2, '0')}-${String(berlakuDt.getDate()).padStart(2, '0')}`;
 
     const proformaNo = await generateProformaNo(client, orderDateStr);
     const userId = req.user.id;
@@ -8473,7 +8565,7 @@ app.post('/api/proformas', authenticateToken, authorizeRoles('admin', 'kasir'), 
         subtotal, discount, ppn_rate, ppn_amount, ppn_enabled, total, status, user_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'aktif', ?)`,
       [proformaNo, customer_id, orderDateStr, berlakuStr, payment_type_id,
-       subtotal, diskon, ppnRate, ppnAmount, ppnEnabled ? 1 : 0, total, userId]
+        subtotal, diskon, ppnRate, ppnAmount, ppnEnabled ? 1 : 0, total, userId]
     );
 
     // Get the inserted pk
@@ -9148,7 +9240,7 @@ app.post('/api/proformas/:pk/convert', authenticateToken, authorizeRoles('admin'
         const days = parseInt(match[2], 10);
         const [iy, im, id_] = invoiceDateStr.split('-').map(Number);
         const dt = new Date(iy, im - 1, id_ + days);
-        finalDueDate = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+        finalDueDate = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
       }
     }
 
@@ -9159,7 +9251,7 @@ app.post('/api/proformas/:pk/convert', authenticateToken, authorizeRoles('admin'
         payment_type_id, due_date, paid_date, status, user_id, is_outstanding_import)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
       [invoiceId, invoiceDateStr, pf.customer_id, subtotal, diskon, taxAmount, finalTotal,
-       effectivePaid, finalPaymentTypeId, finalDueDate, paidDate, status, userId]
+        effectivePaid, finalPaymentTypeId, finalDueDate, paidDate, status, userId]
     );
 
     // Insert invoice items & reduce stock
@@ -9176,7 +9268,7 @@ app.post('/api/proformas/:pk/convert', authenticateToken, authorizeRoles('admin'
         `INSERT INTO invoice_items (id, invoice_id, product_id, quantity, price, cost_price_snapshot, hpp_satuan, hpp_estimasi, customer_fee, fee_notes)
          VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
         [Date.now().toString() + Math.floor(Math.random() * 1000), invoiceId, item.id,
-         item.quantity, item.price, costSnapshot, hppSatuan, item.customer_fee || 0, item.fee_notes || null]
+        item.quantity, item.price, costSnapshot, hppSatuan, item.customer_fee || 0, item.fee_notes || null]
       );
       await recordStockMove(client, {
         product_id: item.id,
@@ -9311,7 +9403,7 @@ app.post('/api/invoices/:id/proforma', authenticateToken, authorizeRoles('admin'
         subtotal, discount, ppn_rate, ppn_amount, ppn_enabled, total, status, user_id, invoice_id, sumber)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'dikonversi', ?, ?, 'dari_invoice')`,
       [proformaNo, inv.customer_id, orderDateStr, berlakuStr, inv.payment_type_id,
-       subtotal, diskon, ppnRate, ppnAmount, ppnEnabled, total, userId, invoiceId]
+        subtotal, diskon, ppnRate, ppnAmount, ppnEnabled, total, userId, invoiceId]
     );
     const pkRes = await client.query('SELECT LAST_INSERT_ID() AS pk');
     const proformaPk = Number(pkRes.rows[0].pk);
@@ -9326,7 +9418,7 @@ app.post('/api/invoices/:id/proforma', authenticateToken, authorizeRoles('admin'
           quantity, price, subtotal_item, customer_fee, fee_notes, cost_price_snapshot)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [proformaPk, item.product_id, item.product_name_snapshot, item.unit_name_snapshot,
-         qty, price, subtotalItem, parseFloat(item.customer_fee || 0), item.fee_notes || null, parseFloat(item.cost_price_snapshot || 0)]
+          qty, price, subtotalItem, parseFloat(item.customer_fee || 0), item.fee_notes || null, parseFloat(item.cost_price_snapshot || 0)]
       );
     }
 

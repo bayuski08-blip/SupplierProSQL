@@ -678,7 +678,7 @@ const PAGE_TITLES = {
 // ---------- Role Based Access Control (RBAC) ----------
 const ROLE_PERMISSIONS = {
     admin: ['dashboard', 'pos', 'products', 'customers', 'vendors', 'purchases', 'proformas', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'sales-report', 'reports', 'settings', 'roles', 'master-data', 'customerfee', 'pricelists', 'returns', 'stock-moves', 'conversions', 'hpp-log'],
-    finance: ['dashboard', 'invoices', 'piutang', 'cashflow', 'profitloss', 'balance', 'reports', 'returns', 'hpp-log'],
+    finance: ['dashboard', 'piutang'],
     gudang: ['dashboard', 'products', 'purchases', 'vendors', 'hutang', 'stock-moves', 'returns', 'conversions'],
     kasir: ['dashboard', 'pos', 'customers', 'proformas', 'invoices', 'sales-report', 'pricelists', 'returns']
 };
@@ -889,6 +889,11 @@ function navigateTo(page) {
     if (page === 'conversions') {
         if (typeof loadConversionsPage === 'function') loadConversionsPage(1);
     }
+    if (page === 'dashboard') {
+        if (role === 'finance' && typeof fetchPiutangByCustomer === 'function') {
+            fetchPiutangByCustomer();
+        }
+    }
     if (page === 'sales-report') {
         if (typeof initSalesReportPage === 'function') initSalesReportPage();
     }
@@ -1044,7 +1049,7 @@ async function fetchDashboardSummary() {
 
 async function fetchSalesTrend(days = 7) {
     const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
-    if (role !== 'admin' && role !== 'finance') return;
+    if (role !== 'admin') return;
     try {
         const res = await fetch(`/api/dashboard/sales-trend?days=${days}`, { headers: getAuthHeaders() });
         if (res.ok) {
@@ -1057,7 +1062,7 @@ async function fetchSalesTrend(days = 7) {
 
 async function fetchSalesComposition(days = 30) {
     const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
-    if (role !== 'admin' && role !== 'finance') return;
+    if (role !== 'admin') return;
     try {
         const res = await fetch(`/api/dashboard/sales-composition?days=${days}`, { headers: getAuthHeaders() });
         if (res.ok) {
@@ -1073,7 +1078,7 @@ let currentCompositionDays = 30;
 
 async function refreshCharts() {
     const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
-    if (role !== 'admin' && role !== 'finance') return;
+    if (role !== 'admin') return;
     await Promise.all([
         fetchSalesTrend(currentTrendDays),
         fetchSalesComposition(currentCompositionDays)
@@ -1129,7 +1134,11 @@ function setupChartListeners() {
 
 async function checkReconciliationStatus() {
     const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
-    if (role !== 'admin' && role !== 'finance') return;
+    if (role !== 'admin') {
+        const alertEl = document.getElementById('reconciliation-alert');
+        if (alertEl) alertEl.style.display = 'none';
+        return;
+    }
     try {
         const res = await fetch('/api/finance/reconciliation-status', { headers: getAuthHeaders() });
         if (res.ok) {
@@ -1154,10 +1163,10 @@ async function checkReconciliationStatus() {
 function renderDashboard() {
     const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
 
-    // A7: Charts hanya untuk Admin dan Finance
+    // Charts hanya untuk Admin (Finance hanya melihat Total Piutang & Piutang per Pelanggan)
     const chartsRow = document.getElementById('dashboard-charts-row');
     if (chartsRow) {
-        if (role === 'admin' || role === 'finance') {
+        if (role === 'admin') {
             chartsRow.style.display = '';
             renderSalesChart();
             renderDonutChart();
@@ -1166,8 +1175,14 @@ function renderDashboard() {
         }
     }
 
+    const bottomGrid = document.getElementById('dashboard-bottom-grid');
+    if (bottomGrid) {
+        bottomGrid.style.display = role === 'finance' ? 'none' : '';
+    }
+
     checkReconciliationStatus();
     renderSummaryCards();
+    renderPiutangByCustomerCard();
     renderRecentTransactions();
     renderLowStock();
     renderRecentStockMoves();
@@ -1194,34 +1209,46 @@ function renderSummaryCards() {
     // A7: Pembagian card dashboard per role
     const cards = [];
 
-    // Omzet & Keuangan: Admin & Finance saja
-    if (role === 'admin' || role === 'finance') {
-        cards.push({ label: 'Omzet Bulan Ini', value: rpShort(totalOmzet), trend: 'Total penjualan', trendDir: 'up', icon: 'trending-up', color: 'blue' });
-        cards.push({ label: 'Total Piutang', value: rpShort(totalPiutang), trend: totalPiutang > 0 ? 'Belum terbayar' : 'Semua lunas', trendDir: totalPiutang > 0 ? 'down' : 'up', icon: 'hand-coins', color: 'amber' });
-        cards.push({ label: 'Laba Kotor', value: rpShort(labaKotor), trend: labaKotor >= 0 ? 'Revenue - HPP' : 'Rugi', trendDir: labaKotor >= 0 ? 'up' : 'down', icon: 'wallet', color: 'emerald' });
-    }
+    if (role === 'finance') {
+        const unpaidCount = DASHBOARD_SUMMARY?.unpaidCount ?? INVOICES.filter(i => i.status && !['lunas', 'batal', 'cancel', 'dibatalkan'].includes(i.status.toLowerCase())).length;
+        cards.push({
+            label: 'Total Piutang',
+            value: rp(totalPiutang),
+            trend: unpaidCount > 0 ? `${unpaidCount} invoice belum lunas` : 'Semua lunas',
+            trendDir: totalPiutang > 0 ? 'down' : 'up',
+            icon: 'hand-coins',
+            color: 'amber'
+        });
+    } else {
+        // Omzet & Keuangan: Admin saja
+        if (role === 'admin') {
+            cards.push({ label: 'Omzet Bulan Ini', value: rpShort(totalOmzet), trend: 'Total penjualan', trendDir: 'up', icon: 'trending-up', color: 'blue' });
+            cards.push({ label: 'Total Piutang', value: rpShort(totalPiutang), trend: totalPiutang > 0 ? 'Belum terbayar' : 'Semua lunas', trendDir: totalPiutang > 0 ? 'down' : 'up', icon: 'hand-coins', color: 'amber' });
+            cards.push({ label: 'Laba Kotor', value: rpShort(labaKotor), trend: labaKotor >= 0 ? 'Revenue - HPP' : 'Rugi', trendDir: labaKotor >= 0 ? 'up' : 'down', icon: 'wallet', color: 'emerald' });
+        }
 
-    // Total Hutang: Admin & Gudang saja (C6 / A7: sesuai izin halaman Hutang)
-    if (role === 'admin' || role === 'gudang') {
-        cards.push({ label: 'Total Hutang', value: rpShort(totalHutang), trend: totalHutang > 0 ? 'Ke vendor' : 'Semua lunas', trendDir: totalHutang > 0 ? 'down' : 'up', icon: 'landmark', color: 'rose' });
-    }
+        // Total Hutang: Admin & Gudang saja (C6 / A7: sesuai izin halaman Hutang)
+        if (role === 'admin' || role === 'gudang') {
+            cards.push({ label: 'Total Hutang', value: rpShort(totalHutang), trend: totalHutang > 0 ? 'Ke vendor' : 'Semua lunas', trendDir: totalHutang > 0 ? 'down' : 'up', icon: 'landmark', color: 'rose' });
+        }
 
-    // Stok Menipis: Admin, Finance, Kasir, Gudang
-    cards.push({ label: 'Stok Menipis', value: lowStockCount + ' produk', trend: lowStockCount > 0 ? 'Perlu restock' : 'Stok aman', trendDir: lowStockCount > 0 ? 'down' : 'up', icon: 'alert-triangle', color: 'orange' });
+        // Stok Menipis: Admin, Kasir, Gudang
+        cards.push({ label: 'Stok Menipis', value: lowStockCount + ' produk', trend: lowStockCount > 0 ? 'Perlu restock' : 'Stok aman', trendDir: lowStockCount > 0 ? 'down' : 'up', icon: 'alert-triangle', color: 'orange' });
 
-    // Order Hari Ini: Admin, Finance, Kasir (Gudang tidak melihat order hari ini)
-    if (role === 'admin' || role === 'finance' || role === 'kasir') {
-        cards.push({ label: 'Order Hari Ini', value: ordersToday + ' transaksi', trend: 'Hari ini', trendDir: 'up', icon: 'shopping-cart', color: 'indigo' });
-    }
+        // Order Hari Ini: Admin, Kasir (Gudang tidak melihat order hari ini)
+        if (role === 'admin' || role === 'kasir') {
+            cards.push({ label: 'Order Hari Ini', value: ordersToday + ' transaksi', trend: 'Hari ini', trendDir: 'up', icon: 'shopping-cart', color: 'indigo' });
+        }
 
-    // Pelanggan Aktif: Admin, Finance, Kasir
-    if (role === 'admin' || role === 'finance' || role === 'kasir') {
-        cards.push({ label: 'Pelanggan Aktif', value: activeCustomers + ' pelanggan', trend: 'Terdaftar', trendDir: 'up', icon: 'users', color: 'violet' });
-    }
+        // Pelanggan Aktif: Admin, Kasir
+        if (role === 'admin' || role === 'kasir') {
+            cards.push({ label: 'Pelanggan Aktif', value: activeCustomers + ' pelanggan', trend: 'Terdaftar', trendDir: 'up', icon: 'users', color: 'violet' });
+        }
 
-    // Produk Terdaftar: Admin & Gudang (Kasir tidak perlu card katalog)
-    if (role === 'admin' || role === 'gudang') {
-        cards.push({ label: 'Produk Terdaftar', value: totalProducts + ' produk', trend: 'Katalog', trendDir: 'up', icon: 'package', color: 'cyan' });
+        // Produk Terdaftar: Admin & Gudang (Kasir tidak perlu card katalog)
+        if (role === 'admin' || role === 'gudang') {
+            cards.push({ label: 'Produk Terdaftar', value: totalProducts + ' produk', trend: 'Katalog', trendDir: 'up', icon: 'package', color: 'cyan' });
+        }
     }
 
     const grid = document.getElementById('summary-grid');
@@ -1340,12 +1367,95 @@ function renderDonutChart() {
     wrapper.innerHTML = svg + `<div class="donut-legend">${legend}</div>`;
 }
 
+let PIUTANG_BY_CUSTOMER = { rows: [], summary: { totalPiutang: 0, totalCustomers: 0, totalInvoices: 0 } };
+
+async function fetchPiutangByCustomer() {
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    if (role !== 'finance') return;
+    try {
+        const res = await fetch('/api/finance/receivables/by-customer', { headers: getAuthHeaders() });
+        if (res.ok) {
+            const json = await res.json();
+            if (json.success) {
+                PIUTANG_BY_CUSTOMER = {
+                    rows: Array.isArray(json.data) ? json.data : [],
+                    summary: json.summary || { totalPiutang: 0, totalCustomers: 0, totalInvoices: 0 }
+                };
+                renderPiutangByCustomerCard();
+            }
+        }
+    } catch (err) {
+        console.warn('Failed to fetch piutang by customer:', err);
+    }
+}
+
+function openPiutangForCustomer(customerId) {
+    navigateTo('piutang');
+    setTimeout(() => {
+        const custFilterEl = document.getElementById('piutang-customer-filter');
+        if (custFilterEl && customerId) {
+            custFilterEl.value = customerId;
+        }
+        if (typeof fetchPiutang === 'function') fetchPiutang(1);
+    }, 50);
+}
+
+function renderPiutangByCustomerCard() {
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    const cardEl = document.getElementById('dash-card-piutang-by-customer');
+    if (!cardEl) return;
+
+    if (role !== 'finance') {
+        cardEl.style.display = 'none';
+        return;
+    }
+    cardEl.style.display = '';
+
+    const tbody = document.getElementById('piutang-by-customer-body');
+    const tfoot = document.getElementById('piutang-by-customer-foot');
+    if (!tbody) return;
+
+    const rows = PIUTANG_BY_CUSTOMER.rows || [];
+    if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--gray-400); padding:2rem;">Tidak ada piutang belum lunas</td></tr>';
+        if (tfoot) tfoot.innerHTML = '';
+        return;
+    }
+
+    tbody.innerHTML = rows.map(r => {
+        const dueLabel = r.earliestDueDate ? formatDate(r.earliestDueDate) : '-';
+        const overdueBadge = r.overdueCount > 0
+            ? ` <span class="badge-status batal" style="margin-left:0.35rem; font-size:0.72rem;">${r.overdueCount} jatuh tempo</span>`
+            : '';
+        return `
+            <tr style="cursor:pointer;" onclick="openPiutangForCustomer('${escapeHtml(r.customerId || '')}')" title="Klik untuk lihat detail piutang ${escapeHtml(r.customerName)}">
+                <td style="font-weight:600;">${escapeHtml(r.customerName)}</td>
+                <td style="text-align:right;">${r.invoiceCount} invoice</td>
+                <td>${dueLabel}${overdueBadge}</td>
+                <td style="text-align:right; font-weight:700; color:var(--amber-600, #d97706);">${rp(r.totalPiutang)}</td>
+            </tr>
+        `;
+    }).join('');
+
+    if (tfoot) {
+        const sum = PIUTANG_BY_CUSTOMER.summary || {};
+        tfoot.innerHTML = `
+            <tr style="background:var(--gray-50, #f9fafb); font-weight:700;">
+                <td>TOTAL (${sum.totalCustomers ?? rows.length} pelanggan)</td>
+                <td style="text-align:right;">${sum.totalInvoices ?? rows.reduce((s, r) => s + r.invoiceCount, 0)} invoice</td>
+                <td></td>
+                <td style="text-align:right;">${rp(sum.totalPiutang ?? rows.reduce((s, r) => s + r.totalPiutang, 0))}</td>
+            </tr>
+        `;
+    }
+}
+
 function renderRecentTransactions() {
     const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
     const cardEl = document.getElementById('dash-card-recent-transactions');
 
-    // A7: Gudang tidak memiliki izin transaksi / invoice -> card tidak dirender
-    if (role === 'gudang') {
+    // A7: Gudang & Finance tidak menampilkan Transaksi Terbaru di dashboard
+    if (role === 'gudang' || role === 'finance') {
         if (cardEl) cardEl.style.display = 'none';
         return;
     }
@@ -1371,6 +1481,14 @@ function renderRecentTransactions() {
 }
 
 function renderLowStock() {
+    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
+    const lowStockCard = document.getElementById('dash-card-low-stock');
+    if (role === 'finance') {
+        if (lowStockCard) lowStockCard.style.display = 'none';
+        return;
+    }
+    if (lowStockCard) lowStockCard.style.display = '';
+
     // A1: Tampilkan dalam frame dengan scroll vertikal. A2: Produk nonaktif tidak ikut dihitung.
     let lowStock = [];
     if (DASHBOARD_SUMMARY && Array.isArray(DASHBOARD_SUMMARY.lowStockProducts)) {
@@ -4452,10 +4570,8 @@ async function init() {
         );
     } else if (loggedRole === 'finance') {
         fetchPromises.push(
+            fetchPiutangByCustomer(),
             fetchInvoices(),
-            fetchPurchases(),
-            fetchCashTransactions(),
-            fetchVendors(),
             fetchCustomers()
         );
     } else if (loggedRole === 'kasir') {

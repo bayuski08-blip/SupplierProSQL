@@ -4443,6 +4443,50 @@ async function recordPurchaseOrderPayment({ poId, amount, paymentDate, paymentMe
   }
 }
 
+app.get('/api/finance/receivables/by-customer', authenticateToken, authorizeRoles('admin', 'finance'), async (req, res) => {
+  try {
+    const resRows = await pool.query(`
+      SELECT
+        COALESCE(si.customer_id, '') AS customer_id,
+        COALESCE(c.name, 'Tanpa Pelanggan') AS customer_name,
+        COUNT(*) AS invoice_count,
+        COALESCE(SUM(GREATEST(0, si.total - si.paid_amount - COALESCE(si.return_amount, 0))), 0) AS total_piutang,
+        SUM(CASE WHEN GREATEST(0, si.total - si.paid_amount - COALESCE(si.return_amount, 0)) > 0 AND si.due_date IS NOT NULL AND si.due_date < CURDATE() THEN 1 ELSE 0 END) AS overdue_count,
+        MIN(si.due_date) AS earliest_due_date
+      FROM sales_invoices si
+      LEFT JOIN customers c ON c.id = si.customer_id
+      WHERE LOWER(COALESCE(si.status, '')) NOT IN ('lunas', 'batal', 'cancel', 'dibatalkan')
+        AND GREATEST(0, si.total - si.paid_amount - COALESCE(si.return_amount, 0)) > 0
+      GROUP BY si.customer_id, c.name
+      ORDER BY total_piutang DESC
+    `);
+
+    const rows = (resRows.rows || []).map(r => ({
+      customerId: r.customer_id || '',
+      customerName: r.customer_name || 'Tanpa Pelanggan',
+      invoiceCount: parseInt(r.invoice_count || 0, 10),
+      totalPiutang: parseFloat(r.total_piutang || 0),
+      overdueCount: parseInt(r.overdue_count || 0, 10),
+      earliestDueDate: r.earliest_due_date ? formatDateStr(r.earliest_due_date) : null
+    }));
+
+    const totalPiutang = rows.reduce((s, r) => s + r.totalPiutang, 0);
+    const totalInvoices = rows.reduce((s, r) => s + r.invoiceCount, 0);
+
+    res.json({
+      success: true,
+      data: rows,
+      summary: {
+        totalPiutang,
+        totalCustomers: rows.length,
+        totalInvoices
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/api/finance/receivables', authenticateToken, authorizeRoles('admin', 'finance'), async (req, res) => {
   try {
     const { page, limit: limitQ, q, search, customer_id, status, paginate, all } = req.query;

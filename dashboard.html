@@ -209,6 +209,30 @@
                         <!-- Filled by JS -->
                     </div>
 
+                    <!-- Card Piutang Group by Customer (khusus Finance) -->
+                    <div class="dash-card" id="dash-card-piutang-by-customer" style="display: none; margin-bottom: 1.5rem;">
+                        <div class="dash-card-header">
+                            <span class="dash-card-title">Piutang per Pelanggan</span>
+                            <button class="dash-card-action" onclick="navigateTo('piutang')">Lihat Detail Piutang</button>
+                        </div>
+                        <div class="dash-card-body" style="padding: 0; max-height: 460px; overflow-y: auto;">
+                            <table class="data-table" id="piutang-by-customer-table">
+                                <thead>
+                                    <tr>
+                                        <th>Pelanggan</th>
+                                        <th style="text-align:right;">Jml Invoice</th>
+                                        <th>Jatuh Tempo Terdekat</th>
+                                        <th style="text-align:right;">Total Piutang</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="piutang-by-customer-body">
+                                    <!-- Filled by JS -->
+                                </tbody>
+                                <tfoot id="piutang-by-customer-foot"></tfoot>
+                            </table>
+                        </div>
+                    </div>
+
                     <!-- Charts Row -->
                     <div class="dashboard-grid-2" id="dashboard-charts-row">
                         <div class="dash-card">

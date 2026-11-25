@@ -13578,7 +13578,7 @@ window.submitCancelConversion = submitCancelConversion;
 
 
 // ==========================================================================
-// LAPORAN PENJUALAN & LABA (Admin Only)
+// LAPORAN PENJUALAN & LABA (Admin & Kasir)
 // ==========================================================================
 let salesReportState = {
     initialized: false,
@@ -13865,7 +13865,7 @@ function drillDownSalesReportMonth(ymStr) {
 
 async function fetchSalesReport(page = 1) {
     const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
-    if (role !== 'admin') return;
+    if (role !== 'admin' && role !== 'kasir') return;
 
     const validated = _srValidateInputs();
     if (validated.error) {

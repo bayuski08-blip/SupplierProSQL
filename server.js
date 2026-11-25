@@ -932,6 +932,130 @@ async function recordStockMove(conn, {
   ]);
 }
 
+// ─── Helper Terpusat HPP Rata-rata Tertimbang (PO & Konversi Produk) ─────────
+async function lockProductsOrdered(client, productIds) {
+  const uniq = [...new Set((productIds || []).filter(Boolean).map(String))].sort();
+  if (uniq.length === 0) return {};
+  const placeholders = uniq.map(() => '?').join(', ');
+  const res = await client.query(
+    `SELECT id, name, sku, stock, cost_price FROM products WHERE id IN (${placeholders}) FOR UPDATE`,
+    uniq
+  );
+  const map = {};
+  res.rows.forEach(p => { map[p.id] = p; });
+  return map;
+}
+
+/**
+ * Terapkan penambahan stok masuk dan hitung HPP rata-rata tertimbang di master produk.
+ * Harus dipanggil di dalam transaksi DB (BEGIN ... COMMIT).
+ */
+async function applyIncomingCost(client, { productId, qtyIn, unitCost }) {
+  const qty = parseFloat(qtyIn || 0);
+  const cost = parseFloat(unitCost || 0);
+  if (isNaN(qty) || qty <= 0) {
+    throw Object.assign(new Error('Qty barang masuk harus lebih besar dari 0'), { status: 400 });
+  }
+  if (isNaN(cost) || cost < 0) {
+    throw Object.assign(new Error('Biaya satuan tidak valid'), { status: 400 });
+  }
+
+  const prodRes = await client.query(
+    'SELECT id, name, stock, cost_price FROM products WHERE id = ? FOR UPDATE',
+    [productId]
+  );
+  if (prodRes.rows.length === 0) {
+    throw Object.assign(new Error(`Produk '${productId}' tidak ditemukan`), { status: 404 });
+  }
+
+  const prod = prodRes.rows[0];
+  const stokLama = parseFloat(prod.stock || 0);
+  const hppLama = parseFloat(prod.cost_price || 0);
+  const stokSesudah = stokLama + qty;
+
+  let hppSesudah;
+  if (stokLama <= 0 || stokSesudah <= 0) {
+    hppSesudah = cost;
+  } else {
+    hppSesudah = ((stokLama * hppLama) + (qty * cost)) / stokSesudah;
+  }
+
+  await client.query(
+    'UPDATE products SET stock = ?, cost_price = ? WHERE id = ?',
+    [stokSesudah, hppSesudah, productId]
+  );
+
+  return {
+    product_name: prod.name,
+    stok_sebelum: stokLama,
+    hpp_sebelum: hppLama,
+    hpp_sesudah: hppSesudah,
+    stok_sesudah: stokSesudah
+  };
+}
+
+/**
+ * Balikkan stok masuk dan hitung balik HPP rata-rata tertimbang di master produk.
+ * Menolak jika stok_now < qtyIn (stok sudah terpakai sebagian).
+ * Harus dipanggil di dalam transaksi DB (BEGIN ... COMMIT).
+ */
+async function reverseIncomingCost(client, { productId, qtyIn, unitCost, hppSebelum = null, customShortageMsg = null }) {
+  const qty = parseFloat(qtyIn || 0);
+  const cost = parseFloat(unitCost || 0);
+
+  const prodRes = await client.query(
+    'SELECT id, name, stock, cost_price FROM products WHERE id = ? FOR UPDATE',
+    [productId]
+  );
+  if (prodRes.rows.length === 0) {
+    throw Object.assign(new Error(`Produk '${productId}' tidak ditemukan`), { status: 404 });
+  }
+
+  const prod = prodRes.rows[0];
+  const stokNow = parseFloat(prod.stock || 0);
+  const hppNow = parseFloat(prod.cost_price || 0);
+
+  if (stokNow < qty - 1e-9) {
+    const msg = customShortageMsg
+      ? customShortageMsg(prod, stokNow, qty)
+      : `Stok produk '${prod.name}' saat ini (${stokNow}) lebih kecil dari qty dokumen (${qty}). Stok sudah terpakai sebagian sehingga tidak dapat dibatalkan/dikurangi.`;
+    throw Object.assign(new Error(msg), { status: 400 });
+  }
+
+  const rawSisa = stokNow - qty;
+  const sisa = Math.abs(rawSisa) < 1e-9 ? 0 : rawSisa;
+  const fallbackHpp = (hppSebelum !== null && hppSebelum !== undefined && !isNaN(parseFloat(hppSebelum)))
+    ? parseFloat(hppSebelum)
+    : hppNow;
+
+  let hppSesudah;
+  if (sisa <= 0) {
+    hppSesudah = fallbackHpp;
+  } else {
+    const calc = ((stokNow * hppNow) - (qty * cost)) / sisa;
+    if (Math.abs(calc) < 1e-6) {
+      hppSesudah = 0;
+    } else if (calc < 0) {
+      hppSesudah = fallbackHpp;
+    } else {
+      hppSesudah = calc;
+    }
+  }
+
+  await client.query(
+    'UPDATE products SET stock = ?, cost_price = ? WHERE id = ?',
+    [sisa, hppSesudah, productId]
+  );
+
+  return {
+    product_name: prod.name,
+    stok_sebelum: stokNow,
+    hpp_sebelum: hppNow,
+    hpp_sesudah: hppSesudah,
+    stok_sesudah: sisa
+  };
+}
+
 // Authentication Middleware
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -964,8 +1088,8 @@ const authorizeRoles = (...allowedRoles) => {
 // ======================= API ROUTES =======================
 
 // ─── Price & Cost Access Control Helpers ─────────────────────────────────────
-// Role kasir dan gudang tidak boleh menerima field HPP / harga pokok
-const HPP_RESTRICTED_ROLES = ['kasir', 'gudang'];
+// Role kasir tidak boleh menerima field HPP / harga pokok; admin, owner, finance, dan gudang boleh melihat HPP
+const HPP_RESTRICTED_ROLES = ['kasir'];
 function isHppRestricted(req) {
   return HPP_RESTRICTED_ROLES.includes((req.user?.role || '').toLowerCase());
 }
@@ -1378,7 +1502,7 @@ app.post('/api/settings', authenticateToken, authorizeRoles('admin'), async (req
     res.json({ success: true });
   } catch (err) {
     await client.query('ROLLBACK');
-    res.status(400).json({ error: err.message });
+    res.status(err.status || 400).json({ error: err.message });
   } finally {
     client.release();
   }
@@ -3090,7 +3214,7 @@ app.get('/api/purchases/:id/items', authenticateToken, authorizeRoles('admin', '
     const rows = result.rows.map(row => {
       if (!restricted) return row;
       const r = { ...row };
-      delete r.cost_price; // Gudang tetap melihat poi.cost (harga beli PO), bukan HPP rata-rata produk
+      delete r.cost_price;
       return r;
     });
     res.json(rows);
@@ -4497,6 +4621,10 @@ app.post('/api/invoices/:id/payments/:paymentId/void', authenticateToken, author
     await addColIfMissing('purchase_orders', 'tax', 'DECIMAL(20,4) DEFAULT 0');
     await addColIfMissing('purchase_orders', 'paid_date', 'DATE DEFAULT NULL');
     await addColIfMissing('purchase_orders', 'is_outstanding_import', 'TINYINT(1) NOT NULL DEFAULT 0');
+
+    await addColIfMissing('purchase_order_items', 'stock_before', 'DECIMAL(20,4) NULL');
+    await addColIfMissing('purchase_order_items', 'hpp_before', 'DECIMAL(20,4) NULL');
+    await addColIfMissing('purchase_order_items', 'hpp_after', 'DECIMAL(20,4) NULL');
 
     await addColIfMissing('sales_invoices', 'paid_date', 'DATE DEFAULT NULL');
     await addColIfMissing('sales_invoices', 'is_outstanding_import', 'TINYINT(1) NOT NULL DEFAULT 0');
@@ -7037,42 +7165,35 @@ app.post('/api/purchases', authenticateToken, authorizeRoles('admin', 'gudang'),
     );
 
     if (items && Array.isArray(items)) {
-      for (const item of items) {
-        const itemId = 'POI-' + Date.now() + Math.floor(Math.random() * 1000);
+      await lockProductsOrdered(client, items.map(it => it.product_id || it.id));
+      for (let idx = 0; idx < items.length; idx++) {
+        const item = items[idx];
+        const itemId = `POI-${Date.now()}-${idx}-${Math.floor(Math.random() * 1000)}`;
         const prodId = item.product_id || item.id;
         const qty = parseFloat(item.quantity || item.qty || 0);
         const cost = parseFloat(item.cost || item.cost_price || item.price || 0);
 
-        await client.query('INSERT INTO purchase_order_items (id, purchase_order_id, product_id, quantity, cost) VALUES ($1, $2, $3, $4, $5)', [itemId, poId, prodId, qty, cost]);
+        const snap = await applyIncomingCost(client, { productId: prodId, qtyIn: qty, unitCost: cost });
 
-        // Calculate weighted average HPP
-        const prodRes = await client.query('SELECT stock, cost_price FROM products WHERE id = ? FOR UPDATE', [prodId]);
-        if (prodRes.rows.length > 0) {
-          const currentStock = parseFloat(prodRes.rows[0].stock || 0);
-          const currentCost = parseFloat(prodRes.rows[0].cost_price || 0);
-          let newCost = cost;
-          if (currentStock > 0 && (currentStock + qty) > 0) {
-            newCost = ((currentStock * currentCost) + (qty * cost)) / (currentStock + qty);
-          } else {
-            newCost = cost;
-          }
-          const newStock = currentStock + qty;
-          await client.query('UPDATE products SET stock = ?, cost_price = ? WHERE id = ?', [newStock, newCost, prodId]);
-          await recordStockMove(client, {
-            product_id: prodId,
-            tanggal: poDate ? poDate + ' 12:00:00' : null,
-            tipe: 'pembelian',
-            ref_type: 'purchase_order',
-            ref_id: poId,
-            ref_no: poId,
-            qty_masuk: qty,
-            qty_keluar: 0,
-            qty_sebelum: currentStock,
-            qty_sesudah: newStock,
-            keterangan: `Pembelian PO ${poId}`,
-            created_by: userId
-          });
-        }
+        await client.query(
+          'INSERT INTO purchase_order_items (id, purchase_order_id, product_id, quantity, cost, stock_before, hpp_before, hpp_after) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+          [itemId, poId, prodId, qty, cost, snap.stok_sebelum, snap.hpp_sebelum, snap.hpp_sesudah]
+        );
+
+        await recordStockMove(client, {
+          product_id: prodId,
+          tanggal: poDate ? poDate + ' 12:00:00' : null,
+          tipe: 'pembelian',
+          ref_type: 'purchase_order',
+          ref_id: poId,
+          ref_no: poId,
+          qty_masuk: qty,
+          qty_keluar: 0,
+          qty_sebelum: snap.stok_sebelum,
+          qty_sesudah: snap.stok_sesudah,
+          keterangan: `Pembelian PO ${poId}`,
+          created_by: userId
+        });
       }
     }
 
@@ -7201,7 +7322,7 @@ app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang
       ? (currentPo.paid_date ? formatDateStr(currentPo.paid_date) : poDate)
       : null;
 
-    const oldItemsRes = await client.query('SELECT product_id, quantity, cost FROM purchase_order_items WHERE purchase_order_id = $1', [poId]);
+    const oldItemsRes = await client.query('SELECT product_id, quantity, cost, stock_before, hpp_before, hpp_after FROM purchase_order_items WHERE purchase_order_id = $1 ORDER BY id ASC', [poId]);
 
     // B3 Soft-Lock check for PO: check if any item qty decreased or item was removed
     const oldPoQtyMap = {};
@@ -7241,19 +7362,21 @@ app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang
       }
     }
 
+    // Kunci semua produk terkait dalam urutan ID konsisten untuk mencegah deadlock
+    await lockProductsOrdered(client, [
+      ...oldItemsRes.rows.map(it => it.product_id),
+      ...(Array.isArray(items) ? items.map(it => it.product_id || it.id) : [])
+    ]);
+
     for (const item of oldItemsRes.rows) {
-      const prodRes = await client.query('SELECT stock, cost_price FROM products WHERE id = ? FOR UPDATE', [item.product_id]);
-      const curStock = parseFloat(prodRes.rows[0]?.stock || 0);
-      const curCost = parseFloat(prodRes.rows[0]?.cost_price || 0);
       const oldQty = parseFloat(item.quantity || 0);
       const oldCost = parseFloat(item.cost || 0);
-      const nextStock = curStock - oldQty;
-      let reversedCost = curCost;
-      if (nextStock > 0) {
-        const calcCost = ((curStock * curCost) - (oldQty * oldCost)) / nextStock;
-        reversedCost = calcCost >= 0 ? calcCost : curCost;
-      }
-      await client.query('UPDATE products SET stock = ?, cost_price = ? WHERE id = ?', [nextStock, reversedCost, item.product_id]);
+      const rev = await reverseIncomingCost(client, {
+        productId: item.product_id,
+        qtyIn: oldQty,
+        unitCost: oldCost,
+        hppSebelum: item.hpp_before
+      });
       await recordStockMove(client, {
         product_id: item.product_id,
         tanggal: poDate ? poDate + ' 12:00:00' : null,
@@ -7263,8 +7386,8 @@ app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang
         ref_no: poId,
         qty_masuk: 0,
         qty_keluar: oldQty,
-        qty_sebelum: curStock,
-        qty_sesudah: nextStock,
+        qty_sebelum: rev.stok_sebelum,
+        qty_sesudah: rev.stok_sesudah,
         keterangan: `Koreksi Edit PO ${poId} (reversal item lama)${correctionReason ? ' - ' + correctionReason : ''}`,
         created_by: req.user.id
       });
@@ -7273,22 +7396,19 @@ app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang
     await client.query('DELETE FROM purchase_order_items WHERE purchase_order_id = $1', [poId]);
 
     if (items && Array.isArray(items)) {
-      for (const item of items) {
-        const itemId = 'POI-' + Date.now() + Math.floor(Math.random() * 1000);
+      for (let idx = 0; idx < items.length; idx++) {
+        const item = items[idx];
+        const itemId = `POI-${Date.now()}-${idx}-${Math.floor(Math.random() * 1000)}`;
         const prodId = item.product_id || item.id;
         const qty = parseFloat(item.quantity || item.qty || 0);
         const cost = parseFloat(item.cost || item.cost_price || item.price || 0);
 
-        await client.query('INSERT INTO purchase_order_items (id, purchase_order_id, product_id, quantity, cost) VALUES ($1, $2, $3, $4, $5)', [itemId, poId, prodId, qty, cost]);
-        const prodRes = await client.query('SELECT stock, cost_price FROM products WHERE id = ? FOR UPDATE', [prodId]);
-        const curStock = parseFloat(prodRes.rows[0]?.stock || 0);
-        const curCost = parseFloat(prodRes.rows[0]?.cost_price || 0);
-        const nextStock = curStock + qty;
-        let newCost = cost;
-        if (curStock > 0 && nextStock > 0) {
-          newCost = ((curStock * curCost) + (qty * cost)) / nextStock;
-        }
-        await client.query('UPDATE products SET stock = ?, cost_price = ? WHERE id = ?', [nextStock, newCost, prodId]);
+        const snap = await applyIncomingCost(client, { productId: prodId, qtyIn: qty, unitCost: cost });
+
+        await client.query(
+          'INSERT INTO purchase_order_items (id, purchase_order_id, product_id, quantity, cost, stock_before, hpp_before, hpp_after) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+          [itemId, poId, prodId, qty, cost, snap.stok_sebelum, snap.hpp_sebelum, snap.hpp_sesudah]
+        );
         await recordStockMove(client, {
           product_id: prodId,
           tanggal: poDate ? poDate + ' 12:00:00' : null,
@@ -7298,8 +7418,8 @@ app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang
           ref_no: poId,
           qty_masuk: qty,
           qty_keluar: 0,
-          qty_sebelum: curStock,
-          qty_sesudah: nextStock,
+          qty_sebelum: snap.stok_sebelum,
+          qty_sesudah: snap.stok_sesudah,
           keterangan: `Koreksi Edit PO ${poId} (item baru)`,
           created_by: req.user.id
         });
@@ -7324,7 +7444,7 @@ app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang
     res.json({ success: true });
   } catch (err) {
     await client.query('ROLLBACK');
-    res.status(400).json({ error: err.message });
+    res.status(err.status || 400).json({ error: err.message });
   } finally {
     client.release();
   }
@@ -7346,20 +7466,17 @@ app.put('/api/purchases/:id/cancel', authenticateToken, authorizeRoles('admin', 
       return res.json({ success: true });
     }
 
-    const itemsRes = await client.query('SELECT product_id, quantity, cost FROM purchase_order_items WHERE purchase_order_id = $1', [poId]);
+    const itemsRes = await client.query('SELECT product_id, quantity, cost, stock_before, hpp_before, hpp_after FROM purchase_order_items WHERE purchase_order_id = $1 ORDER BY id ASC', [poId]);
+    await lockProductsOrdered(client, itemsRes.rows.map(it => it.product_id));
     for (const item of itemsRes.rows) {
-      const prodRes = await client.query('SELECT stock, cost_price FROM products WHERE id = ? FOR UPDATE', [item.product_id]);
-      const curStock = parseFloat(prodRes.rows[0]?.stock || 0);
-      const curCost = parseFloat(prodRes.rows[0]?.cost_price || 0);
       const itemQty = parseFloat(item.quantity || 0);
       const itemCost = parseFloat(item.cost || 0);
-      const nextStock = curStock - itemQty;
-      let reversedCost = curCost;
-      if (nextStock > 0) {
-        const calcCost = ((curStock * curCost) - (itemQty * itemCost)) / nextStock;
-        reversedCost = calcCost >= 0 ? calcCost : curCost;
-      }
-      await client.query('UPDATE products SET stock = ?, cost_price = ? WHERE id = ?', [nextStock, reversedCost, item.product_id]);
+      const rev = await reverseIncomingCost(client, {
+        productId: item.product_id,
+        qtyIn: itemQty,
+        unitCost: itemCost,
+        hppSebelum: item.hpp_before
+      });
       await recordStockMove(client, {
         product_id: item.product_id,
         tipe: 'koreksi_edit',
@@ -7368,8 +7485,8 @@ app.put('/api/purchases/:id/cancel', authenticateToken, authorizeRoles('admin', 
         ref_no: poId,
         qty_masuk: 0,
         qty_keluar: itemQty,
-        qty_sebelum: curStock,
-        qty_sesudah: nextStock,
+        qty_sebelum: rev.stok_sebelum,
+        qty_sesudah: rev.stok_sesudah,
         keterangan: `Pembatalan PO ${poId}`,
         created_by: req.user.id
       });
@@ -7397,7 +7514,7 @@ app.put('/api/purchases/:id/cancel', authenticateToken, authorizeRoles('admin', 
     res.json({ success: true });
   } catch (err) {
     await client.query('ROLLBACK');
-    res.status(400).json({ error: err.message });
+    res.status(err.status || 400).json({ error: err.message });
   } finally {
     client.release();
   }
@@ -10749,7 +10866,7 @@ app.get('/api/conversions', authenticateToken, authorizeRoles('admin', 'gudang')
       LIMIT ? OFFSET ?
     `, [...params, limitNum, offset]);
 
-    const isGudang = (req.user?.role || '').toLowerCase() === 'gudang';
+    const hideHpp = isHppRestricted(req);
 
     const data = dataRes.rows.map(r => {
       const row = {
@@ -10775,8 +10892,8 @@ app.get('/api/conversions', authenticateToken, authorizeRoles('admin', 'gudang')
         cancel_reason: r.cancel_reason || null
       };
 
-      // Visibilitas HPP: gudang TIDAK melihat nilai / HPP
-      if (!isGudang) {
+      // Visibilitas HPP terpusat: hanya kasir yang dibatasi; admin & gudang boleh melihat
+      if (!hideHpp) {
         row.source_hpp_snapshot = parseFloat(r.source_hpp_snapshot || 0);
         row.moved_value = parseFloat(r.moved_value || 0);
         row.target_stock_before = parseFloat(r.target_stock_before || 0);
@@ -10831,7 +10948,7 @@ app.get('/api/conversions/:id', authenticateToken, authorizeRoles('admin', 'guda
     }
 
     const r = dataRes.rows[0];
-    const isGudang = (req.user?.role || '').toLowerCase() === 'gudang';
+    const hideHpp = isHppRestricted(req);
 
     const result = {
       id: r.id,
@@ -10856,7 +10973,7 @@ app.get('/api/conversions/:id', authenticateToken, authorizeRoles('admin', 'guda
       cancel_reason: r.cancel_reason || null
     };
 
-    if (!isGudang) {
+    if (!hideHpp) {
       result.source_hpp_snapshot = parseFloat(r.source_hpp_snapshot || 0);
       result.moved_value = parseFloat(r.moved_value || 0);
       result.target_stock_before = parseFloat(r.target_stock_before || 0);
@@ -10921,8 +11038,6 @@ app.post('/api/conversions', authenticateToken, authorizeRoles('admin', 'gudang'
 
     const currentSourceStock = parseFloat(sourceProd.stock || 0);
     const currentSourceCost = parseFloat(sourceProd.cost_price || 0);
-    const currentTargetStock = parseFloat(targetProd.stock || 0);
-    const currentTargetCost = parseFloat(targetProd.cost_price || 0);
 
     // 3. Validasi stok sumber mencukupi
     if (currentSourceStock < sQty) {
@@ -10932,23 +11047,19 @@ app.post('/api/conversions', authenticateToken, authorizeRoles('admin', 'gudang'
       });
     }
 
-    // 4. Perhitungan nilai & HPP rata-rata tertimbang
+    // 4. Perhitungan nilai & update stok kedua produk via helper bersama
     const movedValue = currentSourceCost * sQty;
     const newSourceStock = currentSourceStock - sQty;
 
-    let newTargetCost = 0;
-    if (currentTargetStock <= 0) {
-      newTargetCost = movedValue / tQty;
-    } else {
-      newTargetCost = ((currentTargetStock * currentTargetCost) + movedValue) / (currentTargetStock + tQty);
-    }
-    const newTargetStock = currentTargetStock + tQty;
-
-    // 5. Update stok & HPP kedua produk
     // Stok sumber berkurang, HPP sumber TIDAK berubah
     await client.query('UPDATE products SET stock = ? WHERE id = ?', [newSourceStock, source_product_id]);
-    // Stok tujuan bertambah, HPP tujuan disesuaikan dengan weighted average
-    await client.query('UPDATE products SET stock = ?, cost_price = ? WHERE id = ?', [newTargetStock, newTargetCost, target_product_id]);
+
+    // Stok & HPP tujuan diupdate dengan helper terpusat (weighted average)
+    const targetSnap = await applyIncomingCost(client, {
+      productId: target_product_id,
+      qtyIn: tQty,
+      unitCost: movedValue / tQty
+    });
 
     // 6. Generate nomor dokumen KNV-{YYYY}-{NNNNN}
     const convNo = await generateConversionNo(client, convDate);
@@ -10962,7 +11073,7 @@ app.post('/api/conversions', authenticateToken, authorizeRoles('admin', 'gudang'
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'posted', ?)
     `, [
       convNo, convDate, source_product_id, sQty, target_product_id, tQty,
-      currentSourceCost, movedValue, currentTargetStock, currentTargetCost, newTargetCost,
+      currentSourceCost, movedValue, targetSnap.stok_sebelum, targetSnap.hpp_sebelum, targetSnap.hpp_sesudah,
       notes ? notes.trim() : null, req.user.id
     ]);
     const convId = insRes.insertId || insRes.rows?.[0]?.id;
@@ -10994,8 +11105,8 @@ app.post('/api/conversions', authenticateToken, authorizeRoles('admin', 'gudang'
       ref_no: convNo,
       qty_masuk: tQty,
       qty_keluar: 0,
-      qty_sebelum: currentTargetStock,
-      qty_sesudah: newTargetStock,
+      qty_sebelum: targetSnap.stok_sebelum,
+      qty_sesudah: targetSnap.stok_sesudah,
       keterangan: `Konversi masuk dari ${sourceProd.name} (${convNo})`,
       created_by: req.user.id
     });
@@ -11063,8 +11174,6 @@ app.post('/api/conversions/:id/cancel', authenticateToken, authorizeRoles('admin
       return res.status(404).json({ error: 'Produk sumber atau produk tujuan tidak ditemukan di master produk' });
     }
 
-    const currentTargetStock = parseFloat(targetProd.stock || 0);
-    const currentTargetCost = parseFloat(targetProd.cost_price || 0);
     const currentSourceStock = parseFloat(sourceProd.stock || 0);
 
     const tQty = parseFloat(conv.target_qty);
@@ -11072,28 +11181,19 @@ app.post('/api/conversions/:id/cancel', authenticateToken, authorizeRoles('admin
     const movedVal = parseFloat(conv.moved_value);
     const targetHppBefore = parseFloat(conv.target_hpp_before);
 
-    // 3. GUARD: Stok produk tujuan saat ini tidak boleh lebih kecil dari target_qty
-    if (currentTargetStock < tQty) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({
-        error: `Stok produk tujuan '${targetProd.name}' saat ini (${currentTargetStock}) lebih kecil dari qty hasil konversi (${tQty}). Stok hasil konversi sudah terpakai sebagian.`
-      });
-    }
+    // 3. Balikkan stok & HPP produk tujuan via helper terpusat (termasuk guard stok_now < tQty)
+    const revSnap = await reverseIncomingCost(client, {
+      productId: conv.target_product_id,
+      qtyIn: tQty,
+      unitCost: movedVal / tQty,
+      hppSebelum: targetHppBefore,
+      customShortageMsg: (prod, stk, reqQty) =>
+        `Stok produk tujuan '${prod.name}' saat ini (${stk}) lebih kecil dari qty hasil konversi (${reqQty}). Stok hasil konversi sudah terpakai sebagian.`
+    });
 
     // 4. Balikkan stok produk sumber (+ source_qty, HPP tetap)
     const newSourceStock = currentSourceStock + sQty;
     await client.query('UPDATE products SET stock = ? WHERE id = ?', [newSourceStock, conv.source_product_id]);
-
-    // 5. Balikkan stok & HPP produk tujuan
-    const remainingTargetStock = currentTargetStock - tQty;
-    let newTargetCost = 0;
-    if (remainingTargetStock === 0) {
-      newTargetCost = targetHppBefore;
-    } else {
-      newTargetCost = ((currentTargetStock * currentTargetCost) - movedVal) / remainingTargetStock;
-      if (newTargetCost < 0) newTargetCost = targetHppBefore;
-    }
-    await client.query('UPDATE products SET stock = ?, cost_price = ? WHERE id = ?', [remainingTargetStock, newTargetCost, conv.target_product_id]);
 
     // 6. Update status dokumen konversi ke cancelled
     const nowDt = new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -11117,8 +11217,8 @@ app.post('/api/conversions/:id/cancel', authenticateToken, authorizeRoles('admin
       ref_no: conv.number,
       qty_masuk: 0,
       qty_keluar: tQty,
-      qty_sebelum: currentTargetStock,
-      qty_sesudah: remainingTargetStock,
+      qty_sebelum: revSnap.stok_sebelum,
+      qty_sesudah: revSnap.stok_sesudah,
       keterangan: `Pembatalan Konversi ${conv.number}: ${cancel_reason.trim()}`,
       created_by: req.user.id
     });

@@ -382,9 +382,9 @@ async function main() {
     const rDashKas = await api('GET', '/api/dashboard/summary', tokens.kasir);
     const rDashGud = await api('GET', '/api/dashboard/summary', tokens.gudang);
 
-    const gudNoCostPrice = (rProdGud.body?.data || []).every(p => p.cost_price === undefined) && rProdGud.body?.summary?.totalStockValue === undefined;
+    const gudCanSeeCostPrice = (rProdGud.body?.data || []).some(p => p.cost_price !== undefined) && (rProdGud.body?.data || []).every(p => p.sell_price === undefined);
     const kasNoCostPrice = (rProdKas.body?.data || []).every(p => p.cost_price === undefined) && rProdKas.body?.summary?.totalStockValue === undefined;
-    const poGudSafe = (rPoItemsGud.body || []).every(it => it.cost !== undefined && it.cost_price === undefined);
+    const poGudCanSeeHpp = (rPoItemsGud.body || []).every(it => it.cost !== undefined && it.cost_price !== undefined);
     const invItemsKasSafe = (rInvItemsKas.body || []).every(it => it.cost_price_snapshot === undefined && it.hpp_satuan === undefined);
     const invAdmHasLaba = (rInvAdm.body?.data || []).some(r => 'laba' in r);
     const invFinNoLaba = (rInvFin.body?.data || []).every(r => !('laba' in r) && !('hpp' in r) && !('marginPct' in r));
@@ -393,10 +393,10 @@ async function main() {
     record('Skenario 11', 'Akses Laporan Penjualan admin-only (403 untuk finance/kasir/gudang)',
       rFinPenj.status === 403 && rKasPenj.status === 403 && rGudPenj.status === 403 && rFinRing.status === 403 && rFinPdf.status === 403,
       `statuses=[fin:${rFinPenj.status}, kas:${rKasPenj.status}, gud:${rGudPenj.status}, ringFin:${rFinRing.status}, pdfFin:${rFinPdf.status}]`);
-    record('Skenario 11b', 'Sanitasi HPP API untuk kasir & gudang + Laba kolom invoice admin-only + dashboard finance tetap',
-      gudNoCostPrice && kasNoCostPrice && poGudSafe && invItemsKasSafe && invAdmHasLaba && invFinNoLaba && invKasNoLaba &&
+    record('Skenario 11b', 'Sanitasi HPP kasir + Gudang akses HPP produk/PO (tanpa sell_price) + Laba invoice admin-only',
+      gudCanSeeCostPrice && kasNoCostPrice && poGudCanSeeHpp && invItemsKasSafe && invAdmHasLaba && invFinNoLaba && invKasNoLaba &&
       'grossProfit' in rDashFin.body && !('grossProfit' in rDashKas.body) && !('revenue' in rDashKas.body) && !('grossProfit' in rDashGud.body),
-      `gudNoHpp=${gudNoCostPrice}, poGudHasCostOnly=${poGudSafe}, invAdmLaba=${invAdmHasLaba}, invFinNoLaba=${invFinNoLaba}`);
+      `gudHasHppNoSell=${gudCanSeeCostPrice}, poGudHasCostAndHpp=${poGudCanSeeHpp}, invAdmLaba=${invAdmHasLaba}, invFinNoLaba=${invFinNoLaba}`);
 
     // --- SKENARIO 12: Cross-check penuh Juni 2023 ---
     const ccInv = await api('GET', '/api/laporan/penjualan?group=invoice&from=2023-06-01&to=2023-06-30&all=1', tokens.admin);

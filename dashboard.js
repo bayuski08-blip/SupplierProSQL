@@ -682,6 +682,20 @@ const ROLE_PERMISSIONS = {
     kasir: ['dashboard', 'pos', 'customers', 'proformas', 'invoices', 'pricelists', 'returns']
 };
 
+function getCurrentUserRole() {
+    return (localStorage.getItem('role') || 'kasir').toLowerCase();
+}
+
+function canViewHpp() {
+    // Role kasir TIDAK boleh melihat HPP/harga beli; admin, owner, finance, dan gudang boleh
+    return getCurrentUserRole() !== 'kasir';
+}
+
+function canViewSellPrice() {
+    // Role gudang tidak melihat harga jual
+    return getCurrentUserRole() !== 'gudang';
+}
+
 function applyRoleRestrictions() {
     const rawRole = localStorage.getItem('role') || 'kasir';
     const role = rawRole.toLowerCase();
@@ -732,8 +746,8 @@ function applyRoleRestrictions() {
         el.style.display = canSeeFinance ? '' : 'none';
     });
 
-    // Sembunyikan HPP untuk kasir dan gudang
-    const canSeeHpp = role === 'admin' || role === 'owner';
+    // Sembunyikan HPP untuk kasir saja (gudang boleh melihat/mengelola HPP produk, PO, dan Konversi)
+    const canSeeHpp = canViewHpp();
     document.querySelectorAll('.th-product-hpp, .td-product-hpp, .form-group-product-cost').forEach(el => {
         el.style.display = canSeeHpp ? '' : 'none';
     });
@@ -745,13 +759,13 @@ function applyRoleRestrictions() {
     });
 
     // Sembunyikan Harga Jual untuk gudang
-    const canSeeSellPrice = role !== 'gudang';
+    const canSeeSellPrice = canViewSellPrice();
     document.querySelectorAll('.th-product-price, .td-product-price, .form-group-product-price').forEach(el => {
         el.style.display = canSeeSellPrice ? '' : 'none';
     });
 
-    // Sembunyikan nilai / HPP konversi untuk selain Admin (misal Gudang)
-    const canSeeConversionValue = role === 'admin' || role === 'owner';
+    // Visibilitas nilai / HPP konversi mengikuti izin HPP terpusat (kasir dibatasi; admin & gudang boleh melihat)
+    const canSeeConversionValue = canViewHpp();
     document.querySelectorAll('.th-conversion-value, .td-conversion-value, .conversion-admin-value-field').forEach(el => {
         el.style.display = canSeeConversionValue ? '' : 'none';
     });
@@ -4710,9 +4724,8 @@ async function fetchProducts(page) {
         // Simpan baris halaman ini untuk akses instan di modal (A3: Modal Opname Instan)
         CURRENT_PAGE_PRODUCTS.clear();
 
-        const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
-        const canSeeHpp = role === 'admin' || role === 'owner';
-        const canSeeSellPrice = role !== 'gudang';
+        const canSeeHpp = canViewHpp();
+        const canSeeSellPrice = canViewSellPrice();
 
         const tbody = document.getElementById('products-body');
         if (!tbody) return;
@@ -4881,9 +4894,8 @@ async function openEditProductModal(id) {
         catEl.value = p.category || '';
         if (!catEl.value && p.category_id) catEl.value = p.category_id;
     }
-    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
-    const canSeeHpp = role === 'admin' || role === 'owner';
-    const canSeeSellPrice = role !== 'gudang';
+    const canSeeHpp = canViewHpp();
+    const canSeeSellPrice = canViewSellPrice();
     document.getElementById('edit-product-cost').value = (p.cost != null && !isNaN(p.cost) && canSeeHpp) ? formatNumberTrim(p.cost) : '';
     document.getElementById('edit-product-price').value = (p.price != null && !isNaN(p.price) && canSeeSellPrice) ? formatNumberTrim(p.price) : '';
     document.getElementById('edit-product-stock').value = formatNumberTrim(p.stock);
@@ -5944,8 +5956,7 @@ class ProductAutocomplete {
 
         const displayed = matches.slice(0, 8);
         const self = this;
-        const acRole = (localStorage.getItem('role') || 'kasir').toLowerCase();
-        const hideAcPrice = acRole === 'gudang';
+        const hideAcPrice = !canViewHpp();
         const itemsHtml = displayed.map((p, idx) => {
             const highlightedName = highlightMatch(p.name, q);
             const price = self.getPrice(p);
@@ -6335,8 +6346,7 @@ async function openEditPurchaseModal(id) {
     // Populate product select
     const select = document.getElementById('edit-purchase-product-select');
     if (select) {
-        const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
-        const canSeeSellPrice = role !== 'gudang';
+        const canSeeSellPrice = canViewSellPrice();
         select.innerHTML = '<option value="" disabled selected>- Pilih Produk -</option>' +
             PRODUCTS.map(p => {
                 const labelPrice = (p.cost != null && p.cost > 0) ? rp(p.cost) : (canSeeSellPrice ? rp(p.price) : '');
@@ -10053,9 +10063,8 @@ async function exportSection(section) {
 
     try {
         if (section === 'produk') {
-            const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
-            const canSeeHpp = role === 'admin' || role === 'owner';
-            const canSeeSellPrice = role !== 'gudang';
+            const canSeeHpp = canViewHpp();
+            const canSeeSellPrice = canViewSellPrice();
 
             headers = ["SKU", "Nama Produk", "Brand/Merk", "Kategori"];
             if (canSeeHpp) headers.push("Harga Beli");
@@ -12780,7 +12789,7 @@ async function loadConversionsPage(page = 1) {
         return;
     }
 
-    const canSeeVal = role === 'admin' || role === 'owner';
+    const canSeeVal = canViewHpp();
 
     let url = `/api/conversions?page=${page}&limit=80`;
     if (search) url += `&search=${encodeURIComponent(search)}`;
@@ -13129,8 +13138,7 @@ async function submitCreateConversion() {
 async function viewConversionDetail(id) {
     try {
         const token = localStorage.getItem('token');
-        const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
-        const canSeeVal = role === 'admin' || role === 'owner';
+        const canSeeVal = canViewHpp();
 
         const res = await fetch(`/api/conversions/${id}`, {
             headers: { 'Authorization': `Bearer ${token}` }

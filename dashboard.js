@@ -680,7 +680,7 @@ const ROLE_PERMISSIONS = {
     admin: ['dashboard', 'pos', 'products', 'customers', 'vendors', 'purchases', 'proformas', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'sales-report', 'reports', 'settings', 'roles', 'master-data', 'customerfee', 'pricelists', 'returns', 'stock-moves', 'conversions', 'hpp-log'],
     finance: ['dashboard', 'invoices', 'piutang', 'cashflow', 'profitloss', 'balance', 'reports', 'returns', 'hpp-log'],
     gudang: ['dashboard', 'products', 'purchases', 'vendors', 'hutang', 'stock-moves', 'returns', 'conversions'],
-    kasir: ['dashboard', 'pos', 'customers', 'proformas', 'invoices', 'pricelists', 'returns']
+    kasir: ['dashboard', 'pos', 'customers', 'proformas', 'invoices', 'sales-report', 'pricelists', 'returns']
 };
 
 function getCurrentUserRole() {
@@ -13666,7 +13666,7 @@ async function _srPopulateFilterDropdowns() {
 
 async function initSalesReportPage() {
     const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
-    if (role !== 'admin') return;
+    if (role !== 'admin' && role !== 'kasir') return;
 
     await _srPopulateFilterDropdowns();
 

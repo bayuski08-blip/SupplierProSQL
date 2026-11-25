@@ -364,8 +364,11 @@ async function main() {
       `ringkasan_margin=${s10.body?.data?.margin_pct}, performa_margin=${p10.body?.data?.margin}`);
 
     // --- SKENARIO 11: Role & HPP protection ---
+    const rAdmPenj = await api('GET', '/api/laporan/penjualan?group=day&from=2023-06-01&to=2023-06-30', tokens.admin);
     const rFinPenj = await api('GET', '/api/laporan/penjualan?group=day&from=2023-06-01&to=2023-06-30', tokens.finance);
     const rKasPenj = await api('GET', '/api/laporan/penjualan?group=day&from=2023-06-01&to=2023-06-30', tokens.kasir);
+    const rKasRing = await api('GET', '/api/laporan/penjualan/ringkasan?from=2023-06-01&to=2023-06-30', tokens.kasir);
+    const rKasPdf = await api('GET', '/api/laporan/penjualan/export-pdf?group=day&from=2023-06-01&to=2023-06-30', tokens.kasir);
     const rGudPenj = await api('GET', '/api/laporan/penjualan?group=day&from=2023-06-01&to=2023-06-30', tokens.gudang);
     const rFinRing = await api('GET', '/api/laporan/penjualan/ringkasan?from=2023-06-01&to=2023-06-30', tokens.finance);
     const rFinPdf = await api('GET', '/api/laporan/penjualan/export-pdf?group=day&from=2023-06-01&to=2023-06-30', tokens.finance);
@@ -390,9 +393,11 @@ async function main() {
     const invFinNoLaba = (rInvFin.body?.data || []).every(r => !('laba' in r) && !('hpp' in r) && !('marginPct' in r));
     const invKasNoLaba = (rInvKas.body?.data || []).every(r => !('laba' in r) && !('hpp' in r));
 
-    record('Skenario 11', 'Akses Laporan Penjualan admin-only (403 untuk finance/kasir/gudang)',
-      rFinPenj.status === 403 && rKasPenj.status === 403 && rGudPenj.status === 403 && rFinRing.status === 403 && rFinPdf.status === 403,
-      `statuses=[fin:${rFinPenj.status}, kas:${rKasPenj.status}, gud:${rGudPenj.status}, ringFin:${rFinRing.status}, pdfFin:${rFinPdf.status}]`);
+    const kasSameAsAdmin = rKasPenj.status === 200 && rKasRing.status === 200 && rKasPdf.status === 200 &&
+      approx(rKasPenj.body?.data?.totals?.laba_kotor, rAdmPenj.body?.data?.totals?.laba_kotor);
+    record('Skenario 11', 'Akses Laporan Penjualan admin & kasir (200 sama dengan admin; 403 untuk finance/gudang)',
+      rFinPenj.status === 403 && rGudPenj.status === 403 && rFinRing.status === 403 && rFinPdf.status === 403 && kasSameAsAdmin,
+      `statuses=[fin:${rFinPenj.status}, gud:${rGudPenj.status}, ringFin:${rFinRing.status}, pdfFin:${rFinPdf.status}, kas:${rKasPenj.status}/${rKasRing.status}/${rKasPdf.status}]`);
     record('Skenario 11b', 'Sanitasi HPP kasir + Gudang akses HPP produk/PO (tanpa sell_price) + Laba invoice admin-only',
       gudCanSeeCostPrice && kasNoCostPrice && poGudCanSeeHpp && invItemsKasSafe && invAdmHasLaba && invFinNoLaba && invKasNoLaba &&
       'grossProfit' in rDashFin.body && !('grossProfit' in rDashKas.body) && !('revenue' in rDashKas.body) && !('grossProfit' in rDashGud.body),

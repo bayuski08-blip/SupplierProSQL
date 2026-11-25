@@ -6024,8 +6024,8 @@ async function computeGroupedSalesReport(clientOrPool, { group, from, to, custom
   };
 }
 
-// --- Laporan Penjualan Endpoints (Admin Only) ---
-app.get('/api/laporan/penjualan/ringkasan', authenticateToken, authorizeRoles('admin'), async (req, res) => {
+// --- Laporan Penjualan Endpoints (Admin & Kasir) ---
+app.get('/api/laporan/penjualan/ringkasan', authenticateToken, authorizeRoles('admin', 'kasir'), async (req, res) => {
   try {
     const { from, to } = validateSalesReportParams({
       from: req.query.from,
@@ -6045,7 +6045,7 @@ app.get('/api/laporan/penjualan/ringkasan', authenticateToken, authorizeRoles('a
   }
 });
 
-app.get('/api/laporan/penjualan', authenticateToken, authorizeRoles('admin'), async (req, res) => {
+app.get('/api/laporan/penjualan', authenticateToken, authorizeRoles('admin', 'kasir'), async (req, res) => {
   try {
     const group = req.query.group || 'day';
     const validated = validateSalesReportParams({
@@ -6078,7 +6078,7 @@ app.get('/api/laporan/penjualan', authenticateToken, authorizeRoles('admin'), as
   }
 });
 
-app.get('/api/laporan/penjualan/export-pdf', authenticateToken, authorizeRoles('admin'), async (req, res) => {
+app.get('/api/laporan/penjualan/export-pdf', authenticateToken, authorizeRoles('admin', 'kasir'), async (req, res) => {
   try {
     const group = req.query.group || 'day';
     const validated = validateSalesReportParams({

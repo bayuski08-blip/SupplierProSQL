@@ -664,6 +664,7 @@ const PAGE_TITLES = {
     profitloss: { title: 'Laba Rugi', subtitle: 'Laporan pendapatan dan beban' },
     balance: { title: 'Neraca', subtitle: 'Posisi keuangan bisnis Anda' },
     'sales-report': { title: 'Laporan Penjualan', subtitle: 'Analisis penjualan, HPP, dan laba per hari, bulan, atau invoice' },
+    'hpp-log': { title: 'Riwayat Penyesuaian HPP', subtitle: 'Audit log perubahan HPP akibat edit harga pembelian' },
     reports: { title: 'Laporan & Insight', subtitle: 'Analisis performa bisnis' },
     settings: { title: 'Pengaturan', subtitle: 'Konfigurasi profil dan preferensi' },
     roles: { title: 'Otoritas Akses', subtitle: 'Kelola hak akses dan peran staff' },
@@ -676,8 +677,8 @@ const PAGE_TITLES = {
 
 // ---------- Role Based Access Control (RBAC) ----------
 const ROLE_PERMISSIONS = {
-    admin: ['dashboard', 'pos', 'products', 'customers', 'vendors', 'purchases', 'proformas', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'sales-report', 'reports', 'settings', 'roles', 'master-data', 'customerfee', 'pricelists', 'returns', 'stock-moves', 'conversions'],
-    finance: ['dashboard', 'invoices', 'piutang', 'cashflow', 'profitloss', 'balance', 'reports', 'returns'],
+    admin: ['dashboard', 'pos', 'products', 'customers', 'vendors', 'purchases', 'proformas', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'sales-report', 'reports', 'settings', 'roles', 'master-data', 'customerfee', 'pricelists', 'returns', 'stock-moves', 'conversions', 'hpp-log'],
+    finance: ['dashboard', 'invoices', 'piutang', 'cashflow', 'profitloss', 'balance', 'reports', 'returns', 'hpp-log'],
     gudang: ['dashboard', 'products', 'purchases', 'vendors', 'hutang', 'stock-moves', 'returns', 'conversions'],
     kasir: ['dashboard', 'pos', 'customers', 'proformas', 'invoices', 'pricelists', 'returns']
 };
@@ -890,6 +891,9 @@ function navigateTo(page) {
     }
     if (page === 'sales-report') {
         if (typeof initSalesReportPage === 'function') initSalesReportPage();
+    }
+    if (page === 'hpp-log') {
+        if (typeof loadHppLogPage === 'function') loadHppLogPage(1);
     }
 
     // Close mobile sidebar
@@ -6315,11 +6319,13 @@ window.updateEditPurchaseItemPrice = (index, val) => {
 };
 
 let originalEditPurchaseItems = [];
+let originalEditPurchaseDate = '';
 
 // FIX: open edit-purchase modal and load existing items
 async function openEditPurchaseModal(id) {
     const po = PURCHASES.find(x => x.id === id);
     if (!po) return;
+    originalEditPurchaseDate = (po.date || '').split('T')[0];
 
     // Fill header fields
     const idEl = document.getElementById('edit-purchase-id');
@@ -6377,7 +6383,7 @@ async function openEditPurchaseModal(id) {
     openModal('modal-edit-purchase');
 }
 
-async function savePurchase(isEdit, bypassSoftLock = false, correctionReason = null) {
+async function savePurchase(isEdit, bypassSoftLock = false, correctionReason = null, confirmedHppChange = false, alasanHpp = '') {
     const id = isEdit ? document.getElementById('edit-purchase-id').value : null;
     const prefix = isEdit ? 'edit' : 'add';
 
@@ -6393,9 +6399,9 @@ async function savePurchase(isEdit, bypassSoftLock = false, correctionReason = n
         return;
     }
 
-    // Soft-Lock Check (B3) for Edit Purchase
-    if (isEdit && !bypassSoftLock && Array.isArray(originalEditPurchaseItems) && originalEditPurchaseItems.length > 0) {
-        let isQtyReducedOrItemRemoved = false;
+    // Soft-Lock Check (B3) for Edit Purchase — QTY dikurangi / item dihapus
+    let isQtyReducedOrItemRemoved = false;
+    if (isEdit && Array.isArray(originalEditPurchaseItems) && originalEditPurchaseItems.length > 0) {
         for (const orig of originalEditPurchaseItems) {
             const cur = editPurchaseItems.find(i => String(i.product_id) === String(orig.product_id));
             if (!cur) {
@@ -6404,13 +6410,12 @@ async function savePurchase(isEdit, bypassSoftLock = false, correctionReason = n
             }
             const origQty = parseFloat(orig.quantity || orig.qty || 0);
             const curQty = parseFloat(cur.quantity || cur.qty || 0);
-            if (curQty < origQty) {
+            if (curQty < origQty - 1e-9) {
                 isQtyReducedOrItemRemoved = true;
                 break;
             }
         }
-
-        if (isQtyReducedOrItemRemoved) {
+        if (!bypassSoftLock && isQtyReducedOrItemRemoved) {
             promptSoftLockModal('purchase');
             return;
         }
@@ -6421,31 +6426,90 @@ async function savePurchase(isEdit, bypassSoftLock = false, correctionReason = n
         showToast('Pilih vendor terlebih dahulu!', 'warning');
         return;
     }
+    const newDateVal = document.getElementById(`${prefix}-purchase-date`)?.value || '';
+    const newPaymentTypeVal = document.getElementById(`${prefix}-purchase-payment-type`)?.value || '';
+
+    // ── Fase 3: Pratinjau & Konfirmasi sebelum simpan (tanpa pengurangan qty) ──
+    if (isEdit && !confirmedHppChange && !isQtyReducedOrItemRemoved && Array.isArray(originalEditPurchaseItems) && originalEditPurchaseItems.length > 0) {
+        const oldCostMap = {};
+        const oldQtyMap = {};
+        for (const it of originalEditPurchaseItems) {
+            oldQtyMap[String(it.product_id)] = (oldQtyMap[String(it.product_id)] || 0) + parseFloat(it.quantity || 0);
+            oldCostMap[String(it.product_id)] = parseFloat(it.cost || it.price || 0);
+        }
+        let hasReplayTrigger = newDateVal && originalEditPurchaseDate && newDateVal !== originalEditPurchaseDate;
+        if (!hasReplayTrigger) {
+            for (const cur of editPurchaseItems) {
+                const pid = String(cur.product_id);
+                const oldQty = oldQtyMap[pid];
+                const newQty = parseFloat(cur.quantity || cur.qty || 0);
+                const newPrice = parseFloat(cur.price ?? cur.cost ?? 0);
+                if (oldQty === undefined || Math.abs(newQty - oldQty) > 1e-9 || Math.abs(newPrice - (oldCostMap[pid] || 0)) > 0.001) {
+                    hasReplayTrigger = true;
+                    break;
+                }
+            }
+        }
+
+        if (hasReplayTrigger) {
+            const previewReqBody = {
+                date: newDateVal,
+                payment_type_id: newPaymentTypeVal,
+                items: itemsToSave.map(i => ({ product_id: i.product_id, quantity: i.qty, cost: i.price }))
+            };
+            try {
+                const prevRes = await fetch(`/api/purchases/${encodeURIComponent(id)}/preview-price-edit`, {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify(previewReqBody)
+                });
+                const prevData = await prevRes.json();
+                if (!prevRes.ok) {
+                    showToast('Error: ' + (prevData.error || 'Gagal menghitung pratinjau penyesuaian HPP'), 'error');
+                    return;
+                }
+                const hasImpact = (prevData.totalInvoiceTerdampak || 0) > 0 || (prevData.totalKonversiTerdampak || 0) > 0 || prevData.overpayWarning;
+                if (hasImpact) {
+                    await showHppPreviewModal(prevData, (alasan) => {
+                        savePurchase(isEdit, bypassSoftLock, correctionReason, true, alasan);
+                    });
+                    return;
+                }
+            } catch (prevErr) {
+                console.error(prevErr);
+                showToast('Gagal memuat pratinjau penyesuaian HPP', 'error');
+                return;
+            }
+        }
+    }
+
     const total = itemsToSave.reduce((s, i) => s + i.total, 0);
 
     let dueDate = document.getElementById(`${prefix}-purchase-due-date`)?.value || '';
     if (!dueDate) {
-        dueDate = calculateDueDate(getPaymentTypeName(document.getElementById(`${prefix}-purchase-payment-type`)), document.getElementById(`${prefix}-purchase-date`)?.value);
+        dueDate = calculateDueDate(getPaymentTypeName(document.getElementById(`${prefix}-purchase-payment-type`)), newDateVal);
     }
 
     const payTypeName = getPaymentTypeName(document.getElementById(`${prefix}-purchase-payment-type`)).toLowerCase();
     const isKredit = payTypeName.includes('kredit') || payTypeName.includes('credit');
     const paidInput = parseFloat(document.getElementById(`${prefix}-purchase-paid`)?.value || 0);
-    // Jika bukan kredit (Tunai/Transfer), paid otomatis = total (Lunas). Untuk PO baru kredit, bayar = 0 (belum lunas)
     const paid = isKredit ? (isEdit ? paidInput : 0) : total;
 
     const payload = {
-        vendor_id: document.getElementById(`${prefix}-purchase-vendor`)?.value || '',
-        date: document.getElementById(`${prefix}-purchase-date`)?.value || '',
+        vendor_id: vendorVal,
+        date: newDateVal,
         total: total,
         paid: paid,
-        payment_type_id: document.getElementById(`${prefix}-purchase-payment-type`)?.value || '',
+        payment_type_id: newPaymentTypeVal,
         due_date: dueDate,
-        items: itemsToSave
+        items: itemsToSave.map(i => ({ product_id: i.product_id, quantity: i.qty, cost: i.price }))
     };
 
     if (correctionReason) {
         payload.correction_reason = correctionReason;
+    }
+    if (alasanHpp) {
+        payload.alasan = alasanHpp;
     }
 
     const url = isEdit ? `/api/purchases/${encodeURIComponent(id)}` : '/api/purchases';
@@ -6458,12 +6522,22 @@ async function savePurchase(isEdit, bypassSoftLock = false, correctionReason = n
             body: JSON.stringify(payload)
         });
         if (res.ok) {
+            const resData = await res.json().catch(() => ({}));
             closeModal(`modal-${isEdit ? 'edit' : 'add'}-purchase`);
             showToast(isEdit ? 'Purchase Order berhasil diperbarui!' : 'Purchase Order berhasil dibuat!', 'success');
+            if (resData.overpayWarning) {
+                showToast(`Peringatan kelebihan bayar (${rp(resData.overpayAmount || 0)}): total baru lebih kecil dari yang sudah dibayar. Tidak ada refund otomatis.`, 'warning');
+            }
             notifyDataChange('purchase');
             await fetchPurchases();
-            await fetchProducts(); // update stock
+            await fetchProducts();
             renderHutang();
+            if (typeof fetchDashboardSummary === 'function') await fetchDashboardSummary();
+            if (typeof fetchCashTransactions === 'function') await fetchCashTransactions();
+            if (currentPage === 'profitloss' && typeof renderProfitLoss === 'function') await renderProfitLoss();
+            if (currentPage === 'balance' && typeof renderBalance === 'function') await renderBalance();
+            if (currentPage === 'sales-report' && typeof fetchSalesReport === 'function') await fetchSalesReport(1);
+            if (currentPage === 'hpp-log' && typeof loadHppLogPage === 'function') await loadHppLogPage(1);
         } else {
             let errMsg = 'Gagal menyimpan PO';
             try {
@@ -6481,6 +6555,172 @@ async function savePurchase(isEdit, bypassSoftLock = false, correctionReason = n
     } catch (err) {
         console.error(err);
         showToast('Gagal menghubungi server', 'error');
+    }
+}
+
+// ── Modal Pratinjau HPP sebelum simpan perubahan harga PO (Fase 3 & Fase 5) ──
+function _renderHppPreviewInvoiceRows(invoices) {
+    return (invoices || []).map(inv => `
+        <tr>
+            <td>${escapeHtml(inv.invoice_id)}</td>
+            <td>${escapeHtml(inv.date || '-')}</td>
+            <td style="text-align:right;">${rp(inv.hpp_lama)}</td>
+            <td style="text-align:right;">${rp(inv.hpp_baru)}</td>
+            <td style="text-align:right; font-weight:600; color:${inv.selisih_laba >= 0 ? 'var(--emerald-600, #059669)' : 'var(--rose-600, #e11d48)'};">
+                ${inv.selisih_laba > 0 ? '+' : ''}${rp(inv.selisih_laba)}
+            </td>
+        </tr>`).join('');
+}
+
+async function showHppPreviewModal(data, onConfirm) {
+    closeHppPreviewModal();
+    window._hppPreviewData = data;
+    window._hppPreviewShowingAll = false;
+
+    const hppRows = (data.hppChanges || []).map(h => `
+        <tr>
+            <td>${escapeHtml(h.nama)}</td>
+            <td style="text-align:right;">${rp(h.hpp_lama)}</td>
+            <td style="text-align:right; font-weight:600; color:${h.selisih > 0 ? '#d97706' : '#059669'};">${rp(h.hpp_baru)}</td>
+            <td style="text-align:right; color:${h.selisih > 0 ? '#d97706' : '#059669'};">${h.selisih > 0 ? '+' : ''}${rp(h.selisih)}</td>
+        </tr>`).join('');
+
+    const topInvoices = data.top10Invoice || [];
+    const allInvoices = data.allInvoices || topInvoices;
+    const hasMoreInvoices = allInvoices.length > 10;
+
+    const convItems = (data.konversiList || []).map(k =>
+        `<li><strong>${escapeHtml(k.number || String(k.id))}</strong> &rarr; Target: ${escapeHtml(k.target_product_name || k.target_product_id)} (HPP Target: ${rp(k.target_hpp_after?.lama || 0)} &rarr; <strong>${rp(k.target_hpp_after?.baru || 0)}</strong>)</li>`
+    ).join('');
+
+    const overpayAlert = data.overpayWarning
+        ? `<div style="padding:0.75rem; background:#fef2f2; border:1px solid #fecaca; border-radius:0.5rem; color:#991b1b; font-size:0.875rem; margin-bottom:0.75rem;">
+            <strong>Peringatan Kelebihan Bayar:</strong> Total PO baru (${rp(data.newTotal)}) lebih kecil dari yang sudah dibayar (${rp(data.totalPaid)}), selisih lebih ${rp(data.overpayAmount || 0)}. Tidak ada jurnal/refund otomatis.
+           </div>` : '';
+
+    const cashInfo = (data.isInstant && Math.abs(data.selisihKas || 0) > 0.01)
+        ? `<div style="padding:0.65rem 0.75rem; background:#eff6ff; border:1px solid #bfdbfe; border-radius:0.5rem; color:#1e40af; font-size:0.85rem; margin-bottom:0.75rem;">
+            <strong>Info Selisih Kas (PO Tunai/Transfer):</strong> Total kas keluar berubah sebesar <strong>${data.selisihKas > 0 ? '+' : ''}${rp(data.selisihKas)}</strong> (${rp(data.oldTotal)} &rarr; ${rp(data.newTotal)}).
+           </div>` : '';
+
+    const html = `
+    <div class="modal-overlay active" id="modal-hpp-preview" style="z-index: 10060;">
+        <div class="modal" style="max-width: 720px; max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h3>Pratinjau Penyesuaian HPP</h3>
+                <button type="button" class="modal-close" onclick="closeHppPreviewModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto; flex: 1;">
+                ${overpayAlert}
+                ${cashInfo}
+                <div style="padding:0.75rem; background:#fffbeb; border:1px solid #fde68a; border-radius:0.5rem; color:#92400e; font-size:0.875rem; margin-bottom:1rem;">
+                    <strong>Peringatan: Laporan laba periode lama akan berubah.</strong> Perubahan harga ini memperbarui snapshot HPP pada transaksi terkait.
+                </div>
+
+                ${hppRows ? `
+                <div style="margin-bottom: 1rem;">
+                    <h4 style="font-size:0.9rem; font-weight:600; margin-bottom:0.5rem; color:var(--gray-700);">Perubahan HPP Master Produk</h4>
+                    <table class="data-table" style="font-size:0.85rem;">
+                        <thead>
+                            <tr>
+                                <th>Produk</th>
+                                <th style="text-align:right;">HPP Sekarang</th>
+                                <th style="text-align:right;">HPP Sesudah</th>
+                                <th style="text-align:right;">Selisih</th>
+                            </tr>
+                        </thead>
+                        <tbody>${hppRows}</tbody>
+                    </table>
+                </div>` : ''}
+
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:0.75rem; margin-bottom:1rem;">
+                    <div style="padding:0.75rem; background:var(--gray-50); border:1px solid var(--gray-200); border-radius:0.5rem;">
+                        <div style="font-size:0.8rem; color:var(--gray-500);">Jumlah Invoice Terdampak</div>
+                        <div style="font-size:1.25rem; font-weight:700; color:var(--blue-600);">${data.totalInvoiceTerdampak || 0}</div>
+                    </div>
+                    <div style="padding:0.75rem; background:var(--gray-50); border:1px solid var(--gray-200); border-radius:0.5rem;">
+                        <div style="font-size:0.8rem; color:var(--gray-500);">Total Selisih Laba</div>
+                        <div style="font-size:1.25rem; font-weight:700; color:${(data.totalSelisihLaba || 0) < 0 ? '#e11d48' : '#059669'};">
+                            ${(data.totalSelisihLaba || 0) > 0 ? '+' : ''}${rp(data.totalSelisihLaba || 0)}
+                        </div>
+                    </div>
+                </div>
+
+                ${topInvoices.length > 0 ? `
+                <div style="margin-bottom: 1rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                        <h4 style="font-size:0.9rem; font-weight:600; color:var(--gray-700); margin:0;">
+                            ${hasMoreInvoices ? 'Top 10 Invoice Selisih Terbesar' : 'Daftar Invoice Terdampak'}
+                        </h4>
+                        ${hasMoreInvoices ? `<button type="button" id="btn-hpp-toggle-all-inv" class="btn-toolbar secondary" style="padding:0.25rem 0.6rem; font-size:0.78rem;" onclick="toggleAllHppPreviewInvoices()">Lihat semua (${allInvoices.length})</button>` : ''}
+                    </div>
+                    <div style="max-height:220px; overflow-y:auto; border:1px solid var(--gray-200); border-radius:0.5rem;">
+                        <table class="data-table" style="font-size:0.8rem; margin:0;">
+                            <thead>
+                                <tr>
+                                    <th>No. Invoice</th>
+                                    <th>Tanggal</th>
+                                    <th style="text-align:right;">HPP Lama</th>
+                                    <th style="text-align:right;">HPP Baru</th>
+                                    <th style="text-align:right;">Selisih Laba</th>
+                                </tr>
+                            </thead>
+                            <tbody id="hpp-preview-invoice-tbody">${_renderHppPreviewInvoiceRows(topInvoices)}</tbody>
+                        </table>
+                    </div>
+                </div>` : '<p style="color:var(--gray-500); font-size:0.85rem; margin-bottom:1rem;">Tidak ada invoice penjualan yang terdampak.</p>'}
+
+                ${data.totalKonversiTerdampak > 0 ? `
+                <div style="margin-bottom:1rem; padding:0.75rem; background:var(--gray-50); border:1px solid var(--gray-200); border-radius:0.5rem; font-size:0.85rem;">
+                    <div style="font-weight:600; margin-bottom:0.35rem;">Konversi Produk Terdampak (${data.totalKonversiTerdampak} dokumen):</div>
+                    <ul style="margin:0; padding-left:1.25rem;">${convItems}</ul>
+                </div>` : ''}
+
+                <div class="form-group" style="margin-bottom:0;">
+                    <label style="font-weight:600;">Alasan Perubahan <span style="color:#e11d48;">*</span></label>
+                    <textarea id="hpp-preview-alasan" class="form-input" rows="2" placeholder="Wajib diisi: alasan penyesuaian harga / HPP..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-toolbar secondary" onclick="closeHppPreviewModal()">Batal</button>
+                <button type="button" class="btn-toolbar primary" onclick="confirmHppPreview()">Simpan &amp; Terapkan</button>
+            </div>
+        </div>
+    </div>`;
+
+    document.body.insertAdjacentHTML('beforeend', html);
+    window._hppPreviewOnConfirm = onConfirm;
+}
+
+function toggleAllHppPreviewInvoices() {
+    const data = window._hppPreviewData;
+    const tbody = document.getElementById('hpp-preview-invoice-tbody');
+    const btn = document.getElementById('btn-hpp-toggle-all-inv');
+    if (!data || !tbody || !btn) return;
+    window._hppPreviewShowingAll = !window._hppPreviewShowingAll;
+    const list = window._hppPreviewShowingAll ? (data.allInvoices || data.top10Invoice || []) : (data.top10Invoice || []);
+    tbody.innerHTML = _renderHppPreviewInvoiceRows(list);
+    btn.textContent = window._hppPreviewShowingAll ? 'Tampilkan Top 10' : `Lihat semua (${(data.allInvoices || []).length})`;
+}
+
+function closeHppPreviewModal() {
+    const el = document.getElementById('modal-hpp-preview');
+    if (el) el.remove();
+    window._hppPreviewOnConfirm = null;
+    window._hppPreviewData = null;
+}
+
+function confirmHppPreview() {
+    const alasan = (document.getElementById('hpp-preview-alasan')?.value || '').trim();
+    if (alasan.length < 3) {
+        showToast('Alasan perubahan wajib diisi!', 'warning');
+        document.getElementById('hpp-preview-alasan')?.focus();
+        return;
+    }
+    const cb = window._hppPreviewOnConfirm;
+    closeHppPreviewModal();
+    if (typeof cb === 'function') {
+        cb(alasan);
     }
 }
 
@@ -13944,3 +14184,104 @@ window.drillDownSalesReportMonth = drillDownSalesReportMonth;
 window.popSalesReportDrill = popSalesReportDrill;
 window.exportSalesReportExcel = exportSalesReportExcel;
 window.exportSalesReportPdf = exportSalesReportPdf;
+
+
+// ==========================================================================
+// RIWAYAT PENYESUAIAN HPP (Fase 6 — Admin & Finance)
+// ==========================================================================
+async function loadHppLogPage(page = 1) {
+    const prodSelect = document.getElementById('hpp-log-filter-product');
+    if (prodSelect && prodSelect.options.length <= 1) {
+        let prods = Array.isArray(PRODUCTS) && PRODUCTS.length > 0 ? PRODUCTS : [];
+        if (prods.length === 0) {
+            try {
+                const pr = await fetch('/api/products?all=true', { headers: getAuthHeaders() });
+                if (pr.ok) {
+                    const pJson = await pr.json();
+                    prods = Array.isArray(pJson) ? pJson : (pJson.data || []);
+                }
+            } catch (_) {}
+        }
+        prodSelect.innerHTML = '<option value="all">Semua Produk</option>' +
+            prods.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join('');
+    }
+
+    const productId = prodSelect?.value || 'all';
+    const from = document.getElementById('hpp-log-date-from')?.value || '';
+    const to = document.getElementById('hpp-log-date-to')?.value || '';
+
+    const params = new URLSearchParams({ page: String(page), limit: '50' });
+    if (productId && productId !== 'all') params.set('product_id', productId);
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+
+    const tbody = document.getElementById('hpp-log-table-body');
+    const emptyEl = document.getElementById('hpp-log-empty-state');
+    const pagEl = document.getElementById('pagination-hpp-log');
+    if (!tbody) return;
+
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:1.5rem; color:var(--gray-400);">Memuat riwayat...</td></tr>';
+
+    try {
+        const res = await fetch(`/api/hpp-adjustment-log?${params.toString()}`, { headers: getAuthHeaders() });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Gagal memuat log');
+
+        const rows = json.data || [];
+        if (rows.length === 0) {
+            tbody.innerHTML = '';
+            if (emptyEl) emptyEl.style.display = 'block';
+            if (pagEl) pagEl.innerHTML = '';
+            return;
+        }
+        if (emptyEl) emptyEl.style.display = 'none';
+
+        tbody.innerHTML = rows.map(r => {
+            const waktu = r.created_at ? String(r.created_at).replace('T', ' ').slice(0, 19) : '-';
+            return `
+            <tr>
+                <td style="white-space:nowrap; font-size:0.82rem;">${escapeHtml(waktu)}</td>
+                <td style="font-size:0.78rem; font-family:monospace;">${escapeHtml(r.batch_id)}</td>
+                <td>${escapeHtml(r.user_name || '-')}</td>
+                <td>${escapeHtml(r.produk_nama || r.produk_id)}</td>
+                <td><span class="badge-status">${escapeHtml(r.jenis_dokumen)}</span></td>
+                <td style="font-size:0.82rem;">${escapeHtml(r.dokumen_id)}</td>
+                <td style="font-size:0.82rem;">${escapeHtml(r.field)}</td>
+                <td style="text-align:right;">${r.nilai_lama !== null ? rp(r.nilai_lama) : '-'}</td>
+                <td style="text-align:right; font-weight:600;">${r.nilai_baru !== null ? rp(r.nilai_baru) : '-'}</td>
+                <td style="font-size:0.82rem;">${escapeHtml(r.alasan || '-')}</td>
+            </tr>`;
+        }).join('');
+
+        if (pagEl) {
+            const totalPages = json.totalPages || 1;
+            const curPage = json.page || 1;
+            let pagHtml = '';
+            if (totalPages > 1) {
+                pagHtml = `<button class="btn-toolbar secondary" ${curPage <= 1 ? 'disabled' : ''} onclick="loadHppLogPage(${curPage - 1})">&laquo; Prev</button>
+                    <span style="margin:0 0.75rem; font-size:0.85rem;">Halaman ${curPage} dari ${totalPages} (${json.total} entri)</span>
+                    <button class="btn-toolbar secondary" ${curPage >= totalPages ? 'disabled' : ''} onclick="loadHppLogPage(${curPage + 1})">Next &raquo;</button>`;
+            }
+            pagEl.innerHTML = pagHtml;
+        }
+    } catch (err) {
+        console.error(err);
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:1.5rem; color:#e11d48;">${escapeHtml(err.message)}</td></tr>`;
+    }
+}
+
+function resetHppLogFilter() {
+    const prodSelect = document.getElementById('hpp-log-filter-product');
+    const fromEl = document.getElementById('hpp-log-date-from');
+    const toEl = document.getElementById('hpp-log-date-to');
+    if (prodSelect) prodSelect.value = 'all';
+    if (fromEl) fromEl.value = '';
+    if (toEl) toEl.value = '';
+    loadHppLogPage(1);
+}
+
+window.loadHppLogPage = loadHppLogPage;
+window.resetHppLogFilter = resetHppLogFilter;
+window.toggleAllHppPreviewInvoices = toggleAllHppPreviewInvoices;
+window.closeHppPreviewModal = closeHppPreviewModal;
+window.confirmHppPreview = confirmHppPreview;

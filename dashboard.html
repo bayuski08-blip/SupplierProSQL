@@ -101,6 +101,9 @@
                     <div class="nav-item" data-page="sales-report" id="nav-sales-report">
                         <i data-lucide="file-bar-chart-2"></i> Laporan Penjualan
                     </div>
+                    <div class="nav-item" data-page="hpp-log" id="nav-hpp-log">
+                        <i data-lucide="history"></i> Riwayat Penyesuaian HPP
+                    </div>
                     <div class="nav-item" data-page="customerfee" id="nav-customerfee">
                         <i data-lucide="lock"></i> Fee Customer
                     </div>
@@ -2149,6 +2152,61 @@
                     </div>
 
                     <div id="pagination-conversions" class="pagination-container"></div>
+                </section>
+
+                <!-- Riwayat Penyesuaian HPP (Fase 6) -->
+                <section class="page-section" id="page-hpp-log">
+                    <div class="page-toolbar" style="flex-wrap: wrap; gap: 0.75rem;">
+                        <div class="page-toolbar-left" style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                            <select id="hpp-log-filter-product" class="form-input"
+                                style="padding: 0.45rem 0.75rem; font-size: 0.85rem; min-width: 220px;"
+                                onchange="loadHppLogPage(1)">
+                                <option value="all">Semua Produk</option>
+                            </select>
+                        </div>
+                        <div class="page-toolbar-right" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                            <div style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.85rem;">
+                                <span>Dari:</span>
+                                <input type="date" id="hpp-log-date-from" class="form-input"
+                                    style="padding: 0.35rem 0.5rem; font-size: 0.85rem;"
+                                    onchange="loadHppLogPage(1)">
+                                <span>s/d</span>
+                                <input type="date" id="hpp-log-date-to" class="form-input"
+                                    style="padding: 0.35rem 0.5rem; font-size: 0.85rem;"
+                                    onchange="loadHppLogPage(1)">
+                            </div>
+                            <button class="btn-toolbar secondary" onclick="resetHppLogFilter()">
+                                <i data-lucide="rotate-ccw"></i> Reset
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="data-table-wrapper">
+                        <table class="data-table" id="hpp-log-table">
+                            <thead>
+                                <tr>
+                                    <th>Waktu</th>
+                                    <th>Batch ID</th>
+                                    <th>User</th>
+                                    <th>Produk</th>
+                                    <th>Jenis Dokumen</th>
+                                    <th>ID Dokumen</th>
+                                    <th>Field</th>
+                                    <th style="text-align: right;">Nilai Lama</th>
+                                    <th style="text-align: right;">Nilai Baru</th>
+                                    <th>Alasan</th>
+                                </tr>
+                            </thead>
+                            <tbody id="hpp-log-table-body"></tbody>
+                        </table>
+                    </div>
+
+                    <div id="hpp-log-empty-state" class="empty-state" style="display: none; padding: 2.5rem; text-align: center;">
+                        <i data-lucide="history" style="width: 48px; height: 48px; color: var(--gray-300); margin-bottom: 0.5rem;"></i>
+                        <p style="color: var(--gray-500); font-size: 0.95rem;">Belum ada riwayat penyesuaian HPP.</p>
+                    </div>
+
+                    <div id="pagination-hpp-log" class="pagination-container"></div>
                 </section>
             </div><!-- /content-area -->
         </div><!-- /main-content -->

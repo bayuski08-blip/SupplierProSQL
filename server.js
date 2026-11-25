@@ -1056,6 +1056,541 @@ async function reverseIncomingCost(client, { productId, qtyIn, unitCost, hppSebe
   };
 }
 
+// ─── recomputeHppFromDate: Replay HPP Kronologis (Fase 2) ─────────────────────
+/**
+ * Perluas himpunan produk terdampak secara transitif via konversi produk.
+ */
+async function expandAffectedProductsByConversion(client, initialIds) {
+  const allProdukIds = new Set((initialIds || []).filter(Boolean).map(String));
+  let toExpand = [...allProdukIds];
+  while (toExpand.length > 0) {
+    const ph = toExpand.map(() => '?').join(',');
+    const convRes = await client.query(
+      `SELECT DISTINCT target_product_id FROM product_conversions
+       WHERE source_product_id IN (${ph}) AND status != 'cancelled'`,
+      toExpand
+    );
+    const newIds = convRes.rows
+      .map(r => String(r.target_product_id))
+      .filter(id => !allProdukIds.has(id));
+    newIds.forEach(id => allProdukIds.add(id));
+    toExpand = newIds;
+  }
+  return [...allProdukIds].sort();
+}
+
+/**
+ * Replay ulang HPP rata-rata tertimbang untuk produk terdampak mulai tanggal tertentu.
+ * Aturan urut kronologis: tanggal_dokumen (stock_moves.tanggal DATETIME) -> stock_moves.id ASC.
+ * Pembulatan 2 desimal dilakukan di akhir hitungan tiap langkah.
+ */
+async function recomputeHppFromDate(client, { produkIds, tanggalMulai, dryRun = false, userId = null, batchId = null, alasan = '' }) {
+  const round2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
+  const round4 = (v) => Math.round((Number(v) || 0) * 10000) / 10000;
+  const tanggalDt = tanggalMulai + ' 00:00:00';
+
+  // 1. Perluas produk terdampak secara transitif via product_conversions
+  const affectedIds = await expandAffectedProductsByConversion(client, produkIds);
+  if (affectedIds.length === 0) {
+    return {
+      dryRun,
+      hppMasterPerubahan: {},
+      invoiceTerdampak: [],
+      totalInvoiceTerdampak: 0,
+      totalSelisihLaba: 0,
+      top10Invoice: [],
+      totalKonversiTerdampak: 0,
+      konversiTerdampak: {},
+      konversiList: [],
+      perubahan: [],
+      stockValid: true
+    };
+  }
+
+  // 2. Lock semua produk terdampak berurutan ID terkecil untuk mencegah deadlock
+  await lockProductsOrdered(client, affectedIds);
+
+  // Ambil nama produk untuk pesan error & pratinjau
+  const phNames = affectedIds.map(() => '?').join(',');
+  const masterAllRes = await client.query(
+    `SELECT id, name, stock, cost_price FROM products WHERE id IN (${phNames})`,
+    affectedIds
+  );
+  const masterMap = {};
+  masterAllRes.rows.forEach(p => { masterMap[String(p.id)] = p; });
+
+  // 3. Ambil posisi awal (stok & HPP) tepat sebelum tanggalMulai
+  const hppState = {};
+  for (const pid of affectedIds) {
+    const master = masterMap[pid] || { id: pid, name: pid, stock: 0, cost_price: 0 };
+    const masterStock = parseFloat(master.stock || 0);
+
+    const smBefore = await client.query(
+      `SELECT qty_sesudah FROM stock_moves
+       WHERE product_id = ? AND tanggal < ?
+       ORDER BY tanggal DESC, id DESC LIMIT 1`,
+      [pid, tanggalDt]
+    );
+    const netAfterRes = await client.query(
+      `SELECT COALESCE(SUM(qty_masuk - qty_keluar), 0) AS net_after
+       FROM stock_moves
+       WHERE product_id = ? AND tanggal >= ?`,
+      [pid, tanggalDt]
+    );
+    const netAfter = parseFloat(netAfterRes.rows[0]?.net_after || 0);
+
+    // Stok tepat sebelum tanggalMulai
+    const initialStock = smBefore.rows.length > 0
+      ? parseFloat(smBefore.rows[0].qty_sesudah || 0)
+      : (masterStock - netAfter);
+
+    // Cari HPP terakhir sebelum tanggalMulai (PO atau Konversi Target)
+    const hppPoBefore = await client.query(
+      `SELECT poi.hpp_after, po.date AS doc_date
+       FROM purchase_order_items poi
+       JOIN purchase_orders po ON po.id = poi.purchase_order_id
+       WHERE poi.product_id = ? AND po.date < ? AND po.status != 'Batal'
+       ORDER BY po.date DESC, poi.id DESC LIMIT 1`,
+      [pid, tanggalMulai]
+    );
+    const hppConvBefore = await client.query(
+      `SELECT pc.target_hpp_after, pc.date AS doc_date
+       FROM product_conversions pc
+       WHERE pc.target_product_id = ? AND pc.date < ? AND pc.status != 'cancelled'
+       ORDER BY pc.date DESC, pc.id DESC LIMIT 1`,
+      [pid, tanggalMulai]
+    );
+
+    let initialHpp = 0;
+    const poRow = hppPoBefore.rows[0];
+    const convRow = hppConvBefore.rows[0];
+    if (poRow && convRow) {
+      const dPo = formatDateStr(poRow.doc_date);
+      const dConv = formatDateStr(convRow.doc_date);
+      initialHpp = dConv >= dPo ? parseFloat(convRow.target_hpp_after || 0) : parseFloat(poRow.hpp_after || 0);
+    } else if (poRow) {
+      initialHpp = parseFloat(poRow.hpp_after || 0);
+    } else if (convRow) {
+      initialHpp = parseFloat(convRow.target_hpp_after || 0);
+    } else if (initialStock > 0) {
+      // Tidak ada PO/konversi sebelum tanggalMulai: cek hpp_before dari PO atau konversi pertama pada/setelah tanggalMulai
+      const firstPoOnOrAfter = await client.query(
+        `SELECT poi.hpp_before, po.date AS doc_date
+         FROM purchase_order_items poi
+         JOIN purchase_orders po ON po.id = poi.purchase_order_id
+         WHERE poi.product_id = ? AND po.date >= ? AND po.status != 'Batal' AND poi.hpp_before IS NOT NULL
+         ORDER BY po.date ASC, poi.id ASC LIMIT 1`,
+        [pid, tanggalMulai]
+      );
+      const firstConvOnOrAfter = await client.query(
+        `SELECT pc.target_hpp_before, pc.date AS doc_date
+         FROM product_conversions pc
+         WHERE pc.target_product_id = ? AND pc.date >= ? AND pc.status != 'cancelled'
+         ORDER BY pc.date ASC, pc.id ASC LIMIT 1`,
+        [pid, tanggalMulai]
+      );
+      const fp = firstPoOnOrAfter.rows[0];
+      const fc = firstConvOnOrAfter.rows[0];
+      if (fp && fc) {
+        const dFp = formatDateStr(fp.doc_date);
+        const dFc = formatDateStr(fc.doc_date);
+        initialHpp = dFp <= dFc ? parseFloat(fp.hpp_before || 0) : parseFloat(fc.target_hpp_before || 0);
+      } else if (fp) {
+        initialHpp = parseFloat(fp.hpp_before || 0);
+      } else if (fc) {
+        initialHpp = parseFloat(fc.target_hpp_before || 0);
+      } else {
+        initialHpp = parseFloat(master.cost_price || 0);
+      }
+    }
+
+    hppState[pid] = {
+      stock: initialStock,
+      hpp: initialHpp
+    };
+  }
+
+  // 4. Ambil seluruh stock_moves mulai tanggalMulai, urut kronologis: tanggal ASC, id ASC
+  const movesRes = await client.query(
+    `SELECT sm.id, sm.product_id, sm.tanggal, sm.tipe, sm.ref_type, sm.ref_id, sm.ref_no,
+            sm.qty_masuk, sm.qty_keluar, sm.qty_sebelum, sm.qty_sesudah
+     FROM stock_moves sm
+     WHERE sm.product_id IN (${phNames}) AND sm.tanggal >= ?
+     ORDER BY sm.tanggal ASC, sm.id ASC`,
+    [...affectedIds, tanggalDt]
+  );
+
+  // 5. Replay kejadian satu per satu
+  const perubahan = [];
+  const invoiceTerdampak = {};
+  const konversiTerdampak = {};
+  const replayHpp = {};
+  for (const pid of affectedIds) {
+    replayHpp[pid] = { stock: hppState[pid].stock, hpp: hppState[pid].hpp };
+  }
+
+  // Cache kecil per konversi dalam loop agar konversi_keluar -> konversi_masuk terhubung
+  const convTempMovedVal = {};
+
+  for (const move of movesRes.rows) {
+    const pid = String(move.product_id);
+    const st = replayHpp[pid];
+    if (!st) continue;
+
+    const qMasuk = parseFloat(move.qty_masuk || 0);
+    const qKeluar = parseFloat(move.qty_keluar || 0);
+    const prodName = masterMap[pid]?.name || pid;
+
+    if (move.ref_type === 'purchase_order') {
+      const poiRes = await client.query(
+        `SELECT poi.id, poi.cost, poi.stock_before, poi.hpp_before, poi.hpp_after, po.status AS po_status
+         FROM purchase_order_items poi
+         JOIN purchase_orders po ON po.id = poi.purchase_order_id
+         WHERE poi.product_id = ? AND poi.purchase_order_id = ?
+         ORDER BY poi.id ASC LIMIT 1`,
+        [pid, move.ref_id]
+      );
+      const poi = poiRes.rows[0] || null;
+
+      if (qMasuk > 0) {
+        if (poi) {
+          const hargaBeli = parseFloat(poi.cost || 0);
+          const stokLama = st.stock;
+          const hppLama = st.hpp;
+          const stokSesudah = stokLama + qMasuk;
+          let hppBaru;
+          if (stokLama <= 0 || stokSesudah <= 0) {
+            hppBaru = round4(hargaBeli);
+          } else {
+            hppBaru = round4(((stokLama * hppLama) + (qMasuk * hargaBeli)) / stokSesudah);
+          }
+          st.stock = stokSesudah;
+          st.hpp = hppBaru;
+
+          if (!dryRun && poi.po_status !== 'Batal') {
+            const oldAfter = parseFloat(poi.hpp_after ?? 0);
+            const oldBefore = parseFloat(poi.hpp_before ?? 0);
+            if (Math.abs(oldAfter - hppBaru) > 0.0001 || Math.abs(oldBefore - hppLama) > 0.0001 || Math.abs(parseFloat(poi.stock_before ?? 0) - stokLama) > 0.0001) {
+              await client.query(
+                'UPDATE purchase_order_items SET stock_before = ?, hpp_before = ?, hpp_after = ? WHERE id = ?',
+                [stokLama, hppLama, hppBaru, poi.id]
+              );
+              if (Math.abs(oldAfter - hppBaru) > 0.001) {
+                perubahan.push({ jenis: 'purchase_order', id: move.ref_id, field: 'hpp_after', lama: oldAfter, baru: hppBaru, produk_id: pid });
+              }
+            }
+          }
+        } else {
+          st.stock += qMasuk;
+        }
+      } else if (qKeluar > 0) {
+        // Reversal PO (koreksi_edit / pembatalan PO)
+        const rawSisa = st.stock - qKeluar;
+        const sisa = Math.abs(rawSisa) < 1e-9 ? 0 : rawSisa;
+        const fallbackHpp = poi?.hpp_before !== null && poi?.hpp_before !== undefined ? parseFloat(poi.hpp_before) : st.hpp;
+        if (sisa <= 0) {
+          st.hpp = round4(fallbackHpp);
+        } else if (poi) {
+          const calc = ((st.stock * st.hpp) - (qKeluar * parseFloat(poi.cost || 0))) / sisa;
+          st.hpp = calc < 0 ? round4(fallbackHpp) : round4(calc);
+        }
+        st.stock = sisa;
+      }
+
+    } else if (move.ref_type === 'product_conversion') {
+      const convRes = await client.query(
+        `SELECT pc.*, tp.name AS target_product_name
+         FROM product_conversions pc
+         LEFT JOIN products tp ON tp.id = pc.target_product_id COLLATE utf8mb4_unicode_ci
+         WHERE pc.number = ? OR CAST(pc.id AS CHAR) = ?
+         LIMIT 1`,
+        [String(move.ref_id), String(move.ref_id)]
+      );
+      const conv = convRes.rows[0] || null;
+
+      if (move.tipe === 'konversi_keluar' && qKeluar > 0) {
+        const hppSumberSaatIni = round2(st.hpp);
+        const movedValueRaw = qKeluar * hppSumberSaatIni;
+        const movedValueRounded = round2(movedValueRaw);
+        if (conv) {
+          convTempMovedVal[conv.id] = movedValueRaw;
+          if (conv.status !== 'cancelled') {
+            const oldSnapshot = parseFloat(conv.source_hpp_snapshot || 0);
+            const oldMovedValue = parseFloat(conv.moved_value || 0);
+            if (!konversiTerdampak[conv.id]) {
+              konversiTerdampak[conv.id] = {
+                id: conv.id,
+                number: conv.number,
+                target_product_id: String(conv.target_product_id),
+                target_product_name: conv.target_product_name || String(conv.target_product_id)
+              };
+            }
+            konversiTerdampak[conv.id].source_hpp_snapshot = { lama: oldSnapshot, baru: hppSumberSaatIni };
+            konversiTerdampak[conv.id].moved_value = { lama: oldMovedValue, baru: movedValueRounded };
+            if (!dryRun && (Math.abs(oldSnapshot - hppSumberSaatIni) > 0.001 || Math.abs(oldMovedValue - movedValueRounded) > 0.001)) {
+              await client.query(
+                'UPDATE product_conversions SET source_hpp_snapshot = ?, moved_value = ? WHERE id = ?',
+                [hppSumberSaatIni, movedValueRounded, conv.id]
+              );
+              if (Math.abs(oldSnapshot - hppSumberSaatIni) > 0.001) {
+                perubahan.push({ jenis: 'product_conversion', id: conv.number || conv.id, field: 'source_hpp_snapshot', lama: oldSnapshot, baru: hppSumberSaatIni, produk_id: pid });
+              }
+              if (Math.abs(oldMovedValue - movedValueRounded) > 0.001) {
+                perubahan.push({ jenis: 'product_conversion', id: conv.number || conv.id, field: 'moved_value', lama: oldMovedValue, baru: movedValueRounded, produk_id: pid });
+              }
+            } else if (dryRun && Math.abs(oldSnapshot - hppSumberSaatIni) > 0.001) {
+              perubahan.push({ jenis: 'product_conversion', id: conv.number || conv.id, field: 'source_hpp_snapshot', lama: oldSnapshot, baru: hppSumberSaatIni, produk_id: pid });
+            }
+          }
+        }
+        st.stock = st.stock - qKeluar;
+
+      } else if (move.tipe === 'konversi_masuk' && qMasuk > 0) {
+        if (conv) {
+          const targetQty = parseFloat(conv.target_qty || qMasuk || 0);
+          const movedValRaw = convTempMovedVal[conv.id] !== undefined
+            ? convTempMovedVal[conv.id]
+            : parseFloat(conv.moved_value || 0);
+          const hppPerUnitRaw = targetQty > 0 ? movedValRaw / targetQty : 0;
+          const hppPerUnitKonversi = round2(hppPerUnitRaw);
+          const stokTarget = st.stock;
+          const hppTarget = st.hpp;
+          const stokSesudah = stokTarget + targetQty;
+          let hppTargetBaru;
+          if (stokTarget <= 0 || stokSesudah <= 0) {
+            hppTargetBaru = round2(hppPerUnitRaw);
+          } else {
+            hppTargetBaru = round2(((stokTarget * hppTarget) + (targetQty * hppPerUnitRaw)) / stokSesudah);
+          }
+
+          if (conv.status !== 'cancelled') {
+            const oldHppBefore = parseFloat(conv.target_hpp_before || 0);
+            const oldHppAfter = parseFloat(conv.target_hpp_after || 0);
+            const oldStockBefore = parseFloat(conv.target_stock_before || 0);
+            if (!konversiTerdampak[conv.id]) {
+              konversiTerdampak[conv.id] = {
+                id: conv.id,
+                number: conv.number,
+                target_product_id: String(conv.target_product_id),
+                target_product_name: conv.target_product_name || String(conv.target_product_id)
+              };
+            }
+            konversiTerdampak[conv.id].hpp_per_unit_konversi = hppPerUnitKonversi;
+            konversiTerdampak[conv.id].target_hpp_before = { lama: oldHppBefore, baru: round2(hppTarget) };
+            konversiTerdampak[conv.id].target_hpp_after = { lama: oldHppAfter, baru: hppTargetBaru };
+            konversiTerdampak[conv.id].target_stock_before = { lama: oldStockBefore, baru: stokTarget };
+
+            if (!dryRun && (Math.abs(oldHppAfter - hppTargetBaru) > 0.001 || Math.abs(oldHppBefore - hppTarget) > 0.001)) {
+              await client.query(
+                'UPDATE product_conversions SET target_hpp_before = ?, target_hpp_after = ?, target_stock_before = ? WHERE id = ?',
+                [round2(hppTarget), hppTargetBaru, stokTarget, conv.id]
+              );
+              if (Math.abs(oldHppAfter - hppTargetBaru) > 0.001) {
+                perubahan.push({ jenis: 'product_conversion', id: conv.number || conv.id, field: 'target_hpp_after', lama: oldHppAfter, baru: hppTargetBaru, produk_id: pid });
+              }
+            } else if (dryRun && Math.abs(oldHppAfter - hppTargetBaru) > 0.001) {
+              perubahan.push({ jenis: 'product_conversion', id: conv.number || conv.id, field: 'target_hpp_after', lama: oldHppAfter, baru: hppTargetBaru, produk_id: pid });
+            }
+          }
+          st.stock = stokSesudah;
+          st.hpp = hppTargetBaru;
+        } else {
+          st.stock += qMasuk;
+        }
+
+      } else if (move.tipe === 'batal_konversi') {
+        if (qKeluar > 0) {
+          const rawSisa = st.stock - qKeluar;
+          const sisa = Math.abs(rawSisa) < 1e-9 ? 0 : rawSisa;
+          const fallbackHpp = conv ? parseFloat(conv.target_hpp_before || st.hpp) : st.hpp;
+          if (sisa <= 0) {
+            st.hpp = round2(fallbackHpp);
+          } else if (conv) {
+            const movedVal = convTempMovedVal[conv.id] ?? parseFloat(conv.moved_value || 0);
+            const calc = ((st.stock * st.hpp) - movedVal) / sisa;
+            st.hpp = calc < 0 ? round2(fallbackHpp) : round2(calc);
+          }
+          st.stock = sisa;
+        } else if (qMasuk > 0) {
+          st.stock += qMasuk;
+        }
+      } else {
+        st.stock = st.stock + qMasuk - qKeluar;
+      }
+
+    } else if (move.ref_type === 'invoice') {
+      if (move.tipe === 'penjualan' && qKeluar > 0) {
+        const iiRes = await client.query(
+          `SELECT ii.id, ii.quantity, ii.hpp_satuan, ii.cost_price_snapshot, si.status AS inv_status, si.date AS inv_date
+           FROM invoice_items ii
+           JOIN sales_invoices si ON si.id = ii.invoice_id
+           WHERE ii.invoice_id = ? AND ii.product_id = ?
+           LIMIT 1`,
+          [move.ref_id, pid]
+        );
+        if (iiRes.rows.length > 0) {
+          const ii = iiRes.rows[0];
+          const stLower = String(ii.inv_status || '').toLowerCase();
+          if (stLower !== 'batal' && stLower !== 'cancel') {
+            const hppSaatIni = round2(st.hpp);
+            const oldHpp = parseFloat(ii.hpp_satuan || ii.cost_price_snapshot || 0);
+            const itemQty = parseFloat(ii.quantity || qKeluar);
+            invoiceTerdampak[ii.id] = {
+              lama: oldHpp,
+              baru: hppSaatIni,
+              invoice_id: move.ref_id,
+              invoice_date: formatDateStr(ii.inv_date),
+              qty: itemQty
+            };
+            if (!dryRun && Math.abs(oldHpp - hppSaatIni) > 0.001) {
+              await client.query(
+                'UPDATE invoice_items SET hpp_satuan = ?, cost_price_snapshot = ? WHERE id = ?',
+                [hppSaatIni, hppSaatIni, ii.id]
+              );
+              perubahan.push({ jenis: 'invoice_item', id: move.ref_id, field: 'hpp_satuan', lama: oldHpp, baru: hppSaatIni, produk_id: pid });
+            } else if (dryRun && Math.abs(oldHpp - hppSaatIni) > 0.001) {
+              perubahan.push({ jenis: 'invoice_item', id: move.ref_id, field: 'hpp_satuan', lama: oldHpp, baru: hppSaatIni, produk_id: pid });
+            }
+          }
+        }
+        st.stock = st.stock - qKeluar;
+      } else {
+        // cancel_invoice atau koreksi_edit invoice: stok berubah, HPP tidak
+        st.stock = st.stock + qMasuk - qKeluar;
+      }
+
+    } else if (move.ref_type === 'sales_return' && move.tipe === 'retur_penjualan' && qMasuk > 0) {
+      // Retur penjualan kembali ke stok: pakai snapshot item invoice asal setelah dikoreksi
+      const sriRes = await client.query(
+        `SELECT sri.id, sri.cost_price_snapshot, sr.invoice_id
+         FROM sales_return_items sri
+         JOIN sales_returns sr ON sr.id = sri.return_id
+         WHERE sri.return_id = ? AND sri.product_id = ?
+         LIMIT 1`,
+        [move.ref_id, pid]
+      );
+      let returnCost = st.hpp;
+      if (sriRes.rows.length > 0) {
+        const sri = sriRes.rows[0];
+        const origIiRes = await client.query(
+          'SELECT hpp_satuan, cost_price_snapshot FROM invoice_items WHERE invoice_id = ? AND product_id = ? LIMIT 1',
+          [sri.invoice_id, pid]
+        );
+        const origIi = origIiRes.rows[0];
+        returnCost = origIi
+          ? parseFloat(origIi.hpp_satuan || origIi.cost_price_snapshot || sri.cost_price_snapshot || st.hpp)
+          : parseFloat(sri.cost_price_snapshot || st.hpp);
+        returnCost = round2(returnCost);
+
+        const oldSriCost = parseFloat(sri.cost_price_snapshot || 0);
+        if (!dryRun && Math.abs(oldSriCost - returnCost) > 0.001) {
+          await client.query(
+            'UPDATE sales_return_items SET cost_price_snapshot = ? WHERE id = ?',
+            [returnCost, sri.id]
+          );
+          perubahan.push({ jenis: 'sales_return', id: move.ref_id, field: 'cost_price_snapshot', lama: oldSriCost, baru: returnCost, produk_id: pid });
+        }
+      }
+      const nextStock = st.stock + qMasuk;
+      if (st.stock > 0 && nextStock > 0) {
+        st.hpp = round2(((st.stock * st.hpp) + (qMasuk * returnCost)) / nextStock);
+      } else {
+        st.hpp = returnCost > 0 ? returnCost : st.hpp;
+      }
+      st.stock = nextStock;
+
+    } else {
+      // purchase_return, opname, stok_awal, retur_penjualan_rusak, stock_adjustment, dll.
+      // HPP rata-rata tidak berubah pada kejadian keluar / opname
+      st.stock = st.stock + qMasuk - qKeluar;
+    }
+
+    // 6. Deteksi stok negatif di titik mana pun
+    if (st.stock < -1e-9) {
+      const tglErr = move.tanggal ? String(move.tanggal).slice(0, 10) : tanggalMulai;
+      throw Object.assign(
+        new Error(`Replay HPP gagal: Stok produk '${prodName}' (${pid}) menjadi negatif (${Math.round(st.stock * 1000) / 1000}) pada tanggal ${tglErr} saat memproses dokumen ${move.ref_type || move.tipe} '${move.ref_id || '-'}'. Kemungkinan tanggal PO dipindah melewati tanggal penjualan. Semua perubahan dibatalkan.`),
+        { status: 400 }
+      );
+    }
+  }
+
+  // 7. Validasi stok akhir HARUS identik dengan stok master saat ini
+  for (const pid of affectedIds) {
+    const masterStock = parseFloat(masterMap[pid]?.stock || 0);
+    const replayStock = replayHpp[pid].stock;
+    if (Math.abs(masterStock - replayStock) > 0.01) {
+      throw Object.assign(
+        new Error(`Validasi stok replay tidak konsisten untuk produk '${masterMap[pid]?.name || pid}' (${pid}): stok master=${masterStock}, hasil replay=${replayStock}. Seluruh perubahan dibatalkan.`),
+        { status: 400 }
+      );
+    }
+  }
+
+  // 8. Tulis HPP akhir ke master produk + tulis log audit hpp_adjustment_log
+  if (!dryRun) {
+    for (const pid of affectedIds) {
+      const oldMasterHpp = parseFloat(masterMap[pid]?.cost_price || 0);
+      const newMasterHpp = round4(replayHpp[pid].hpp);
+      await client.query('UPDATE products SET cost_price = ? WHERE id = ?', [newMasterHpp, pid]);
+      if (Math.abs(oldMasterHpp - newMasterHpp) > 0.001) {
+        perubahan.push({ jenis: 'product_master', id: pid, field: 'cost_price', lama: oldMasterHpp, baru: newMasterHpp, produk_id: pid });
+      }
+    }
+
+    if (batchId && perubahan.length > 0) {
+      for (const p of perubahan) {
+        await client.query(
+          `INSERT INTO hpp_adjustment_log (batch_id, user_id, alasan, produk_id, jenis_dokumen, dokumen_id, field, nilai_lama, nilai_baru)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [batchId, userId || null, alasan || '', p.produk_id, p.jenis, String(p.id), p.field, p.lama ?? null, p.baru ?? null]
+        );
+      }
+    }
+  }
+
+  // 9. Susun ringkasan dampak (hanya invoice yang benar-benar berubah HPP-nya)
+  const invoiceListAll = Object.entries(invoiceTerdampak)
+    .map(([iiId, v]) => ({
+      invoice_item_id: iiId,
+      invoice_id: v.invoice_id,
+      date: v.invoice_date,
+      hpp_lama: v.lama,
+      hpp_baru: v.baru,
+      qty: v.qty,
+      selisih_laba: round2((v.lama - v.baru) * v.qty)
+    }))
+    .filter(r => Math.abs(r.hpp_baru - r.hpp_lama) > 0.001);
+  invoiceListAll.sort((a, b) => Math.abs(b.selisih_laba) - Math.abs(a.selisih_laba));
+
+  const hppMasterPerubahan = {};
+  for (const pid of affectedIds) {
+    hppMasterPerubahan[pid] = {
+      hpp_lama: round2(hppState[pid].hpp),
+      hpp_baru: round2(replayHpp[pid].hpp)
+    };
+  }
+
+  const konversiChangedList = Object.values(konversiTerdampak).filter(k =>
+    (k.source_hpp_snapshot && Math.abs(k.source_hpp_snapshot.baru - k.source_hpp_snapshot.lama) > 0.001) ||
+    (k.target_hpp_after && Math.abs(k.target_hpp_after.baru - k.target_hpp_after.lama) > 0.001)
+  );
+
+  return {
+    dryRun,
+    hppMasterPerubahan,
+    invoiceTerdampak: invoiceListAll,
+    totalInvoiceTerdampak: invoiceListAll.length,
+    totalSelisihLaba: round2(invoiceListAll.reduce((s, r) => s + r.selisih_laba, 0)),
+    top10Invoice: invoiceListAll.slice(0, 10),
+    totalKonversiTerdampak: konversiChangedList.length,
+    konversiTerdampak,
+    konversiList: konversiChangedList,
+    perubahan,
+    stockValid: true
+  };
+}
+
 // Authentication Middleware
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -7215,19 +7750,244 @@ app.post('/api/purchases', authenticateToken, authorizeRoles('admin', 'gudang'),
   }
 });
 
-app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang', 'finance'), async (req, res) => {
+// ── Fase 3: Endpoint Preview (Dry-run) sebelum edit harga PO ──
+app.post('/api/purchases/:id/preview-price-edit', authenticateToken, authorizeRoles('admin', 'gudang', 'finance'), async (req, res) => {
+  const poId = req.params.id;
+  const { date, payment_type_id, items, discount, diskon } = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const poCheck = await client.query('SELECT * FROM purchase_orders WHERE id = ? FOR UPDATE', [poId]);
+    if (poCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'PO tidak ditemukan' });
+    }
+    const currentPo = poCheck.rows[0];
+    if (currentPo.status === 'Batal') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Purchase Order yang sudah dibatalkan tidak dapat diedit' });
+    }
+
+    const oldPoDate = formatDateStr(currentPo.date);
+    const newPoDate = date ? formatDateStr(date) : oldPoDate;
+    const minDate = newPoDate < oldPoDate ? newPoDate : oldPoDate;
+
+    const oldItemsRes = await client.query(
+      'SELECT id, product_id, quantity, cost FROM purchase_order_items WHERE purchase_order_id = ? ORDER BY id ASC', [poId]
+    );
+
+    // Hitung total PO baru (termasuk diskon & PPN)
+    const settingsRes = await client.query(`SELECT \`key\`, value FROM settings WHERE \`key\` IN ('ppn_enabled', 'pajak_default')`);
+    const settingsMap = {};
+    settingsRes.rows.forEach(r => settingsMap[r.key] = r.value);
+    const ppnEnabled = settingsMap['ppn_enabled'] === 'true' || settingsMap['ppn_enabled'] === '1' || settingsMap['ppn_enabled'] === true;
+    const pajakDefault = parseFloat(settingsMap['pajak_default'] || 11);
+
+    let newSubtotal = 0;
+    (items || []).forEach(it => {
+      newSubtotal += parseFloat(it.cost || it.cost_price || it.price || 0) * parseFloat(it.quantity || it.qty || 0);
+    });
+    const finalDiskon = parseFloat(discount ?? diskon ?? currentPo.discount ?? 0);
+    const newTax = ppnEnabled ? Math.round((newSubtotal - finalDiskon) * (pajakDefault / 100)) : 0;
+    const newTotal = newSubtotal - finalDiskon + newTax;
+    const oldTotal = parseFloat(currentPo.total || 0);
+
+    const pType = payment_type_id || currentPo.payment_type_id || 'PT-1';
+    const instant = await isInstantPayment(pType);
+    const activePayRes = await client.query(
+      "SELECT COALESCE(SUM(amount), 0) as total_paid FROM purchase_order_payments WHERE purchase_order_id = ? AND status = 'active'",
+      [poId]
+    );
+    const totalActivePaid = parseFloat(activePayRes.rows[0].total_paid || 0);
+    const totalPaid = Math.max(totalActivePaid, instant ? 0 : parseFloat(currentPo.paid_amount || 0));
+    const currentReturnAmount = parseFloat(currentPo.return_amount || 0);
+    const overpayWarning = totalPaid > 0 && newTotal < (totalPaid + currentReturnAmount - 0.01);
+    const overpayAmount = overpayWarning ? Math.round((totalPaid + currentReturnAmount - newTotal) * 100) / 100 : 0;
+    const selisihKas = instant ? Math.round((newTotal - oldTotal) * 100) / 100 : 0;
+
+    // Peta qty lama & baru
+    const oldQtyMap = {};
+    oldItemsRes.rows.forEach(it => { oldQtyMap[String(it.product_id)] = (oldQtyMap[String(it.product_id)] || 0) + parseFloat(it.quantity || 0); });
+    const newQtyMap = {};
+    (items || []).forEach(it => {
+      const pid = String(it.product_id || it.id);
+      newQtyMap[pid] = (newQtyMap[pid] || 0) + parseFloat(it.quantity || it.qty || 0);
+    });
+
+    // Terapkan perubahan sementara dalam transaksi dry-run (akan di-ROLLBACK di akhir)
+    const allPoProdIds = [...new Set([...Object.keys(oldQtyMap), ...Object.keys(newQtyMap)])];
+    const expandedIds = await expandAffectedProductsByConversion(client, allPoProdIds);
+    await lockProductsOrdered(client, expandedIds);
+
+    for (const it of (items || [])) {
+      const pid = String(it.product_id || it.id);
+      const newCost = parseFloat(it.cost || it.cost_price || it.price || 0);
+      const newQty = parseFloat(it.quantity || it.qty || 0);
+      const oldQty = oldQtyMap[pid] || 0;
+      const delta = newQty - oldQty;
+
+      if (oldQtyMap[pid] !== undefined) {
+        await client.query(
+          'UPDATE purchase_order_items SET cost = ?, quantity = ? WHERE purchase_order_id = ? AND product_id = ?',
+          [newCost, newQty, poId, pid]
+        );
+      } else {
+        const tmpId = `POI-DRY-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        await client.query(
+          'INSERT INTO purchase_order_items (id, purchase_order_id, product_id, quantity, cost) VALUES (?, ?, ?, ?, ?)',
+          [tmpId, poId, pid, newQty, newCost]
+        );
+      }
+
+      if (Math.abs(delta) > 1e-9) {
+        await client.query('UPDATE products SET stock = stock + ? WHERE id = ?', [delta, pid]);
+        const smExisting = await client.query(
+          `SELECT id FROM stock_moves WHERE ref_type = 'purchase_order' AND ref_id = ? AND product_id = ? AND qty_masuk > 0 ORDER BY id DESC LIMIT 1`,
+          [poId, pid]
+        );
+        if (smExisting.rows.length > 0) {
+          await client.query('UPDATE stock_moves SET qty_masuk = ? WHERE id = ?', [newQty, smExisting.rows[0].id]);
+        } else {
+          await recordStockMove(client, {
+            product_id: pid,
+            tanggal: newPoDate + ' 12:00:00',
+            tipe: 'pembelian',
+            ref_type: 'purchase_order',
+            ref_id: poId,
+            ref_no: poId,
+            qty_masuk: newQty,
+            qty_keluar: 0,
+            qty_sebelum: 0,
+            qty_sesudah: newQty,
+            keterangan: `Dry-run PO ${poId}`
+          });
+        }
+      }
+    }
+
+    if (newPoDate !== oldPoDate) {
+      await client.query('UPDATE purchase_orders SET date = ? WHERE id = ?', [newPoDate, poId]);
+      await client.query(
+        `UPDATE stock_moves SET tanggal = ? WHERE ref_type = 'purchase_order' AND ref_id = ?`,
+        [newPoDate + ' 12:00:00', poId]
+      );
+    }
+
+    // Dry-run replay
+    const preview = await recomputeHppFromDate(client, {
+      produkIds: allPoProdIds,
+      tanggalMulai: minDate,
+      dryRun: true
+    });
+
+    const prodNames = {};
+    const allOutIds = Object.keys(preview.hppMasterPerubahan);
+    if (allOutIds.length > 0) {
+      const ph = allOutIds.map(() => '?').join(',');
+      const pRes = await client.query(`SELECT id, name FROM products WHERE id IN (${ph})`, allOutIds);
+      pRes.rows.forEach(p => { prodNames[String(p.id)] = p.name; });
+    }
+
+    await client.query('ROLLBACK');
+
+    const hppChanges = Object.entries(preview.hppMasterPerubahan).map(([pid, v]) => ({
+      produk_id: pid,
+      nama: prodNames[pid] || pid,
+      hpp_lama: v.hpp_lama,
+      hpp_baru: v.hpp_baru,
+      selisih: Math.round((v.hpp_baru - v.hpp_lama) * 100) / 100
+    })).filter(h => Math.abs(h.selisih) > 0.001);
+
+    res.json({
+      success: true,
+      hppChanges,
+      totalInvoiceTerdampak: preview.totalInvoiceTerdampak,
+      totalSelisihLaba: Math.round(preview.totalSelisihLaba * 100) / 100,
+      top10Invoice: preview.top10Invoice,
+      allInvoices: preview.invoiceTerdampak,
+      totalKonversiTerdampak: preview.totalKonversiTerdampak,
+      konversiList: preview.konversiList,
+      overpayWarning,
+      overpayAmount,
+      totalPaid,
+      oldTotal,
+      newTotal,
+      isInstant: instant,
+      selisihKas
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(err.status || 400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ── Fase 6: Endpoint Riwayat HPP Log (admin & finance) ──
+app.get('/api/hpp-adjustment-log', authenticateToken, authorizeRoles('admin', 'finance'), async (req, res) => {
+  const { product_id, from, to, page = 1, limit = 50 } = req.query;
+  const pageNum = Math.max(1, parseInt(page) || 1);
+  const limitNum = Math.min(200, Math.max(1, parseInt(limit) || 50));
+  const offset = (pageNum - 1) * limitNum;
+  const where = [];
+  const params = [];
+  if (product_id && product_id !== 'all') { where.push('hal.produk_id = ?'); params.push(product_id); }
+  if (from) { where.push('hal.created_at >= ?'); params.push(from + ' 00:00:00'); }
+  if (to) { where.push('hal.created_at <= ?'); params.push(to + ' 23:59:59'); }
+  const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
+
+  try {
+    const dataRes = await pool.query(
+      `SELECT hal.*, u.name AS user_name, p.name AS produk_nama
+       FROM hpp_adjustment_log hal
+       LEFT JOIN users u ON u.id = hal.user_id
+       LEFT JOIN products p ON p.id = hal.produk_id COLLATE utf8mb4_unicode_ci
+       ${whereClause}
+       ORDER BY hal.created_at DESC, hal.id DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limitNum, offset]
+    );
+    const countRes = await pool.query(
+      `SELECT COUNT(*) AS total FROM hpp_adjustment_log hal ${whereClause}`,
+      params
+    );
+    const total = parseInt(countRes.rows[0]?.total || 0);
+    res.json({
+      success: true,
+      data: dataRes.rows,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum) || 1
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang'), async (req, res) => {
   const poId = req.params.id;
   const { vendor_id, vendorId, date, paid, paid_amount, payment_type_id, due_date, items, discount, diskon } = req.body;
   const vId = vendor_id || vendorId;
   const pType = payment_type_id || 'PT-1';
   const poDate = date || new Date().toISOString().split('T')[0];
 
-  console.log(`[PO Edit API] Request received for PO: ${poId}`);
-  console.log(`[PO Edit API] Payload items:`, JSON.stringify(items, null, 2));
-
   const client = await pool.connect();
   try {
+    // Pre-fetch product IDs untuk lock berurutan sebelum membaca snapshot PO agar edit bersamaan ter-serialisasi penuh
+    const preOldItems = await pool.query('SELECT product_id FROM purchase_order_items WHERE purchase_order_id = ?', [poId]);
+    const preIds = [
+      ...preOldItems.rows.map(r => String(r.product_id)),
+      ...(Array.isArray(items) ? items.map(it => String(it.product_id || it.id)) : [])
+    ];
+    await client.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
     await client.query('BEGIN');
+
+    if (preIds.length > 0) {
+      const preExpanded = await expandAffectedProductsByConversion(client, preIds);
+      await lockProductsOrdered(client, preExpanded);
+    }
 
     // 0. Lock PO & validasi status
     const poCheck = await client.query('SELECT * FROM purchase_orders WHERE id = ? FOR UPDATE', [poId]);
@@ -7241,6 +8001,9 @@ app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang
       return res.status(400).json({ error: 'Purchase Order yang sudah dibatalkan tidak dapat diedit' });
     }
     const currentReturnAmount = parseFloat(currentPo.return_amount || 0);
+    const oldPoDate = formatDateStr(currentPo.date);
+    const newPoDate = formatDateStr(poDate);
+    const minReplayDate = newPoDate < oldPoDate ? newPoDate : oldPoDate;
 
     // 1. Recalculate subtotal, tax, and finalTotal from items
     const settingsRes = await client.query(`SELECT \`key\`, value FROM settings WHERE \`key\` IN ('ppn_enabled', 'pajak_default')`);
@@ -7256,12 +8019,40 @@ app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang
         subtotal += (parseFloat(item.cost || item.cost_price || item.price || 0) * (parseFloat(item.quantity || item.qty || 0)));
       });
     }
-    const finalDiskon = parseFloat(discount || diskon || 0);
-    // PPN is calculated from DPP (Subtotal - Diskon)
+    const finalDiskon = parseFloat(discount ?? diskon ?? 0);
     const taxAmount = ppnEnabled ? Math.round((subtotal - finalDiskon) * (pajakDefault / 100)) : 0;
     const finalTotal = subtotal - finalDiskon + taxAmount;
 
-    // 2. Check active payments in purchase_order_payments (C2: Soft-Lock)
+    const oldItemsRes = await client.query('SELECT id, product_id, quantity, cost, stock_before, hpp_before, hpp_after FROM purchase_order_items WHERE purchase_order_id = $1 ORDER BY id ASC', [poId]);
+
+    // ── FASE 1: Klasifikasi perubahan per item (qty dikurangi/dihapus vs qty tetap/ditambah) ──
+    const oldPoQtyMap = {};
+    for (const it of oldItemsRes.rows) {
+      const pid = String(it.product_id);
+      oldPoQtyMap[pid] = (oldPoQtyMap[pid] || 0) + parseFloat(it.quantity || 0);
+    }
+    const newPoQtyMap = {};
+    if (items && Array.isArray(items)) {
+      for (const it of items) {
+        const pId = String(it.product_id || it.id);
+        newPoQtyMap[pId] = (newPoQtyMap[pId] || 0) + parseFloat(it.quantity || it.qty || 0);
+      }
+    }
+
+    const oldProdIds = Object.keys(oldPoQtyMap).sort();
+    const newProdIds = Object.keys(newPoQtyMap).sort();
+    const sameProducts = oldProdIds.length === newProdIds.length && oldProdIds.every((pid, i) => pid === newProdIds[i]);
+    const sameQty = sameProducts && oldProdIds.every(pid => Math.abs((oldPoQtyMap[pid] || 0) - (newPoQtyMap[pid] || 0)) < 1e-9);
+
+    let hasPoReduction = false;
+    for (const pId of oldProdIds) {
+      if ((newPoQtyMap[pId] || 0) < oldPoQtyMap[pId] - 1e-9) {
+        hasPoReduction = true;
+        break;
+      }
+    }
+
+    // 2. Check active payments
     const activePayRes = await client.query(
       `SELECT COALESCE(SUM(amount), 0) as total_active, COUNT(*) as count 
        FROM purchase_order_payments 
@@ -7271,8 +8062,11 @@ app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang
     const totalActivePaid = parseFloat(activePayRes.rows[0].total_active || 0);
     const activePaymentCount = parseInt(activePayRes.rows[0].count || 0);
 
-    // Rule C2: Edit yang membuat total PO lebih kecil dari total pembayaran cicilan aktif (+ retur) ditolak
-    if ((totalActivePaid > 0 || currentReturnAmount > 0) && finalTotal < (totalActivePaid + currentReturnAmount - 0.01)) {
+    // Fase 5 vs Rule C2:
+    // - Jika ada pengurangan/penghapusan qty ATAU PO tanpa item/total<=0 (mis. test_batch_c items:[]): tetap tolak bila finalTotal < totalActivePaid.
+    // - Jika perubahan harga/qty-tetap/qty-tambah pada PO beritem (finalTotal > 0): IZINKAN dan tandai overpayWarning tanpa refund otomatis.
+    const isValidPriceOrAddEdit = oldItemsRes.rows.length > 0 && !hasPoReduction && finalTotal > 0;
+    if (!isValidPriceOrAddEdit && (totalActivePaid > 0 || currentReturnAmount > 0) && finalTotal < (totalActivePaid + currentReturnAmount - 0.01)) {
       await client.query('ROLLBACK');
       return res.status(400).json({
         softLock: true,
@@ -7280,15 +8074,13 @@ app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang
       });
     }
 
-    // Determine status & effectivePaid by payment type & active cicilan
     const instant = await isInstantPayment(pType);
-    const finalPaid = parseFloat(paid || paid_amount || 0);
+    const finalPaid = parseFloat(paid ?? paid_amount ?? currentPo.paid_amount ?? 0);
     let effectivePaid = 0;
     let status = 'Dalam Proses';
 
     if (activePaymentCount > 0) {
       if (instant) {
-        // Tipe pembayaran diubah ke tunai/instant: void cicilan lama, cancel cash transactions lama
         await client.query(
           `UPDATE cash_transactions SET status = 'cancelled' WHERE purchase_order_id = ? AND (status IS NULL OR status = 'active')`,
           [poId]
@@ -7318,33 +8110,15 @@ app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang
       status = instant ? 'Selesai' : ((effectivePaid + currentReturnAmount) >= (finalTotal - 0.01) ? 'Selesai' : 'Dalam Proses');
     }
 
+    const overpayWarning = !instant && effectivePaid > 0 && finalTotal < (effectivePaid + currentReturnAmount - 0.01);
+    const overpayAmount = overpayWarning ? Math.round((effectivePaid + currentReturnAmount - finalTotal) * 100) / 100 : 0;
+
     const paidDate = status === 'Selesai'
       ? (currentPo.paid_date ? formatDateStr(currentPo.paid_date) : poDate)
       : null;
 
-    const oldItemsRes = await client.query('SELECT product_id, quantity, cost, stock_before, hpp_before, hpp_after FROM purchase_order_items WHERE purchase_order_id = $1 ORDER BY id ASC', [poId]);
+    const correctionReason = req.body.correction_reason || req.body.reason || req.body.alasan || '';
 
-    // B3 Soft-Lock check for PO: check if any item qty decreased or item was removed
-    const oldPoQtyMap = {};
-    for (const it of oldItemsRes.rows) {
-      oldPoQtyMap[it.product_id] = (oldPoQtyMap[it.product_id] || 0) + parseFloat(it.quantity || 0);
-    }
-    const newPoQtyMap = {};
-    if (items && Array.isArray(items)) {
-      for (const it of items) {
-        const pId = it.product_id || it.id;
-        newPoQtyMap[pId] = (newPoQtyMap[pId] || 0) + parseFloat(it.quantity || it.qty || 0);
-      }
-    }
-    let hasPoReduction = false;
-    for (const pId of Object.keys(oldPoQtyMap)) {
-      const newQ = newPoQtyMap[pId] || 0;
-      if (newQ < oldPoQtyMap[pId]) {
-        hasPoReduction = true;
-        break;
-      }
-    }
-    const correctionReason = req.body.correction_reason || req.body.reason || '';
     if (hasPoReduction) {
       if (req.user.role.toLowerCase() !== 'admin') {
         await client.query('ROLLBACK');
@@ -7362,12 +8136,123 @@ app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang
       }
     }
 
-    // Kunci semua produk terkait dalam urutan ID konsisten untuk mencegah deadlock
-    await lockProductsOrdered(client, [
-      ...oldItemsRes.rows.map(it => it.product_id),
-      ...(Array.isArray(items) ? items.map(it => it.product_id || it.id) : [])
-    ]);
+    // Fase 4 #1: Kunci semua produk terdampak (PO lama+baru + target konversi transitif) berurutan ID terkecil
+    const baseProdIds = [...new Set([...oldProdIds, ...newProdIds])];
+    const allLockedIds = await expandAffectedProductsByConversion(client, baseProdIds);
+    await lockProductsOrdered(client, allLockedIds);
 
+    if (!hasPoReduction) {
+      // ── FASE 1: Perubahan harga / diskon / PPN / tanggal / qty ditambah (TIDAK validasi stok keluar) ──
+      // Terapkan perubahan item & stok tambahan
+      for (const it of (items || [])) {
+        const prodId = String(it.product_id || it.id);
+        const newQty = parseFloat(it.quantity || it.qty || 0);
+        const newCost = parseFloat(it.cost || it.cost_price || it.price || 0);
+        const oldQty = oldPoQtyMap[prodId] || 0;
+        const delta = newQty - oldQty;
+
+        if (oldPoQtyMap[prodId] !== undefined) {
+          await client.query(
+            'UPDATE purchase_order_items SET cost = ?, quantity = ? WHERE purchase_order_id = ? AND product_id = ?',
+            [newCost, newQty, poId, prodId]
+          );
+        } else {
+          const itemId = `POI-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+          await client.query(
+            'INSERT INTO purchase_order_items (id, purchase_order_id, product_id, quantity, cost) VALUES (?, ?, ?, ?, ?)',
+            [itemId, poId, prodId, newQty, newCost]
+          );
+        }
+
+        if (delta > 1e-9) {
+          // Qty ditambah atau produk baru ditambah -> tambah stok master & sesuaikan stock_moves PO
+          const curProd = await client.query('SELECT stock FROM products WHERE id = ?', [prodId]);
+          const curStock = parseFloat(curProd.rows[0]?.stock || 0);
+          await client.query('UPDATE products SET stock = stock + ? WHERE id = ?', [delta, prodId]);
+
+          const smExisting = await client.query(
+            `SELECT id FROM stock_moves WHERE ref_type = 'purchase_order' AND ref_id = ? AND product_id = ? AND qty_masuk > 0 ORDER BY id DESC LIMIT 1`,
+            [poId, prodId]
+          );
+          if (smExisting.rows.length > 0) {
+            await client.query(
+              'UPDATE stock_moves SET qty_masuk = ?, qty_sesudah = qty_sesudah + ? WHERE id = ?',
+              [newQty, delta, smExisting.rows[0].id]
+            );
+          } else {
+            await recordStockMove(client, {
+              product_id: prodId,
+              tanggal: newPoDate + ' 12:00:00',
+              tipe: 'pembelian',
+              ref_type: 'purchase_order',
+              ref_id: poId,
+              ref_no: poId,
+              qty_masuk: newQty,
+              qty_keluar: 0,
+              qty_sebelum: curStock,
+              qty_sesudah: curStock + delta,
+              keterangan: `Tambah item Edit PO ${poId}`,
+              created_by: req.user.id
+            });
+          }
+        }
+      }
+
+      // Jika tanggal PO berubah, perbarui tanggal di stock_moves untuk PO ini sebelum replay
+      if (newPoDate !== oldPoDate) {
+        await client.query(
+          `UPDATE stock_moves SET tanggal = ? WHERE ref_type = 'purchase_order' AND ref_id = ?`,
+          [newPoDate + ' 12:00:00', poId]
+        );
+      }
+
+      // Simpan header PO
+      await client.query(
+        'UPDATE purchase_orders SET date = ?, vendor_id = ?, subtotal = ?, discount = ?, tax = ?, total = ?, paid_amount = ?, paid_date = ?, status = ?, payment_type_id = ?, due_date = ? WHERE id = ?',
+        [poDate, vId, subtotal, finalDiskon, taxAmount, finalTotal, effectivePaid, paidDate, status, pType, due_date, poId]
+      );
+
+      // Fase 5: Update kas hanya untuk PO tunai/instant tanpa cicilan aktif
+      if (activePaymentCount === 0 && instant) {
+        await client.query('DELETE FROM cash_transactions WHERE purchase_order_id = ?', [poId]);
+        if (effectivePaid > 0) {
+          const ctPrefix = await getSetting('prefix_cash_transaction', 'CT');
+          const ctId = await generateNextId(client, 'cash_transactions', ctPrefix);
+          const ptNameRes = await client.query('SELECT name FROM payment_types WHERE id = ?', [pType]);
+          const methodEdit = ptNameRes.rows[0]?.name || 'Transfer Bank';
+          await client.query(
+            'INSERT INTO cash_transactions (id, date, type, category, description, amount, method, purchase_order_id, payment_type_id, user_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [ctId, poDate, 'OUT', 'Pembelian Stok', `Bayar PO ${poId} (Edit Harga)`, effectivePaid, methodEdit, poId, pType, req.user.id, 'active']
+          );
+        }
+      }
+
+      // Fase 2 & 4: Replay HPP kronologis dari min(tanggal lama, tanggal baru) + catat log audit
+      const batchId = `HPPADJ-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+      const alasanEdit = correctionReason || `Edit PO ${poId}`;
+      const replayResult = await recomputeHppFromDate(client, {
+        produkIds: baseProdIds,
+        tanggalMulai: minReplayDate,
+        dryRun: false,
+        userId: req.user.id,
+        batchId,
+        alasan: alasanEdit
+      });
+
+      await client.query('COMMIT');
+      return res.json({
+        success: true,
+        priceOnly: sameQty,
+        batchId,
+        overpayWarning,
+        overpayAmount,
+        hppChanges: replayResult.hppMasterPerubahan,
+        totalInvoiceTerdampak: replayResult.totalInvoiceTerdampak,
+        totalSelisihLaba: replayResult.totalSelisihLaba
+      });
+    }
+
+    // ── Jalur Pengurangan Qty / Hapus Item: validasi stok & reversal lama tetap berlaku ──
     for (const item of oldItemsRes.rows) {
       const oldQty = parseFloat(item.quantity || 0);
       const oldCost = parseFloat(item.cost || 0);
@@ -7441,7 +8326,7 @@ app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang
     }
 
     await client.query('COMMIT');
-    res.json({ success: true });
+    res.json({ success: true, overpayWarning, overpayAmount });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(err.status || 400).json({ error: err.message });

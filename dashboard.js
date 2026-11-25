@@ -6199,6 +6199,8 @@ function _recalcEditPurchaseTotals() {
             if (totalCell) totalCell.textContent = rp(itemTotal);
         }
     });
+    const subtotalEl = document.getElementById('edit-purchase-subtotal');
+    if (subtotalEl) subtotalEl.textContent = rp(subtotal);
     const totalEl = document.getElementById('edit-purchase-total');
     if (totalEl) totalEl.textContent = rp(subtotal);
 }
@@ -6248,7 +6250,10 @@ function renderEditPurchaseItems() {
         container.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 1rem; color: var(--gray-500);">Belum ada item.</td></tr>`;
     }
 
-    document.getElementById('edit-purchase-total').textContent = rp(subtotal);
+    const subtotalEl = document.getElementById('edit-purchase-subtotal');
+    if (subtotalEl) subtotalEl.textContent = rp(subtotal);
+    const totalEl = document.getElementById('edit-purchase-total');
+    if (totalEl) totalEl.textContent = rp(subtotal);
 
     if (typeof lucide !== 'undefined') lucide.createIcons();
 }
@@ -6433,7 +6438,7 @@ async function savePurchase(isEdit, bypassSoftLock = false, correctionReason = n
         payload.correction_reason = correctionReason;
     }
 
-    const url = isEdit ? `/api/purchases/${id}` : '/api/purchases';
+    const url = isEdit ? `/api/purchases/${encodeURIComponent(id)}` : '/api/purchases';
     const method = isEdit ? 'PUT' : 'POST';
 
     try {

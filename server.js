@@ -4455,23 +4455,51 @@ app.post('/api/invoices/payments/:paymentId/void', authenticateToken, authorizeR
 app.post('/api/invoices/:id/payments/:paymentId/void', authenticateToken, authorizeRoles('admin', 'finance'), handleVoidPayment);
 
 // --- Cash Flow Route ---
-// Auto-migrate: add 'status' column if not exists
-pool.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active'`)
-  .catch(err => console.error('Error adding status column to cash_transactions:', err));
-
-// Auto-migrate: add customer_fee and fee_notes columns to invoice_items if not exists
+// Auto-migrate: add missing columns & payment/conversion tables (MySQL 5.7/8.0 & MariaDB safe)
 (async () => {
-  try {
-    await pool.query(`ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS customer_fee NUMERIC(15,2) NOT NULL DEFAULT 0`);
-    await pool.query(`ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS fee_notes VARCHAR(255)`);
-    console.log('[Migration] invoice_items: customer_fee & fee_notes columns ensured');
+  const addColIfMissing = async (table, col, colDef) => {
+    try {
+      const [cols] = await mysqlPool.query(`SHOW COLUMNS FROM \`${table}\` LIKE ?`, [col]);
+      if (!cols || cols.length === 0) {
+        await mysqlPool.query(`ALTER TABLE \`${table}\` ADD COLUMN \`${col}\` ${colDef}`);
+      }
+    } catch (err) {
+      console.error(`[Migration] ${table}.${col} failed:`, err.message);
+    }
+  };
 
-    await pool.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS subtotal DECIMAL(20,4) DEFAULT 0`);
-    await pool.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS discount DECIMAL(20,4) DEFAULT 0`);
-    await pool.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS tax DECIMAL(20,4) DEFAULT 0`);
-    await pool.query(`ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS cost_price_snapshot DECIMAL(20,4) DEFAULT 0`);
-    console.log('[Migration] purchase_orders: subtotal, discount, tax columns ensured');
-    console.log('[Migration] invoice_items: cost_price_snapshot column ensured');
+  const ensureTableSafe = async (name, ddlWithFk, ddlNoFk) => {
+    try {
+      await mysqlPool.query(ddlWithFk);
+    } catch (err) {
+      if (ddlNoFk) {
+        console.warn(`[Migration] ${name} FK DDL failed (${err.message}), retrying without FK...`);
+        try {
+          await mysqlPool.query(ddlNoFk);
+        } catch (err2) {
+          console.error(`[Migration] ${name} fallback failed:`, err2.message);
+        }
+      } else {
+        console.error(`[Migration] ${name} failed:`, err.message);
+      }
+    }
+  };
+
+  try {
+    await addColIfMissing('cash_transactions', 'status', "VARCHAR(20) DEFAULT 'active'");
+
+    await addColIfMissing('invoice_items', 'customer_fee', 'NUMERIC(15,2) NOT NULL DEFAULT 0');
+    await addColIfMissing('invoice_items', 'fee_notes', 'VARCHAR(255)');
+    await addColIfMissing('invoice_items', 'cost_price_snapshot', 'DECIMAL(20,4) DEFAULT 0');
+
+    await addColIfMissing('purchase_orders', 'subtotal', 'DECIMAL(20,4) DEFAULT 0');
+    await addColIfMissing('purchase_orders', 'discount', 'DECIMAL(20,4) DEFAULT 0');
+    await addColIfMissing('purchase_orders', 'tax', 'DECIMAL(20,4) DEFAULT 0');
+    await addColIfMissing('purchase_orders', 'paid_date', 'DATE DEFAULT NULL');
+    await addColIfMissing('purchase_orders', 'is_outstanding_import', 'TINYINT(1) NOT NULL DEFAULT 0');
+
+    await addColIfMissing('sales_invoices', 'paid_date', 'DATE DEFAULT NULL');
+    await addColIfMissing('sales_invoices', 'is_outstanding_import', 'TINYINT(1) NOT NULL DEFAULT 0');
 
     // Ensure hpp_satuan & hpp_estimasi columns on invoice_items + indexes on sales_invoices
     const [hppSatCols] = await mysqlPool.query("SHOW COLUMNS FROM invoice_items LIKE 'hpp_satuan'");
@@ -4493,29 +4521,23 @@ pool.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS status VARCHA
     }
     console.log('[Migration] invoice_items hpp_satuan/hpp_estimasi & sales_invoices indexes ensured');
 
-    // Add paid_date to invoices and purchases
-    await pool.query(`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS paid_date DATE DEFAULT NULL`);
-    await pool.query(`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS is_outstanding_import TINYINT(1) NOT NULL DEFAULT 0`);
-    await pool.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS paid_date DATE DEFAULT NULL`);
-    await pool.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS is_outstanding_import TINYINT(1) NOT NULL DEFAULT 0`);
-    console.log('[Migration] sales_invoices & purchase_orders: paid_date & is_outstanding_import column ensured');
-
     // Auto-migrasi field baru tabel customers
-    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS ktp VARCHAR(50) NULL`);
-    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS npwp VARCHAR(50) NULL`);
-    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS npwp_name VARCHAR(255) NULL`);
-    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS npwp_address TEXT NULL`);
-    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS nib VARCHAR(30) NULL`);
-    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS email VARCHAR(255) NULL`);
-    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS no_hp_2 VARCHAR(30) NULL`);
+    await addColIfMissing('customers', 'ktp', 'VARCHAR(50) NULL');
+    await addColIfMissing('customers', 'npwp', 'VARCHAR(50) NULL');
+    await addColIfMissing('customers', 'npwp_name', 'VARCHAR(255) NULL');
+    await addColIfMissing('customers', 'npwp_address', 'TEXT NULL');
+    await addColIfMissing('customers', 'nib', 'VARCHAR(30) NULL');
+    await addColIfMissing('customers', 'email', 'VARCHAR(255) NULL');
+    await addColIfMissing('customers', 'no_hp_2', 'VARCHAR(30) NULL');
+
     // Auto-migrasi tabel pembayaran cicilan invoice & counter
-    await pool.query(`
+    await ensureTableSafe('payment_counters', `
       CREATE TABLE IF NOT EXISTS payment_counters (
         year INT NOT NULL PRIMARY KEY,
         last_number INT NOT NULL DEFAULT 0
-      )
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    await pool.query(`
+    await ensureTableSafe('sales_invoice_payments', `
       CREATE TABLE IF NOT EXISTS sales_invoice_payments (
         id INT AUTO_INCREMENT PRIMARY KEY,
         payment_no VARCHAR(50) UNIQUE NOT NULL,
@@ -4539,19 +4561,40 @@ pool.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS status VARCHA
         FOREIGN KEY (void_by) REFERENCES users(id) ON DELETE SET NULL,
         FOREIGN KEY (cash_transaction_id) REFERENCES cash_transactions(id) ON DELETE SET NULL,
         FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
-      )
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `, `
+      CREATE TABLE IF NOT EXISTS sales_invoice_payments (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        payment_no VARCHAR(50) UNIQUE NOT NULL,
+        invoice_id VARCHAR(255) NOT NULL,
+        payment_date DATE NOT NULL,
+        amount DECIMAL(20,4) NOT NULL,
+        payment_method VARCHAR(50) NOT NULL,
+        notes TEXT DEFAULT NULL,
+        is_down_payment TINYINT(1) DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'active',
+        void_reason TEXT DEFAULT NULL,
+        void_by INT DEFAULT NULL,
+        void_at DATETIME DEFAULT NULL,
+        cash_transaction_id VARCHAR(255) DEFAULT NULL,
+        created_by INT DEFAULT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_invoice_id (invoice_id),
+        INDEX idx_payment_date (payment_date),
+        INDEX idx_status (status)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
     await pool.query("INSERT IGNORE INTO settings (`key`, value) VALUES ('prefix_payment', 'PAY-{YYYY}-{MM}-')");
     console.log('[Migration] sales_invoice_payments & payment_counters tables ensured');
 
-    // Auto-migrasi tabel pembayaran cicilan PO & counter
-    await pool.query(`
+    // Auto-migrasi tabel pembayaran cicilan PO & counter (dengan fallback tanpa FK untuk Hostinger)
+    await ensureTableSafe('purchase_payment_counters', `
       CREATE TABLE IF NOT EXISTS purchase_payment_counters (
         year INT NOT NULL PRIMARY KEY,
         last_number INT NOT NULL DEFAULT 0
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    await pool.query(`
+    await ensureTableSafe('purchase_order_payments', `
       CREATE TABLE IF NOT EXISTS purchase_order_payments (
         id INT AUTO_INCREMENT PRIMARY KEY,
         payment_no VARCHAR(50) UNIQUE NOT NULL,
@@ -4575,20 +4618,40 @@ pool.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS status VARCHA
         FOREIGN KEY (void_by) REFERENCES users(id) ON DELETE SET NULL,
         FOREIGN KEY (cash_transaction_id) REFERENCES cash_transactions(id) ON DELETE SET NULL,
         FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `, `
+      CREATE TABLE IF NOT EXISTS purchase_order_payments (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        payment_no VARCHAR(50) UNIQUE NOT NULL,
+        purchase_order_id VARCHAR(255) NOT NULL,
+        payment_date DATE NOT NULL,
+        amount DECIMAL(20,4) NOT NULL,
+        payment_method VARCHAR(50) NOT NULL,
+        notes TEXT DEFAULT NULL,
+        is_down_payment TINYINT(1) DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'active',
+        void_reason TEXT DEFAULT NULL,
+        void_by INT DEFAULT NULL,
+        void_at DATETIME DEFAULT NULL,
+        cash_transaction_id VARCHAR(255) DEFAULT NULL,
+        created_by INT DEFAULT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_po_id (purchase_order_id),
+        INDEX idx_payment_date (payment_date),
+        INDEX idx_status (status)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
     await pool.query("INSERT IGNORE INTO settings (`key`, value) VALUES ('prefix_purchase_payment', 'POP-{YYYY}-{MM}-')");
     console.log('[Migration] purchase_order_payments & purchase_payment_counters tables ensured');
 
     // Auto-migrasi tabel konversi produk & counter
-    // Collation: utf8mb4_general_ci (default lokal); di Hostinger tabel sudah dibuat via SQL import
-    await pool.query(`
+    await ensureTableSafe('conversion_counters', `
       CREATE TABLE IF NOT EXISTS conversion_counters (
         year INT NOT NULL PRIMARY KEY,
         last_number INT NOT NULL DEFAULT 0
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    await pool.query(`
+    await ensureTableSafe('product_conversions', `
       CREATE TABLE IF NOT EXISTS product_conversions (
         id INT AUTO_INCREMENT PRIMARY KEY,
         number VARCHAR(50) NOT NULL,
@@ -4614,7 +4677,7 @@ pool.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS status VARCHA
         KEY idx_pc_status (status),
         KEY idx_pc_source (source_product_id),
         KEY idx_pc_target (target_product_id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
     await pool.query("INSERT IGNORE INTO settings (`key`, value) VALUES ('prefix_conversion', 'KNV-{YYYY}-')");
     console.log('[Migration] product_conversions & conversion_counters tables ensured');
@@ -7045,6 +7108,19 @@ app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang
   try {
     await client.query('BEGIN');
 
+    // 0. Lock PO & validasi status
+    const poCheck = await client.query('SELECT * FROM purchase_orders WHERE id = ? FOR UPDATE', [poId]);
+    if (poCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Purchase Order tidak ditemukan' });
+    }
+    const currentPo = poCheck.rows[0];
+    if (currentPo.status === 'Batal') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Purchase Order yang sudah dibatalkan tidak dapat diedit' });
+    }
+    const currentReturnAmount = parseFloat(currentPo.return_amount || 0);
+
     // 1. Recalculate subtotal, tax, and finalTotal from items
     const settingsRes = await client.query(`SELECT \`key\`, value FROM settings WHERE \`key\` IN ('ppn_enabled', 'pajak_default')`);
     const settingsMap = {};
@@ -7074,12 +7150,12 @@ app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang
     const totalActivePaid = parseFloat(activePayRes.rows[0].total_active || 0);
     const activePaymentCount = parseInt(activePayRes.rows[0].count || 0);
 
-    // Rule C2: Edit yang membuat total PO lebih kecil dari total pembayaran cicilan aktif ditolak
-    if (totalActivePaid > 0 && finalTotal < totalActivePaid) {
+    // Rule C2: Edit yang membuat total PO lebih kecil dari total pembayaran cicilan aktif (+ retur) ditolak
+    if ((totalActivePaid > 0 || currentReturnAmount > 0) && finalTotal < (totalActivePaid + currentReturnAmount - 0.01)) {
       await client.query('ROLLBACK');
       return res.status(400).json({
         softLock: true,
-        error: `Total PO baru (Rp ${Math.round(finalTotal).toLocaleString('id-ID')}) tidak boleh lebih kecil dari total pembayaran cicilan aktif yang sudah dicatat (Rp ${Math.round(totalActivePaid).toLocaleString('id-ID')}).`
+        error: `Total PO baru (Rp ${Math.round(finalTotal).toLocaleString('id-ID')}) tidak boleh lebih kecil dari total pembayaran cicilan aktif & retur yang sudah dicatat (Rp ${Math.round(totalActivePaid + currentReturnAmount).toLocaleString('id-ID')}).`
       });
     }
 
@@ -7100,24 +7176,30 @@ app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang
           `UPDATE purchase_order_payments SET status = 'void', void_reason = 'Tipe pembayaran diubah ke Tunai/Instant', void_by = ?, void_at = NOW() WHERE purchase_order_id = ? AND status = 'active'`,
           [req.user.id, poId]
         );
-        effectivePaid = finalTotal;
+        effectivePaid = Math.max(0, finalTotal - currentReturnAmount);
         status = 'Selesai';
-        const ctPrefix = await getSetting('prefix_cash_transaction', 'CT');
-        const ctId = await generateNextId(client, 'cash_transactions', ctPrefix);
-        const ptNameRes = await client.query('SELECT name FROM payment_types WHERE id = ?', [pType]);
-        const methodEdit = ptNameRes.rows[0]?.name || 'Tunai';
-        await client.query(
-          'INSERT INTO cash_transactions (id, date, type, category, description, amount, method, purchase_order_id, payment_type_id, user_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [ctId, poDate, 'OUT', 'Pembelian Stok', `Bayar PO ${poId} (Ubah ke ${methodEdit})`, finalTotal, methodEdit, poId, pType, req.user.id, 'active']
-        );
+        if (effectivePaid > 0) {
+          const ctPrefix = await getSetting('prefix_cash_transaction', 'CT');
+          const ctId = await generateNextId(client, 'cash_transactions', ctPrefix);
+          const ptNameRes = await client.query('SELECT name FROM payment_types WHERE id = ?', [pType]);
+          const methodEdit = ptNameRes.rows[0]?.name || 'Tunai';
+          await client.query(
+            'INSERT INTO cash_transactions (id, date, type, category, description, amount, method, purchase_order_id, payment_type_id, user_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [ctId, poDate, 'OUT', 'Pembelian Stok', `Bayar PO ${poId} (Ubah ke ${methodEdit})`, effectivePaid, methodEdit, poId, pType, req.user.id, 'active']
+          );
+        }
       } else {
         effectivePaid = totalActivePaid;
-        status = (finalTotal - totalActivePaid) <= 0 ? 'Selesai' : 'Dalam Proses';
+        status = (finalTotal - totalActivePaid - currentReturnAmount) <= 0.01 ? 'Selesai' : 'Dalam Proses';
       }
     } else {
-      effectivePaid = instant ? finalTotal : finalPaid;
-      status = instant ? 'Selesai' : (effectivePaid >= finalTotal ? 'Selesai' : 'Dalam Proses');
+      effectivePaid = instant ? Math.max(0, finalTotal - currentReturnAmount) : finalPaid;
+      status = instant ? 'Selesai' : ((effectivePaid + currentReturnAmount) >= (finalTotal - 0.01) ? 'Selesai' : 'Dalam Proses');
     }
+
+    const paidDate = status === 'Selesai'
+      ? (currentPo.paid_date ? formatDateStr(currentPo.paid_date) : poDate)
+      : null;
 
     const oldItemsRes = await client.query('SELECT product_id, quantity, cost FROM purchase_order_items WHERE purchase_order_id = $1', [poId]);
 
@@ -7224,7 +7306,7 @@ app.put('/api/purchases/:id', authenticateToken, authorizeRoles('admin', 'gudang
       }
     }
 
-    await client.query('UPDATE purchase_orders SET date = ?, vendor_id = ?, subtotal = ?, discount = ?, tax = ?, total = ?, paid_amount = ?, status = ?, payment_type_id = ?, due_date = ? WHERE id = ?', [poDate, vId, subtotal, finalDiskon, taxAmount, finalTotal, effectivePaid, status, pType, due_date, poId]);
+    await client.query('UPDATE purchase_orders SET date = ?, vendor_id = ?, subtotal = ?, discount = ?, tax = ?, total = ?, paid_amount = ?, paid_date = ?, status = ?, payment_type_id = ?, due_date = ? WHERE id = ?', [poDate, vId, subtotal, finalDiskon, taxAmount, finalTotal, effectivePaid, paidDate, status, pType, due_date, poId]);
 
     if (activePaymentCount === 0) {
       await client.query('DELETE FROM cash_transactions WHERE purchase_order_id = ?', [poId]);

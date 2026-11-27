@@ -16,6 +16,7 @@
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "express": "^4.19.2",
+    "flatpickr": "^4.6.13",
     "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.9.7",
     "pdfkit": "^0.20.2"

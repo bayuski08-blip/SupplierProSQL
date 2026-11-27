@@ -4487,72 +4487,134 @@ app.get('/api/finance/receivables/by-customer', authenticateToken, authorizeRole
   }
 });
 
+function sanitizeDateParam(val) {
+  if (!val) return '';
+  const s = String(val).trim().split('T')[0].split(' ')[0];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || s === '0000-00-00') return '';
+  const [y, m, d] = s.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== (m - 1) || dt.getUTCDate() !== d) return '';
+  return s;
+}
+
+function buildReceivablesFilterSql(rawFilters = {}) {
+  const {
+    q,
+    search,
+    status,
+    invoice_date_from,
+    invoice_date_to,
+    due_date_from,
+    due_date_to,
+    payment_type_id
+  } = rawFilters;
+
+  const baseConditions = ["si.status NOT IN ('Batal', 'Cancel', 'Dibatalkan')"];
+  const sharedConditions = [];
+  const sharedParams = [];
+
+  const searchQuery = String(q || search || '').trim();
+  if (searchQuery) {
+    sharedConditions.push('(si.id LIKE ? OR c.name LIKE ?)');
+    const pattern = `%${searchQuery}%`;
+    sharedParams.push(pattern, pattern);
+  }
+
+  const invFrom = sanitizeDateParam(invoice_date_from);
+  const invTo = sanitizeDateParam(invoice_date_to);
+  if (invFrom) {
+    sharedConditions.push('si.date >= ?');
+    sharedParams.push(invFrom);
+  }
+  if (invTo) {
+    sharedConditions.push('si.date < DATE_ADD(?, INTERVAL 1 DAY)');
+    sharedParams.push(invTo);
+  }
+
+  const dueFrom = sanitizeDateParam(due_date_from);
+  const dueTo = sanitizeDateParam(due_date_to);
+  if (dueFrom) {
+    sharedConditions.push('si.due_date >= ?');
+    sharedParams.push(dueFrom);
+  }
+  if (dueTo) {
+    sharedConditions.push('si.due_date < DATE_ADD(?, INTERVAL 1 DAY)');
+    sharedParams.push(dueTo);
+  }
+
+  const payTypeId = String(payment_type_id || '').trim();
+  if (payTypeId && payTypeId !== 'all') {
+    sharedConditions.push('si.payment_type_id = ?');
+    sharedParams.push(payTypeId);
+  }
+
+  const whereConditions = [...baseConditions, ...sharedConditions];
+  const params = [...sharedParams];
+
+  const statusVal = String(status || '').trim();
+  if (statusVal && statusVal !== 'all') {
+    const qStatus = statusVal.toLowerCase();
+    if (qStatus === 'overdue') {
+      whereConditions.push('(si.total - si.paid_amount) > 0 AND si.due_date IS NOT NULL AND si.due_date < CURDATE()');
+    } else if (qStatus.includes('belum')) {
+      whereConditions.push('LOWER(si.status) LIKE ?');
+      params.push('%belum%');
+    } else if (qStatus === 'sebagian') {
+      whereConditions.push('LOWER(si.status) = ?');
+      params.push('sebagian');
+    } else if (qStatus === 'lunas') {
+      whereConditions.push('LOWER(si.status) = ?');
+      params.push('lunas');
+    }
+  } else {
+    whereConditions.push("si.status NOT IN ('Lunas', 'Batal', 'Cancel', 'Dibatalkan')");
+  }
+
+  // Summary query is calculated from active (non-Lunas, non-Batal) piutang matching search, date ranges & payment type
+  const summaryWhereConditions = ["si.status NOT IN ('Lunas', 'Batal', 'Cancel', 'Dibatalkan')", ...sharedConditions];
+  const summaryParams = [...sharedParams];
+
+  return {
+    whereClause: 'WHERE ' + whereConditions.join(' AND '),
+    params,
+    summaryWhereClause: 'WHERE ' + summaryWhereConditions.join(' AND '),
+    summaryParams,
+    normalized: {
+      q: searchQuery,
+      status: statusVal || 'all',
+      invoice_date_from: invFrom,
+      invoice_date_to: invTo,
+      due_date_from: dueFrom,
+      due_date_to: dueTo,
+      payment_type_id: payTypeId || 'all'
+    }
+  };
+}
+
 app.get('/api/finance/receivables', authenticateToken, authorizeRoles('admin', 'finance'), async (req, res) => {
   try {
-    const { page, limit: limitQ, q, search, customer_id, status, paginate, all } = req.query;
+    const { page, limit: limitQ, paginate, all } = req.query;
     const isPaginated = (page !== undefined || paginate === 'true') && all !== 'true' && limitQ !== 'all';
     const todayStr = formatDateStr(new Date());
 
-    const whereConditions = ["si.status NOT IN ('Batal', 'Cancel', 'Dibatalkan')"];
-    const params = [];
+    const { whereClause, params, summaryWhereClause, summaryParams } = buildReceivablesFilterSql(req.query);
 
-    const searchQuery = (q || search || '').trim();
-    if (searchQuery) {
-      whereConditions.push('(si.id LIKE ? OR c.name LIKE ?)');
-      const pattern = `%${searchQuery}%`;
-      params.push(pattern, pattern);
-    }
-
-    if (customer_id && customer_id !== 'all') {
-      whereConditions.push('si.customer_id = ?');
-      params.push(customer_id);
-    }
-
-    if (status && status !== 'all') {
-      const qStatus = status.toLowerCase();
-      if (qStatus === 'overdue') {
-        whereConditions.push('(si.total - si.paid_amount) > 0 AND si.due_date IS NOT NULL AND si.due_date < CURDATE()');
-      } else if (qStatus.includes('belum')) {
-        whereConditions.push('LOWER(si.status) LIKE ?');
-        params.push('%belum%');
-      } else if (qStatus === 'sebagian') {
-        whereConditions.push('LOWER(si.status) = ?');
-        params.push('sebagian');
-      } else if (qStatus === 'lunas') {
-        whereConditions.push('LOWER(si.status) = ?');
-        params.push('lunas');
-      }
-    } else {
-      whereConditions.push("si.status NOT IN ('Lunas', 'Batal', 'Cancel', 'Dibatalkan')");
-    }
-
-    const whereClause = 'WHERE ' + whereConditions.join(' AND ');
-
-    // Summary query must be calculated from ALL active piutang data according to filters
-    const summaryWhereConditions = ["si.status NOT IN ('Lunas', 'Batal', 'Cancel', 'Dibatalkan')"];
-    const summaryParams = [];
-    if (searchQuery) {
-      summaryWhereConditions.push('(si.id LIKE ? OR c.name LIKE ?)');
-      const pattern = `%${searchQuery}%`;
-      summaryParams.push(pattern, pattern);
-    }
-    if (customer_id && customer_id !== 'all') {
-      summaryWhereConditions.push('si.customer_id = ?');
-      summaryParams.push(customer_id);
-    }
-    const summaryWhereClause = 'WHERE ' + summaryWhereConditions.join(' AND ');
+    const safeDateOrNull = (val) => {
+      const s = formatDateStr(val);
+      return (!s || s === '0000-00-00') ? null : s;
+    };
 
     const mapReceivableRow = (r) => {
       const total = parseFloat(r.total || 0);
       const paid = parseFloat(r.paid_amount || 0);
       const returnAmount = parseFloat(r.return_amount || 0);
       const sisa = Math.max(0, total - paid - returnAmount);
-      const dueDateStr = formatDateStr(r.due_date);
+      const dueDateStr = safeDateOrNull(r.due_date);
       const isOverdue = sisa > 0 && Boolean(dueDateStr) && dueDateStr < todayStr;
 
       return {
         id: r.id,
-        date: formatDateStr(r.date),
+        date: safeDateOrNull(r.date),
         dueDate: dueDateStr,
         customerId: r.customer_id,
         customer: r.customer_name || 'Tanpa Pelanggan',
@@ -4561,10 +4623,11 @@ app.get('/api/finance/receivables', authenticateToken, authorizeRoles('admin', '
         paid: paid,
         returnAmount: returnAmount,
         sisa: sisa,
+        paymentTypeId: r.payment_type_id || null,
         type: r.payment_type_name || 'Kredit',
         status: r.status,
         isOverdue: isOverdue,
-        paidDate: formatDateStr(r.paid_date) || null,
+        paidDate: safeDateOrNull(r.paid_date),
         isOutstandingImport: Boolean(r.is_outstanding_import)
       };
     };
@@ -4719,28 +4782,99 @@ app.delete('/api/invoices/outstanding/:id', authenticateToken, authorizeRoles('a
 
 /**
  * POST /api/finance/receivables/export-pdf
- * Export PDF laporan piutang untuk baris invoice terpilih.
+ * Export PDF laporan piutang (baris terpilih via ids, atau seluruh data sesuai filter aktif).
  * Hak akses: Administrator dan Finance
  */
 app.post('/api/finance/receivables/export-pdf', authenticateToken, authorizeRoles('admin', 'finance'), async (req, res) => {
-  const { ids } = req.body;
-  if (!Array.isArray(ids) || ids.length === 0) {
+  const { ids, filters } = req.body || {};
+  const hasIds = Array.isArray(ids) && ids.length > 0;
+  const hasFiltersObj = filters && typeof filters === 'object';
+
+  if (!hasIds && !hasFiltersObj) {
     return res.status(400).json({ error: 'Daftar invoice untuk di-export tidak boleh kosong' });
   }
 
   try {
-    const placeholders = ids.map(() => '?').join(',');
-    const sql = `
-      SELECT si.id, si.date, si.due_date, si.total, si.paid_amount, si.status,
-             c.name AS customer_name, c.phone AS customer_phone
-      FROM sales_invoices si
-      LEFT JOIN customers c ON si.customer_id = c.id
-      WHERE si.id IN (${placeholders}) AND si.status NOT IN ('Batal', 'Cancel', 'Dibatalkan')
-      ORDER BY c.name ASC, si.date ASC, si.id ASC
-    `;
-    const invRes = await pool.query(sql, ids);
-    if (invRes.rows.length === 0) {
-      return res.status(404).json({ error: 'Tidak ada data piutang valid yang ditemukan untuk dicetak' });
+    let rows = [];
+    let filterSummaryText = '';
+
+    const formatPdfDate = (val) => {
+      if (!val) return '-';
+      const clean = formatDateStr(val);
+      if (!clean || clean === '0000-00-00') return '-';
+      const parts = clean.split('-');
+      if (parts.length !== 3) return '-';
+      const [y, m, d] = parts;
+      if (!/^\d{4}$/.test(y) || !/^\d{2}$/.test(m) || !/^\d{2}$/.test(d)) return '-';
+      return `${d}/${m}/${y}`;
+    };
+
+    const formatRangeSummary = (label, fromStr, toStr) => {
+      if (fromStr && toStr) return `${label}: ${formatPdfDate(fromStr)} s/d ${formatPdfDate(toStr)}`;
+      if (fromStr) return `${label}: >= ${formatPdfDate(fromStr)}`;
+      if (toStr) return `${label}: <= ${formatPdfDate(toStr)}`;
+      return '';
+    };
+
+    const filterMeta = hasFiltersObj ? buildReceivablesFilterSql(filters) : null;
+
+    if (hasIds) {
+      const placeholders = ids.map(() => '?').join(',');
+      const sql = `
+        SELECT si.id, si.date, si.due_date, si.total, si.paid_amount, si.status,
+               c.name AS customer_name, c.phone AS customer_phone,
+               pt.name AS payment_type_name
+        FROM sales_invoices si
+        LEFT JOIN customers c ON si.customer_id = c.id
+        LEFT JOIN payment_types pt ON si.payment_type_id = pt.id
+        WHERE si.id IN (${placeholders}) AND si.status NOT IN ('Batal', 'Cancel', 'Dibatalkan')
+        ORDER BY c.name ASC, si.date ASC, si.id ASC
+      `;
+      const invRes = await pool.query(sql, ids);
+      rows = invRes.rows || [];
+      if (rows.length === 0) {
+        return res.status(404).json({ error: 'Tidak ada data piutang valid yang ditemukan untuk dicetak' });
+      }
+    } else {
+      const sql = `
+        SELECT si.id, si.date, si.due_date, si.total, si.paid_amount, si.status,
+               c.name AS customer_name, c.phone AS customer_phone,
+               pt.name AS payment_type_name
+        FROM sales_invoices si
+        LEFT JOIN customers c ON si.customer_id = c.id
+        LEFT JOIN payment_types pt ON si.payment_type_id = pt.id
+        ${filterMeta.whereClause}
+        ORDER BY c.name ASC, si.date ASC, si.id ASC
+      `;
+      const invRes = await pool.query(sql, filterMeta.params);
+      rows = invRes.rows || [];
+    }
+
+    if (filterMeta) {
+      const nf = filterMeta.normalized;
+      const parts = [];
+      if (nf.q) parts.push(`Cari: "${nf.q}"`);
+      if (nf.status && nf.status !== 'all') {
+        const statusLabels = {
+          'belum bayar': 'Belum Lunas',
+          'sebagian': 'Sebagian',
+          'lunas': 'Lunas',
+          'overdue': 'Lewat Jatuh Tempo'
+        };
+        parts.push(`Status: ${statusLabels[nf.status.toLowerCase()] || nf.status}`);
+      }
+      const invRange = formatRangeSummary('Tanggal Invoice', nf.invoice_date_from, nf.invoice_date_to);
+      if (invRange) parts.push(invRange);
+      const dueRange = formatRangeSummary('Jatuh Tempo', nf.due_date_from, nf.due_date_to);
+      if (dueRange) parts.push(dueRange);
+      if (nf.payment_type_id && nf.payment_type_id !== 'all') {
+        const ptRes = await pool.query('SELECT name FROM payment_types WHERE id = ?', [nf.payment_type_id]);
+        const ptName = ptRes.rows[0]?.name || nf.payment_type_id;
+        parts.push(`Tipe: ${ptName}`);
+      }
+      if (parts.length > 0) {
+        filterSummaryText = parts.join(' | ');
+      }
     }
 
     const companyRes = await pool.query("SELECT value FROM settings WHERE `key` = 'company_name'");
@@ -4759,15 +4893,6 @@ app.post('/api/finance/receivables/export-pdf', authenticateToken, authorizeRole
     doc.pipe(res);
 
     const formatRp = (num) => 'Rp ' + Math.round(parseFloat(num) || 0).toLocaleString('id-ID');
-    const formatDate = (dateStr) => {
-      if (!dateStr) return '-';
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return String(dateStr).split('T')[0];
-      const day = String(d.getDate()).padStart(2, '0');
-      const month = String(d.getMonth() + 1).padStart(2, '0');
-      const year = d.getFullYear();
-      return `${day}/${month}/${year}`;
-    };
 
     const printDate = new Date().toLocaleDateString('id-ID', {
       day: 'numeric',
@@ -4779,6 +4904,7 @@ app.post('/api/finance/receivables/export-pdf', authenticateToken, authorizeRole
     const pageHeight = doc.page.height;
     const margin = 36;
     const contentWidth = pageWidth - (margin * 2);
+    const bottomLimit = pageHeight - 46; // Keep safe clearance above 36pt bottom margin & footer
 
     const cols = [
       { id: 'customer', label: 'Nama Customer', width: 170, align: 'left' },
@@ -4790,20 +4916,29 @@ app.post('/api/finance/receivables/export-pdf', authenticateToken, authorizeRole
       { id: 'sisa', label: 'Sisa Piutang', width: 105, align: 'right' }
     ];
 
-    let currentY = 36;
+    let currentY = margin;
 
     function renderHeader() {
       doc.save();
       doc.font('Helvetica-Bold').fontSize(16).fillColor('#1e293b')
-        .text('LAPORAN PIUTANG', margin, currentY, { align: 'left' });
+        .text('LAPORAN PIUTANG', margin, currentY, { align: 'left', lineBreak: false });
 
       doc.font('Helvetica').fontSize(10).fillColor('#64748b')
-        .text(`Unit Usaha: ${companyName}`, margin, currentY + 20, { align: 'left' });
+        .text(`Unit Usaha: ${companyName}`, margin, currentY + 20, { align: 'left', lineBreak: false });
 
       doc.fontSize(9).fillColor('#64748b')
-        .text(`Tanggal Cetak: ${printDate}`, margin, currentY + 20, { align: 'right', width: contentWidth });
+        .text(`Tanggal Cetak: ${printDate}`, margin, currentY + 20, { align: 'right', width: contentWidth, lineBreak: false });
 
-      currentY += 40;
+      currentY += 38;
+
+      if (filterSummaryText) {
+        doc.font('Helvetica').fontSize(8.5).fillColor('#475569');
+        const filterHeight = doc.heightOfString(filterSummaryText, { width: contentWidth });
+        doc.text(filterSummaryText, margin, currentY, { width: contentWidth, align: 'left' });
+        currentY += Math.max(14, filterHeight + 6);
+      } else {
+        currentY += 2;
+      }
 
       doc.rect(margin, currentY, contentWidth, 24).fill('#f1f5f9');
       doc.rect(margin, currentY, contentWidth, 24).stroke('#cbd5e1');
@@ -4811,7 +4946,7 @@ app.post('/api/finance/receivables/export-pdf', authenticateToken, authorizeRole
       doc.font('Helvetica-Bold').fontSize(9).fillColor('#334155');
       let curX = margin;
       cols.forEach(col => {
-        doc.text(col.label, curX + 4, currentY + 7, { width: col.width - 8, align: col.align });
+        doc.text(col.label, curX + 4, currentY + 7, { width: col.width - 8, align: col.align, lineBreak: false, ellipsis: true });
         curX += col.width;
       });
 
@@ -4819,132 +4954,141 @@ app.post('/api/finance/receivables/export-pdf', authenticateToken, authorizeRole
       doc.restore();
     }
 
+    function ensureSpace(neededHeight) {
+      if (currentY + neededHeight > bottomLimit) {
+        doc.addPage();
+        currentY = margin;
+        renderHeader();
+      }
+    }
+
     renderHeader();
 
-    const grouped = {};
-    invRes.rows.forEach(r => {
-      const cust = r.customer_name || 'Tanpa Pelanggan';
-      if (!grouped[cust]) grouped[cust] = [];
-      grouped[cust].push(r);
-    });
+    if (rows.length === 0) {
+      doc.rect(margin, currentY, contentWidth, 36).fill('#f8fafc');
+      doc.rect(margin, currentY, contentWidth, 36).stroke('#e2e8f0');
+      doc.font('Helvetica').fontSize(10).fillColor('#64748b')
+        .text('Tidak ada data', margin, currentY + 12, { width: contentWidth, align: 'center', lineBreak: false });
+      currentY += 36;
+    } else {
+      const grouped = {};
+      rows.forEach(r => {
+        const cust = r.customer_name || 'Tanpa Pelanggan';
+        if (!grouped[cust]) grouped[cust] = [];
+        grouped[cust].push(r);
+      });
 
-    const isMultiCustomer = Object.keys(grouped).length > 1;
-    let grandTotal = 0;
-    let grandPaid = 0;
-    let grandSisa = 0;
-    const rowHeight = 20;
+      const isMultiCustomer = Object.keys(grouped).length > 1;
+      let grandTotal = 0;
+      let grandPaid = 0;
+      let grandSisa = 0;
+      const rowHeight = 20;
 
-    for (const custName of Object.keys(grouped)) {
-      const items = grouped[custName];
-      let subTotal = 0;
-      let subPaid = 0;
-      let subSisa = 0;
+      for (const custName of Object.keys(grouped)) {
+        const items = grouped[custName];
+        let subTotal = 0;
+        let subPaid = 0;
+        let subSisa = 0;
 
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        const tot = parseFloat(item.total) || 0;
-        const pd = parseFloat(item.paid_amount) || 0;
-        const rem = Math.max(0, tot - pd);
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          const tot = parseFloat(item.total) || 0;
+          const pd = parseFloat(item.paid_amount) || 0;
+          const rem = Math.max(0, tot - pd);
 
-        subTotal += tot;
-        subPaid += pd;
-        subSisa += rem;
+          subTotal += tot;
+          subPaid += pd;
+          subSisa += rem;
 
-        grandTotal += tot;
-        grandPaid += pd;
-        grandSisa += rem;
+          grandTotal += tot;
+          grandPaid += pd;
+          grandSisa += rem;
 
-        if (currentY + rowHeight > pageHeight - 50) {
-          doc.addPage();
-          currentY = 36;
-          renderHeader();
+          ensureSpace(rowHeight);
+
+          if (i % 2 === 1) {
+            doc.rect(margin, currentY, contentWidth, rowHeight).fill('#f8fafc');
+          }
+          doc.moveTo(margin, currentY + rowHeight).lineTo(margin + contentWidth, currentY + rowHeight).strokeColor('#e2e8f0').stroke();
+
+          doc.font('Helvetica').fontSize(8.5).fillColor('#1e293b');
+          let curX = margin;
+
+          doc.text(custName, curX + 4, currentY + 5, { width: cols[0].width - 8, align: cols[0].align, lineBreak: false, ellipsis: true });
+          curX += cols[0].width;
+
+          doc.text(String(item.id), curX + 4, currentY + 5, { width: cols[1].width - 8, align: cols[1].align, lineBreak: false, ellipsis: true });
+          curX += cols[1].width;
+
+          doc.text(formatPdfDate(item.date), curX + 4, currentY + 5, { width: cols[2].width - 8, align: cols[2].align, lineBreak: false });
+          curX += cols[2].width;
+
+          doc.text(formatPdfDate(item.due_date), curX + 4, currentY + 5, { width: cols[3].width - 8, align: cols[3].align, lineBreak: false });
+          curX += cols[3].width;
+
+          doc.text(formatRp(tot), curX + 4, currentY + 5, { width: cols[4].width - 8, align: cols[4].align, lineBreak: false, ellipsis: true });
+          curX += cols[4].width;
+
+          doc.text(formatRp(pd), curX + 4, currentY + 5, { width: cols[5].width - 8, align: cols[5].align, lineBreak: false, ellipsis: true });
+          curX += cols[5].width;
+
+          doc.font('Helvetica-Bold').fillColor(rem > 0 ? '#b91c1c' : '#059669')
+            .text(formatRp(rem), curX + 4, currentY + 5, { width: cols[6].width - 8, align: cols[6].align, lineBreak: false, ellipsis: true });
+
+          currentY += rowHeight;
         }
 
-        if (i % 2 === 1) {
-          doc.rect(margin, currentY, contentWidth, rowHeight).fill('#f8fafc');
+        if (isMultiCustomer) {
+          ensureSpace(rowHeight);
+
+          doc.rect(margin, currentY, contentWidth, rowHeight).fill('#f1f5f9');
+          doc.rect(margin, currentY, contentWidth, rowHeight).stroke('#cbd5e1');
+
+          doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#334155');
+          const labelWidth = cols[0].width + cols[1].width + cols[2].width + cols[3].width;
+          doc.text(`Subtotal ${custName}:`, margin + 4, currentY + 5, { width: labelWidth - 8, align: 'right', lineBreak: false, ellipsis: true });
+
+          let curX = margin + labelWidth;
+          doc.text(formatRp(subTotal), curX + 4, currentY + 5, { width: cols[4].width - 8, align: cols[4].align, lineBreak: false, ellipsis: true });
+          curX += cols[4].width;
+          doc.text(formatRp(subPaid), curX + 4, currentY + 5, { width: cols[5].width - 8, align: cols[5].align, lineBreak: false, ellipsis: true });
+          curX += cols[5].width;
+          doc.fillColor('#b91c1c').text(formatRp(subSisa), curX + 4, currentY + 5, { width: cols[6].width - 8, align: cols[6].align, lineBreak: false, ellipsis: true });
+
+          currentY += rowHeight + 4;
         }
-        doc.moveTo(margin, currentY + rowHeight).lineTo(margin + contentWidth, currentY + rowHeight).strokeColor('#e2e8f0').stroke();
-
-        doc.font('Helvetica').fontSize(8.5).fillColor('#1e293b');
-        let curX = margin;
-
-        doc.text(custName, curX + 4, currentY + 5, { width: cols[0].width - 8, align: cols[0].align, lineBreak: false });
-        curX += cols[0].width;
-
-        doc.text(String(item.id), curX + 4, currentY + 5, { width: cols[1].width - 8, align: cols[1].align });
-        curX += cols[1].width;
-
-        doc.text(formatDate(item.date), curX + 4, currentY + 5, { width: cols[2].width - 8, align: cols[2].align });
-        curX += cols[2].width;
-
-        doc.text(formatDate(item.due_date), curX + 4, currentY + 5, { width: cols[3].width - 8, align: cols[3].align });
-        curX += cols[3].width;
-
-        doc.text(formatRp(tot), curX + 4, currentY + 5, { width: cols[4].width - 8, align: cols[4].align });
-        curX += cols[4].width;
-
-        doc.text(formatRp(pd), curX + 4, currentY + 5, { width: cols[5].width - 8, align: cols[5].align });
-        curX += cols[5].width;
-
-        doc.font('Helvetica-Bold').fillColor(rem > 0 ? '#b91c1c' : '#059669')
-          .text(formatRp(rem), curX + 4, currentY + 5, { width: cols[6].width - 8, align: cols[6].align });
-
-        currentY += rowHeight;
       }
 
-      if (isMultiCustomer) {
-        if (currentY + rowHeight > pageHeight - 50) {
-          doc.addPage();
-          currentY = 36;
-          renderHeader();
-        }
+      ensureSpace(24);
 
-        doc.rect(margin, currentY, contentWidth, rowHeight).fill('#f1f5f9');
-        doc.rect(margin, currentY, contentWidth, rowHeight).stroke('#cbd5e1');
+      doc.rect(margin, currentY, contentWidth, 24).fill('#e2e8f0');
+      doc.rect(margin, currentY, contentWidth, 24).stroke('#94a3b8');
 
-        doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#334155');
-        const labelWidth = cols[0].width + cols[1].width + cols[2].width + cols[3].width;
-        doc.text(`Subtotal ${custName}:`, margin + 4, currentY + 5, { width: labelWidth - 8, align: 'right' });
+      doc.font('Helvetica-Bold').fontSize(9).fillColor('#0f172a');
+      const labelWidth = cols[0].width + cols[1].width + cols[2].width + cols[3].width;
+      doc.text('TOTAL KESELURUHAN:', margin + 4, currentY + 7, { width: labelWidth - 8, align: 'right', lineBreak: false });
 
-        let curX = margin + labelWidth;
-        doc.text(formatRp(subTotal), curX + 4, currentY + 5, { width: cols[4].width - 8, align: cols[4].align });
-        curX += cols[4].width;
-        doc.text(formatRp(subPaid), curX + 4, currentY + 5, { width: cols[5].width - 8, align: cols[5].align });
-        curX += cols[5].width;
-        doc.fillColor('#b91c1c').text(formatRp(subSisa), curX + 4, currentY + 5, { width: cols[6].width - 8, align: cols[6].align });
-
-        currentY += rowHeight + 4;
-      }
+      let curX = margin + labelWidth;
+      doc.text(formatRp(grandTotal), curX + 4, currentY + 7, { width: cols[4].width - 8, align: cols[4].align, lineBreak: false, ellipsis: true });
+      curX += cols[4].width;
+      doc.text(formatRp(grandPaid), curX + 4, currentY + 7, { width: cols[5].width - 8, align: cols[5].align, lineBreak: false, ellipsis: true });
+      curX += cols[5].width;
+      doc.fillColor('#b91c1c').text(formatRp(grandSisa), curX + 4, currentY + 7, { width: cols[6].width - 8, align: cols[6].align, lineBreak: false, ellipsis: true });
     }
-
-    if (currentY + 24 > pageHeight - 50) {
-      doc.addPage();
-      currentY = 36;
-      renderHeader();
-    }
-
-    doc.rect(margin, currentY, contentWidth, 24).fill('#e2e8f0');
-    doc.rect(margin, currentY, contentWidth, 24).stroke('#94a3b8');
-
-    doc.font('Helvetica-Bold').fontSize(9).fillColor('#0f172a');
-    const labelWidth = cols[0].width + cols[1].width + cols[2].width + cols[3].width;
-    doc.text('TOTAL KESELURUHAN:', margin + 4, currentY + 7, { width: labelWidth - 8, align: 'right' });
-
-    let curX = margin + labelWidth;
-    doc.text(formatRp(grandTotal), curX + 4, currentY + 7, { width: cols[4].width - 8, align: cols[4].align });
-    curX += cols[4].width;
-    doc.text(formatRp(grandPaid), curX + 4, currentY + 7, { width: cols[5].width - 8, align: cols[5].align });
-    curX += cols[5].width;
-    doc.fillColor('#b91c1c').text(formatRp(grandSisa), curX + 4, currentY + 7, { width: cols[6].width - 8, align: cols[6].align });
 
     const range = doc.bufferedPageRange();
     for (let p = 0; p < range.count; p++) {
       doc.switchToPage(p);
+      // Temporarily zero bottom margin + disable lineBreak so footer text below maxY never triggers an extra page
+      const prevBottomMargin = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
       doc.font('Helvetica').fontSize(8).fillColor('#94a3b8')
         .text(`Halaman ${p + 1} dari ${range.count}`, margin, pageHeight - 26, {
           width: contentWidth,
-          align: 'center'
+          align: 'center',
+          lineBreak: false
         });
+      doc.page.margins.bottom = prevBottomMargin;
     }
 
     doc.end();

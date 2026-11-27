@@ -1006,6 +1006,260 @@
     box-shadow: 0 0 0 3px rgba(59,130,246,0.08);
 }
 
+/* ---------- Piutang Single-Row Filter & Popover Toolbar ---------- */
+.piutang-toolbar {
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.piutang-toolbar .page-toolbar-right {
+    flex-shrink: 0;
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    white-space: nowrap;
+}
+
+.piutang-toolbar .page-toolbar-right .btn-toolbar {
+    height: 36px;
+    padding: 0 0.65rem;
+    font-size: 0.8rem;
+}
+
+.piutang-filters {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.4rem;
+    flex: 1 1 0%;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.piutang-search-box {
+    flex: 1 1 110px;
+    min-width: 110px;
+    max-width: 190px;
+    height: 36px;
+    padding: 0 0.6rem;
+    box-sizing: border-box;
+}
+
+.piutang-search-box input {
+    width: 100%;
+    min-width: 0;
+    font-size: 0.8rem;
+}
+
+.piutang-toolbar .filter-select {
+    height: 36px;
+    padding: 0 1.45rem 0 0.55rem;
+    background-position: right 0.4rem center;
+    font-size: 0.8rem;
+    max-width: 128px;
+}
+
+.piutang-date-filter-wrap {
+    position: relative;
+    flex: 0 0 auto;
+}
+
+.piutang-date-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    height: 36px;
+    padding: 0 0.55rem;
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    background: #ffffff;
+    color: var(--gray-600);
+    font-size: 0.8rem;
+    font-weight: 500;
+    font-family: var(--font-main);
+    cursor: pointer;
+    transition: var(--transition);
+    white-space: nowrap;
+}
+
+.piutang-date-btn:hover {
+    background: var(--gray-50);
+    border-color: var(--gray-300);
+}
+
+.piutang-date-btn.open {
+    border-color: var(--blue-400);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.08);
+}
+
+.piutang-date-btn.active {
+    background: #eff6ff;
+    color: #1d4ed8;
+    border-color: #93c5fd;
+    font-weight: 600;
+}
+
+.piutang-date-btn.active:hover {
+    background: #dbeafe;
+    border-color: #60a5fa;
+}
+
+.piutang-date-btn-icon,
+.piutang-date-btn-chevron {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+}
+
+.piutang-date-popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 950;
+    width: 310px;
+    max-width: calc(100vw - 24px);
+    background: #ffffff;
+    border: 1px solid var(--gray-200);
+    border-radius: 10px;
+    box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.14), 0 4px 10px -2px rgba(15, 23, 42, 0.06);
+    padding: 0.85rem;
+}
+
+.piutang-date-popover.align-right {
+    left: auto;
+    right: 0;
+}
+
+.piutang-popover-section + .piutang-popover-section {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--gray-100);
+}
+
+.piutang-popover-title {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--gray-400);
+    margin-bottom: 0.45rem;
+}
+
+.piutang-preset-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.piutang-preset-btn {
+    padding: 0.35rem 0.65rem;
+    font-size: 0.78rem;
+    font-weight: 500;
+    border-radius: 6px;
+    border: 1px solid var(--gray-200);
+    background: var(--gray-50);
+    color: var(--gray-700);
+    cursor: pointer;
+    transition: var(--transition);
+    font-family: var(--font-main);
+}
+
+.piutang-preset-btn:hover {
+    background: #eff6ff;
+    border-color: #bfdbfe;
+    color: #1d4ed8;
+}
+
+.piutang-preset-btn.active {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #ffffff;
+    font-weight: 600;
+}
+
+.piutang-popover-inputs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+}
+
+.piutang-popover-field label {
+    display: block;
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: var(--gray-600);
+    margin-bottom: 0.25rem;
+}
+
+.piutang-fp-input {
+    width: 100%;
+    padding: 0.42rem 0.55rem;
+    border: 1px solid var(--gray-200);
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-family: var(--font-main);
+    color: var(--gray-700);
+    background: #ffffff;
+    cursor: pointer;
+    box-sizing: border-box;
+}
+
+.piutang-fp-input:focus {
+    outline: none;
+    border-color: var(--blue-400);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.08);
+}
+
+.piutang-popover-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 0.85rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--gray-100);
+}
+
+.piutang-popover-footer .btn-toolbar {
+    padding: 0.4rem 0.85rem;
+    font-size: 0.8rem;
+}
+
+.flatpickr-calendar {
+    z-index: 1050 !important;
+}
+
+.btn-reset-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    height: 36px;
+    padding: 0 0.65rem;
+    border-radius: 8px;
+    border: 1px solid var(--rose-200, #fecdd3);
+    background: var(--rose-50, #fff1f2);
+    color: var(--rose-600, #e11d48);
+    font-size: 0.8rem;
+    font-weight: 600;
+    font-family: var(--font-main);
+    cursor: pointer;
+    transition: var(--transition);
+    white-space: nowrap;
+}
+
+.btn-reset-filter:hover {
+    background: #ffe4e6;
+    border-color: #fda4af;
+}
+
+.btn-reset-filter i,
+.btn-reset-filter svg {
+    width: 14px;
+    height: 14px;
+}
+
 .btn-toolbar {
     display: inline-flex;
     align-items: center;
@@ -2184,9 +2438,43 @@ textarea.form-input {
         align-items: stretch;
     }
 
+    .piutang-toolbar {
+        flex-wrap: wrap;
+    }
+
     .page-toolbar-left,
     .page-toolbar-right {
         flex-wrap: wrap;
+    }
+
+    .piutang-toolbar .page-toolbar-right {
+        margin-left: 0;
+        width: 100%;
+    }
+
+    .piutang-search-box {
+        max-width: none;
+        width: 100%;
+        flex: 1 1 100%;
+    }
+
+    .piutang-date-filter-wrap {
+        flex: 1 1 calc(50% - 0.25rem);
+        min-width: 130px;
+    }
+
+    .piutang-date-btn {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .piutang-date-popover {
+        position: fixed;
+        top: 76px;
+        left: 12px !important;
+        right: 12px !important;
+        width: auto;
+        max-width: none;
     }
 
     .toolbar-search input {

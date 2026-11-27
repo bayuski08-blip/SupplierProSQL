@@ -53,7 +53,7 @@ async function api(method, urlPath, token, body = null) {
   }
   const text = await res.text();
   let json = null;
-  try { json = JSON.parse(text); } catch (_) {}
+  try { json = JSON.parse(text); } catch (_) { }
   return { status: res.status, headers: res.headers, body: json, raw: text };
 }
 
@@ -136,7 +136,7 @@ async function startServer() {
         console.log('   Test server is ready.');
         return;
       }
-    } catch (_) {}
+    } catch (_) { }
   }
   throw new Error('Test server failed to start');
 }
@@ -462,7 +462,7 @@ async function main() {
     console.log(`\n=== SUMMARY: ${passedCnt} PASSED, ${failedCnt} FAILED (Total ${results.length}) ===`);
     if (failedCnt > 0) process.exitCode = 1;
   } finally {
-    if (db) await db.end().catch(() => {});
+    if (db) await db.end().catch(() => { });
     if (serverProc) serverProc.kill();
   }
 }

@@ -1516,12 +1516,17 @@ async function fetchPiutangByCustomer() {
     }
 }
 
-function openPiutangForCustomer(customerId) {
+function openPiutangForCustomer(customerId, customerName) {
     navigateTo('piutang');
     setTimeout(() => {
-        const custFilterEl = document.getElementById('piutang-customer-filter');
-        if (custFilterEl && customerId) {
-            custFilterEl.value = customerId;
+        const searchEl = document.getElementById('piutang-search');
+        if (searchEl) {
+            let nameToUse = customerName;
+            if (!nameToUse && customerId && Array.isArray(PIUTANG_BY_CUSTOMER?.rows)) {
+                const match = PIUTANG_BY_CUSTOMER.rows.find(r => String(r.customerId) === String(customerId));
+                if (match && match.customerName) nameToUse = match.customerName;
+            }
+            searchEl.value = nameToUse || '';
         }
         if (typeof fetchPiutang === 'function') fetchPiutang(1);
     }, 50);
@@ -1555,7 +1560,7 @@ function renderPiutangByCustomerCard() {
             ? ` <span class="badge-status batal" style="margin-left:0.35rem; font-size:0.72rem;">${r.overdueCount} jatuh tempo</span>`
             : '';
         return `
-            <tr style="cursor:pointer;" onclick="openPiutangForCustomer('${escapeHtml(r.customerId || '')}')" title="Klik untuk lihat detail piutang ${escapeHtml(r.customerName)}">
+            <tr style="cursor:pointer;" onclick="openPiutangForCustomer('${escapeHtml(r.customerId || '')}', '${escapeHtml(r.customerName || '')}')" title="Klik untuk lihat detail piutang ${escapeHtml(r.customerName)}">
                 <td style="font-weight:600;">${escapeHtml(r.customerName)}</td>
                 <td style="text-align:right;">${r.invoiceCount} invoice</td>
                 <td>${dueLabel}${overdueBadge}</td>
@@ -2158,19 +2163,6 @@ function _renderPiutangLocal_UNUSED(filter) {
         '<div class="fs-label">Dibayar Sebagian</div>' +
         '</div>';
 
-    // Populate customer filter dropdown (preserving current selection)
-    const custFilterEl = document.getElementById('piutang-customer-filter');
-    if (custFilterEl) {
-        const selectedCust = custFilterEl.value;
-        const uniqueCustomers = [...new Map(
-            INVOICES.filter(i => i.customer).map(i => [String(i.customerId), i.customer])
-        ).entries()].sort((a, b) => a[1].localeCompare(b[1]));
-        custFilterEl.innerHTML = '<option value="all">Semua Pelanggan</option>' +
-            uniqueCustomers.map(([cid, cname]) =>
-                '<option value="' + cid + '" ' + (selectedCust === cid ? 'selected' : '') + '>' + cname + '</option>'
-            ).join('');
-    }
-
     const tbody = document.getElementById('piutang-body');
     let filtered = INVOICES.filter(i => i.status.toLowerCase() !== 'batal');
     const today = new Date().toISOString().split('T')[0];
@@ -2183,11 +2175,6 @@ function _renderPiutangLocal_UNUSED(filter) {
         } else {
             filtered = filtered.filter(i => i.status.toLowerCase() === filter);
         }
-    }
-
-    const custFilter = custFilterEl ? custFilterEl.value : 'all';
-    if (custFilter && custFilter !== 'all') {
-        filtered = filtered.filter(i => String(i.customerId) === String(custFilter));
     }
 
     const searchEl = document.getElementById('piutang-search');
@@ -7378,20 +7365,408 @@ async function fetchInvoices(page) {
     }
 }
 
+function formatPiutangDate(ds) {
+    if (!ds || ds === '-' || ds === '0000-00-00') return '-';
+    const clean = String(ds).trim().split('T')[0].split(' ')[0];
+    const p = clean.split('-');
+    if (p.length !== 3) return '-';
+    const [y, m, d] = p;
+    if (!/^\d{4}$/.test(y) || !/^\d{2}$/.test(m) || !/^\d{2}$/.test(d)) return '-';
+    const yi = parseInt(y, 10);
+    const mi = parseInt(m, 10);
+    const di = parseInt(d, 10);
+    const dt = new Date(Date.UTC(yi, mi - 1, di));
+    if (dt.getUTCFullYear() !== yi || dt.getUTCMonth() !== (mi - 1) || dt.getUTCDate() !== di) return '-';
+    return `${d}/${m}/${y}`;
+}
+
+function formatShortPiutangDate(ds) {
+    const full = formatPiutangDate(ds);
+    if (full === '-') return '-';
+    const parts = full.split('/');
+    return `${parts[0]}/${parts[1]}/${parts[2].slice(-2)}`;
+}
+
+function getTodayWIB() {
+    try {
+        return new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Jakarta',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        }).format(new Date());
+    } catch (_) {
+        const dt = new Date(Date.now() + 7 * 3600 * 1000);
+        const y = dt.getUTCFullYear();
+        const m = String(dt.getUTCMonth() + 1).padStart(2, '0');
+        const d = String(dt.getUTCDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+}
+
+function shiftYmdDays(ymdStr, deltaDays) {
+    const [y, m, d] = String(ymdStr).split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d + deltaDays));
+    const ry = dt.getUTCFullYear();
+    const rm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+    const rd = String(dt.getUTCDate()).padStart(2, '0');
+    return `${ry}-${rm}-${rd}`;
+}
+
+const PIUTANG_PRESET_LABELS = {
+    today: 'Hari ini',
+    last_7_days: '7 hari terakhir',
+    this_month: 'Bulan ini',
+    last_month: 'Bulan lalu',
+    overdue: 'Lewat JT',
+    next_7_days: '7 hari ke depan'
+};
+
+function computePiutangDatePreset(presetKey, todayYmd = getTodayWIB()) {
+    const [y, m] = todayYmd.split('-').map(Number);
+    const mm = String(m).padStart(2, '0');
+    switch (presetKey) {
+        case 'today':
+            return { from: todayYmd, to: todayYmd, label: PIUTANG_PRESET_LABELS.today };
+        case 'last_7_days':
+            return { from: shiftYmdDays(todayYmd, -6), to: todayYmd, label: PIUTANG_PRESET_LABELS.last_7_days };
+        case 'this_month': {
+            const lastDay = String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0');
+            return { from: `${y}-${mm}-01`, to: `${y}-${mm}-${lastDay}`, label: PIUTANG_PRESET_LABELS.this_month };
+        }
+        case 'last_month': {
+            const prevYear = m === 1 ? y - 1 : y;
+            const prevMonth = m === 1 ? 12 : m - 1;
+            const pm = String(prevMonth).padStart(2, '0');
+            const lastDay = String(new Date(Date.UTC(prevYear, prevMonth, 0)).getUTCDate()).padStart(2, '0');
+            return { from: `${prevYear}-${pm}-01`, to: `${prevYear}-${pm}-${lastDay}`, label: PIUTANG_PRESET_LABELS.last_month };
+        }
+        case 'overdue':
+            return { from: '', to: shiftYmdDays(todayYmd, -1), label: PIUTANG_PRESET_LABELS.overdue };
+        case 'next_7_days':
+            return { from: todayYmd, to: shiftYmdDays(todayYmd, 7), label: PIUTANG_PRESET_LABELS.next_7_days };
+        default:
+            return { from: '', to: '', label: '' };
+    }
+}
+window.computePiutangDatePreset = computePiutangDatePreset;
+
+const piutangDateState = {
+    invoice: { from: '', to: '', preset: null, baseLabel: 'Tgl Invoice', fpFrom: null, fpTo: null },
+    due: { from: '', to: '', preset: null, baseLabel: 'Jatuh Tempo', fpFrom: null, fpTo: null }
+};
+window.piutangDateState = piutangDateState;
+
+function getPiutangDateInputIds(key) {
+    return key === 'invoice'
+        ? { fromId: 'piutang-invoice-date-from', toId: 'piutang-invoice-date-to' }
+        : { fromId: 'piutang-due-date-from', toId: 'piutang-due-date-to' };
+}
+
+function initPiutangDatePickers() {
+    if (typeof flatpickr !== 'function') return;
+    const idLocale = (flatpickr.l10ns && flatpickr.l10ns.id)
+        ? { ...flatpickr.l10ns.id, firstDayOfWeek: 1 }
+        : { firstDayOfWeek: 1 };
+
+    ['invoice', 'due'].forEach(key => {
+        const state = piutangDateState[key];
+        const { fromId, toId } = getPiutangDateInputIds(key);
+        const fromEl = document.getElementById(fromId);
+        const toEl = document.getElementById(toId);
+        if (fromEl && !state.fpFrom) {
+            state.fpFrom = flatpickr(fromEl, {
+                locale: idLocale,
+                dateFormat: 'Y-m-d',
+                altInput: true,
+                altFormat: 'd/m/Y',
+                altInputClass: 'piutang-fp-input',
+                allowInput: true,
+                disableMobile: true
+            });
+            if (state.fpFrom.altInput) {
+                state.fpFrom.altInput.id = `${fromId}-display`;
+                state.fpFrom.altInput.placeholder = 'dd/mm/yyyy';
+            }
+        }
+        if (toEl && !state.fpTo) {
+            state.fpTo = flatpickr(toEl, {
+                locale: idLocale,
+                dateFormat: 'Y-m-d',
+                altInput: true,
+                altFormat: 'd/m/Y',
+                altInputClass: 'piutang-fp-input',
+                allowInput: true,
+                disableMobile: true
+            });
+            if (state.fpTo.altInput) {
+                state.fpTo.altInput.id = `${toId}-display`;
+                state.fpTo.altInput.placeholder = 'dd/mm/yyyy';
+            }
+        }
+    });
+
+    if (!window._piutangDatePopoverListenersAttached) {
+        window._piutangDatePopoverListenersAttached = true;
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('.piutang-date-filter-wrap') || e.target.closest('.flatpickr-calendar')) {
+                return;
+            }
+            closeAllPiutangDatePopovers();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeAllPiutangDatePopovers();
+            }
+        });
+    }
+}
+
+function closeAllPiutangDatePopovers() {
+    ['invoice', 'due'].forEach(k => {
+        const pop = document.getElementById(`popover-piutang-date-${k}`);
+        const btn = document.getElementById(`btn-piutang-date-${k}`);
+        const st = piutangDateState[k];
+        if (st.fpFrom && st.fpFrom.isOpen) st.fpFrom.close();
+        if (st.fpTo && st.fpTo.isOpen) st.fpTo.close();
+        if (pop) pop.style.display = 'none';
+        if (btn) {
+            btn.classList.remove('open');
+            btn.setAttribute('aria-expanded', 'false');
+        }
+    });
+}
+window.closeAllPiutangDatePopovers = closeAllPiutangDatePopovers;
+
+function syncPiutangPopoverInputs(key) {
+    const state = piutangDateState[key];
+    const { fromId, toId } = getPiutangDateInputIds(key);
+    const fromEl = document.getElementById(fromId);
+    const toEl = document.getElementById(toId);
+    if (state.fpFrom) {
+        if (state.from) state.fpFrom.setDate(state.from, false);
+        else state.fpFrom.clear(false);
+    } else if (fromEl) {
+        fromEl.value = state.from || '';
+    }
+    if (state.fpTo) {
+        if (state.to) state.fpTo.setDate(state.to, false);
+        else state.fpTo.clear(false);
+    } else if (toEl) {
+        toEl.value = state.to || '';
+    }
+    document.querySelectorAll(`.piutang-preset-btn[data-filter="${key}"]`).forEach(btn => {
+        btn.classList.toggle('active', Boolean(state.preset && btn.dataset.preset === state.preset));
+    });
+}
+
+function updatePiutangDateButtonUI(key) {
+    const state = piutangDateState[key];
+    const btn = document.getElementById(`btn-piutang-date-${key}`);
+    const labelEl = document.getElementById(`label-piutang-date-${key}`);
+    if (!btn || !labelEl) return;
+
+    const isActive = Boolean(state.from || state.to);
+    btn.classList.toggle('active', isActive);
+
+    if (!isActive) {
+        labelEl.textContent = state.baseLabel;
+        return;
+    }
+
+    if (state.preset && PIUTANG_PRESET_LABELS[state.preset]) {
+        labelEl.textContent = `${state.baseLabel}: ${PIUTANG_PRESET_LABELS[state.preset]}`;
+        return;
+    }
+
+    const fromStr = state.from ? formatShortPiutangDate(state.from) : '...';
+    const toStr = state.to ? formatShortPiutangDate(state.to) : '...';
+    labelEl.textContent = `${state.baseLabel}: ${fromStr} \u2013 ${toStr}`;
+}
+
+function togglePiutangDatePopover(key) {
+    initPiutangDatePickers();
+    const pop = document.getElementById(`popover-piutang-date-${key}`);
+    const btn = document.getElementById(`btn-piutang-date-${key}`);
+    if (!pop || !btn) return;
+
+    const isCurrentlyOpen = pop.style.display !== 'none';
+    closeAllPiutangDatePopovers();
+    if (isCurrentlyOpen) return;
+
+    syncPiutangPopoverInputs(key);
+    pop.style.display = 'block';
+    btn.classList.add('open');
+    btn.setAttribute('aria-expanded', 'true');
+
+    if (window.innerWidth > 768) {
+        if (key === 'due') {
+            pop.classList.add('align-right');
+            const rect = pop.getBoundingClientRect();
+            if (rect.left < 8) pop.classList.remove('align-right');
+        } else {
+            pop.classList.remove('align-right');
+            const rect = pop.getBoundingClientRect();
+            if (rect.right > window.innerWidth - 8) pop.classList.add('align-right');
+        }
+    }
+}
+window.togglePiutangDatePopover = togglePiutangDatePopover;
+
+function applyPiutangDatePreset(key, presetKey) {
+    const state = piutangDateState[key];
+    const range = computePiutangDatePreset(presetKey);
+    state.from = range.from;
+    state.to = range.to;
+    state.preset = presetKey;
+    syncPiutangPopoverInputs(key);
+    updatePiutangDateButtonUI(key);
+    closeAllPiutangDatePopovers();
+    renderPiutang();
+}
+window.applyPiutangDatePreset = applyPiutangDatePreset;
+
+function applyManualPiutangDateFilter(key) {
+    const state = piutangDateState[key];
+    const { fromId, toId } = getPiutangDateInputIds(key);
+    let fromVal = (state.fpFrom ? state.fpFrom.input.value : document.getElementById(fromId)?.value) || '';
+    let toVal = (state.fpTo ? state.fpTo.input.value : document.getElementById(toId)?.value) || '';
+
+    if (fromVal && toVal && fromVal > toVal) {
+        [fromVal, toVal] = [toVal, fromVal];
+    }
+
+    const validPresets = key === 'invoice'
+        ? ['today', 'last_7_days', 'this_month', 'last_month']
+        : ['overdue', 'today', 'next_7_days', 'this_month'];
+    const matchedPreset = validPresets.find(pk => {
+        const r = computePiutangDatePreset(pk);
+        return r.from === fromVal && r.to === toVal;
+    }) || null;
+
+    state.from = fromVal;
+    state.to = toVal;
+    state.preset = matchedPreset;
+    syncPiutangPopoverInputs(key);
+    updatePiutangDateButtonUI(key);
+    closeAllPiutangDatePopovers();
+    renderPiutang();
+}
+window.applyManualPiutangDateFilter = applyManualPiutangDateFilter;
+
+function resetSinglePiutangDateFilter(key) {
+    const state = piutangDateState[key];
+    state.from = '';
+    state.to = '';
+    state.preset = null;
+    syncPiutangPopoverInputs(key);
+    updatePiutangDateButtonUI(key);
+    closeAllPiutangDatePopovers();
+    renderPiutang();
+}
+window.resetSinglePiutangDateFilter = resetSinglePiutangDateFilter;
+
+function getPiutangFilterParams() {
+    return {
+        q: (document.getElementById('piutang-search')?.value || '').trim(),
+        status: document.getElementById('piutang-status-filter')?.value || 'all',
+        payment_type_id: document.getElementById('piutang-payment-type-filter')?.value || 'all',
+        invoice_date_from: piutangDateState.invoice.from || '',
+        invoice_date_to: piutangDateState.invoice.to || '',
+        due_date_from: piutangDateState.due.from || '',
+        due_date_to: piutangDateState.due.to || ''
+    };
+}
+
+function hasActivePiutangFilters(f = getPiutangFilterParams()) {
+    return Boolean(
+        f.q ||
+        (f.status && f.status !== 'all') ||
+        (f.payment_type_id && f.payment_type_id !== 'all') ||
+        f.invoice_date_from ||
+        f.invoice_date_to ||
+        f.due_date_from ||
+        f.due_date_to
+    );
+}
+
+function updatePiutangResetButton() {
+    const btn = document.getElementById('btn-reset-piutang-filter');
+    if (!btn) return;
+    btn.style.display = hasActivePiutangFilters() ? 'inline-flex' : 'none';
+}
+
+function resetPiutangFilters() {
+    const searchEl = document.getElementById('piutang-search');
+    const statusEl = document.getElementById('piutang-status-filter');
+    const ptEl = document.getElementById('piutang-payment-type-filter');
+    if (searchEl) searchEl.value = '';
+    if (statusEl) statusEl.value = 'all';
+    if (ptEl) ptEl.value = 'all';
+    ['invoice', 'due'].forEach(key => {
+        piutangDateState[key].from = '';
+        piutangDateState[key].to = '';
+        piutangDateState[key].preset = null;
+        syncPiutangPopoverInputs(key);
+        updatePiutangDateButtonUI(key);
+    });
+    closeAllPiutangDatePopovers();
+    updatePiutangResetButton();
+    renderPiutang();
+}
+window.resetPiutangFilters = resetPiutangFilters;
+
+function populatePiutangPaymentTypeFilter(paymentTypes) {
+    const ptFilter = document.getElementById('piutang-payment-type-filter');
+    if (!ptFilter || !Array.isArray(paymentTypes)) return;
+    const prevVal = ptFilter.value || 'all';
+    ptFilter.innerHTML = '<option value="all">Semua Tipe</option>' +
+        paymentTypes.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    if (prevVal && Array.from(ptFilter.options).some(o => o.value === prevVal)) {
+        ptFilter.value = prevVal;
+    }
+}
+
 async function fetchPiutang(page) {
     // Kasir tidak memiliki akses ke piutang — abaikan tanpa toast error
     const _fpRole = (localStorage.getItem('role') || 'kasir').toLowerCase();
     if (_fpRole === 'kasir') return;
     try {
+        // Ensure payment type filter options are populated from DB master
+        const ptFilterEl = document.getElementById('piutang-payment-type-filter');
+        if (ptFilterEl && ptFilterEl.options.length <= 1) {
+            if (Array.isArray(ALL_PAYMENT_TYPES) && ALL_PAYMENT_TYPES.length > 0) {
+                populatePiutangPaymentTypeFilter(ALL_PAYMENT_TYPES);
+            } else {
+                try {
+                    const ptRes = await fetch('/api/master/payment-types', { headers: getAuthHeaders() });
+                    if (ptRes.ok) {
+                        const ptData = await ptRes.json();
+                        if (Array.isArray(ptData)) {
+                            ALL_PAYMENT_TYPES = ptData;
+                            window.ALL_PAYMENT_TYPES = ALL_PAYMENT_TYPES;
+                            window.paymentTypes = ALL_PAYMENT_TYPES;
+                            populatePiutangPaymentTypeFilter(ptData);
+                        }
+                    }
+                } catch (_) { /* silent fallback */ }
+            }
+        }
+
         if (page !== undefined) paginationState.piutang.page = page;
-        const q = document.getElementById('piutang-search')?.value || '';
-        const status = document.getElementById('piutang-status-filter')?.value || 'all';
-        const custFilter = document.getElementById('piutang-customer-filter')?.value || 'all';
+        initPiutangDatePickers();
+        const filters = getPiutangFilterParams();
+        updatePiutangResetButton();
+
         const pg = paginationState.piutang.page;
         let url = '/api/finance/receivables?page=' + pg + '&limit=' + PAGE_SIZE;
-        if (q) url += '&q=' + encodeURIComponent(q);
-        if (status && status !== 'all') url += '&status=' + encodeURIComponent(status);
-        if (custFilter && custFilter !== 'all') url += '&customer_id=' + encodeURIComponent(custFilter);
+        if (filters.q) url += '&q=' + encodeURIComponent(filters.q);
+        if (filters.status && filters.status !== 'all') url += '&status=' + encodeURIComponent(filters.status);
+        if (filters.payment_type_id && filters.payment_type_id !== 'all') url += '&payment_type_id=' + encodeURIComponent(filters.payment_type_id);
+        if (filters.invoice_date_from) url += '&invoice_date_from=' + encodeURIComponent(filters.invoice_date_from);
+        if (filters.invoice_date_to) url += '&invoice_date_to=' + encodeURIComponent(filters.invoice_date_to);
+        if (filters.due_date_from) url += '&due_date_from=' + encodeURIComponent(filters.due_date_from);
+        if (filters.due_date_to) url += '&due_date_to=' + encodeURIComponent(filters.due_date_to);
 
         const res = await fetch(url, { headers: getAuthHeaders() });
         const json = await res.json();
@@ -7419,20 +7794,7 @@ async function fetchPiutang(page) {
                 '</div>';
         }
 
-        // Populate customer filter dropdown
-        const custFilterEl = document.getElementById('piutang-customer-filter');
-        if (custFilterEl && INVOICES.length > 0) {
-            const selectedCust = custFilterEl.value;
-            const uniqueCustomers = [...new Map(
-                INVOICES.filter(i => i.customer).map(i => [String(i.customerId), i.customer])
-            ).entries()].sort((a, b) => a[1].localeCompare(b[1]));
-            custFilterEl.innerHTML = '<option value="all">Semua Pelanggan</option>' +
-                uniqueCustomers.map(([cid, cname]) =>
-                    '<option value="' + cid + '" ' + (selectedCust === cid ? 'selected' : '') + '>' + cname + '</option>'
-                ).join('');
-        }
-
-        const today = new Date().toISOString().split('T')[0];
+        const today = getTodayWITA();
         const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
         const canPayOrVoid = role === 'admin' || role === 'finance';
 
@@ -7468,12 +7830,13 @@ async function fetchPiutang(page) {
             <tr>
                 ${checkboxHtml}
                 <td style="font-weight:600; color:var(--blue-600);">${inv.id}</td>
+                <td>${formatPiutangDate(inv.date)}</td>
                 <td>${inv.customer || '-'}</td>
                 <td style="font-weight:700;">${rp(inv.total)}</td>
                 <td>${rp(inv.paid)}</td>
                 <td style="font-weight:700; color:${sisa > 0 ? 'var(--rose-500)' : 'var(--emerald-500)'};">${rp(sisa)}</td>
-                <td>${inv.dueDate || '-'}${overdueBadge}</td>
-                <td>${statusLower.includes('belum') ? '-' : (inv.paidDate || '-')}</td>
+                <td>${formatPiutangDate(inv.dueDate)}${overdueBadge}</td>
+                <td>${statusLower.includes('belum') ? '-' : formatPiutangDate(inv.paidDate)}</td>
                 <td>${statusLower.includes('belum') ? '-' : (inv.type || '-')}</td>
                 <td><span class="badge-status ${statusLower.includes('belum') ? 'belum' : statusLower.replace(/\s+/g, '-')}">${capitalize(inv.status)}</span></td>
                 <td style="text-align:right; white-space:nowrap;">${actionButtons}</td>
@@ -9143,11 +9506,12 @@ async function populateMasterDropdowns() {
         window.ALL_PAYMENT_TYPES = ALL_PAYMENT_TYPES;
         window.paymentTypes = ALL_PAYMENT_TYPES;
 
-        // Populate Payment Type Filter in Invoices Page (Requirement 5)
+        // Populate Payment Type Filter in Invoices & Piutang Pages
         const invPayFilter = document.getElementById('invoice-payment-type-filter');
         if (invPayFilter && Array.isArray(paymentTypes)) {
             invPayFilter.innerHTML = '<option value="all">Semua Tipe</option>' + paymentTypes.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
         }
+        populatePiutangPaymentTypeFilter(paymentTypes);
 
         // Restore cart payment type from frontend state variable
         const cartPaymentTypeSelect = document.getElementById('cart-payment-type');
@@ -12428,19 +12792,21 @@ function updateExportPdfButton() {
     const btn = document.getElementById('btn-export-pdf-piutang');
     if (!btn) return;
     const count = selectedPiutangIds.size;
+    btn.disabled = false;
     if (count > 0) {
-        btn.disabled = false;
         btn.innerHTML = `<i data-lucide="file-text"></i> Export PDF (${count})`;
     } else {
-        btn.disabled = true;
         btn.innerHTML = `<i data-lucide="file-text"></i> Export PDF`;
     }
     if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
 async function exportPiutangPDF() {
-    if (selectedPiutangIds.size === 0) {
-        showToast('Pilih minimal satu invoice piutang untuk diekspor ke PDF!', 'warning');
+    const hasSelected = selectedPiutangIds.size > 0;
+    const filters = getPiutangFilterParams();
+
+    if (!hasSelected && (paginationState.piutang.total || 0) === 0) {
+        showToast('Tidak ada data piutang untuk di-export ke PDF', 'warning');
         return;
     }
 
@@ -12452,13 +12818,17 @@ async function exportPiutangPDF() {
     }
 
     try {
+        const payload = hasSelected
+            ? { ids: Array.from(selectedPiutangIds), filters }
+            : { filters };
+
         const res = await fetch('/api/finance/receivables/export-pdf', {
             method: 'POST',
             headers: {
                 ...getAuthHeaders(),
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ ids: Array.from(selectedPiutangIds) })
+            body: JSON.stringify(payload)
         });
 
         if (!res.ok) {
@@ -12480,12 +12850,14 @@ async function exportPiutangPDF() {
 
         showToast('PDF Laporan Piutang berhasil di-download', 'success');
 
-        // Reset selection after successful export
-        selectedPiutangIds.clear();
-        updateCheckAllPiutangState();
-        updateExportPdfButton();
-        const checkboxes = document.querySelectorAll('.check-piutang-item');
-        checkboxes.forEach(cb => { cb.checked = false; });
+        if (hasSelected) {
+            // Reset selection after successful export
+            selectedPiutangIds.clear();
+            updateCheckAllPiutangState();
+            updateExportPdfButton();
+            const checkboxes = document.querySelectorAll('.check-piutang-item');
+            checkboxes.forEach(cb => { cb.checked = false; });
+        }
     } catch (err) {
         console.error('Error exporting PDF:', err);
         showToast('Gagal mendownload PDF', 'error');

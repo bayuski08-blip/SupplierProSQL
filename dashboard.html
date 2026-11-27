@@ -20,6 +20,7 @@
     <!-- SheetJS for Excel Export/Import -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- Styles -->
+    <link rel="stylesheet" href="assets/vendor/flatpickr/flatpickr.min.css">
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="dashboard.css">
 </head>
@@ -213,10 +214,12 @@
                     </div>
 
                     <!-- Card Piutang Group by Customer (khusus Finance) -->
-                    <div class="dash-card" id="dash-card-piutang-by-customer" style="display: none; margin-bottom: 1.5rem;">
+                    <div class="dash-card" id="dash-card-piutang-by-customer"
+                        style="display: none; margin-bottom: 1.5rem;">
                         <div class="dash-card-header">
                             <span class="dash-card-title">Piutang per Pelanggan</span>
-                            <button class="dash-card-action" onclick="navigateTo('piutang')">Lihat Detail Piutang</button>
+                            <button class="dash-card-action" onclick="navigateTo('piutang')">Lihat Detail
+                                Piutang</button>
                         </div>
                         <div class="dash-card-body" style="padding: 0; max-height: 460px; overflow-y: auto;">
                             <table class="data-table" id="piutang-by-customer-table">
@@ -886,16 +889,13 @@
                         <!-- Filled by JS -->
                     </div>
 
-                    <div class="page-toolbar">
-                        <div class="page-toolbar-left">
-                            <div class="toolbar-search">
+                    <div class="page-toolbar piutang-toolbar">
+                        <div class="page-toolbar-left piutang-filters">
+                            <div class="toolbar-search piutang-search-box">
                                 <i data-lucide="search"></i>
                                 <input type="text" id="piutang-search" placeholder="Cari No Invoice / Pelanggan..."
                                     onkeyup="renderPiutang()">
                             </div>
-                            <select class="filter-select" id="piutang-customer-filter" onchange="renderPiutang()">
-                                <option value="all">Semua Pelanggan</option>
-                            </select>
                             <select class="filter-select" id="piutang-status-filter" onchange="renderPiutang()">
                                 <option value="all">Semua Status</option>
                                 <option value="belum bayar">Belum Lunas</option>
@@ -903,9 +903,125 @@
                                 <option value="lunas">Lunas</option>
                                 <option value="overdue">Lewat Jatuh Tempo</option>
                             </select>
+                            <select class="filter-select" id="piutang-payment-type-filter" onchange="renderPiutang()">
+                                <option value="all">Semua Tipe</option>
+                            </select>
+
+                            <!-- Filter Tanggal Invoice (Popover + Flatpickr) -->
+                            <div class="piutang-date-filter-wrap" id="piutang-date-wrap-invoice"
+                                data-filter-key="invoice">
+                                <button type="button" class="piutang-date-btn" id="btn-piutang-date-invoice"
+                                    onclick="togglePiutangDatePopover('invoice')" aria-expanded="false">
+                                    <i data-lucide="calendar" class="piutang-date-btn-icon"></i>
+                                    <span class="piutang-date-btn-label" id="label-piutang-date-invoice">Tgl
+                                        Invoice</span>
+                                    <i data-lucide="chevron-down" class="piutang-date-btn-chevron"></i>
+                                </button>
+                                <div class="piutang-date-popover" id="popover-piutang-date-invoice"
+                                    style="display: none;">
+                                    <div class="piutang-popover-section">
+                                        <div class="piutang-popover-title">Pilih cepat</div>
+                                        <div class="piutang-preset-grid">
+                                            <button type="button" class="piutang-preset-btn" data-filter="invoice"
+                                                data-preset="today"
+                                                onclick="applyPiutangDatePreset('invoice', 'today')">Hari ini</button>
+                                            <button type="button" class="piutang-preset-btn" data-filter="invoice"
+                                                data-preset="last_7_days"
+                                                onclick="applyPiutangDatePreset('invoice', 'last_7_days')">7 hari
+                                                terakhir</button>
+                                            <button type="button" class="piutang-preset-btn" data-filter="invoice"
+                                                data-preset="this_month"
+                                                onclick="applyPiutangDatePreset('invoice', 'this_month')">Bulan
+                                                ini</button>
+                                            <button type="button" class="piutang-preset-btn" data-filter="invoice"
+                                                data-preset="last_month"
+                                                onclick="applyPiutangDatePreset('invoice', 'last_month')">Bulan
+                                                lalu</button>
+                                        </div>
+                                    </div>
+                                    <div class="piutang-popover-section">
+                                        <div class="piutang-popover-title">Atau pilih rentang</div>
+                                        <div class="piutang-popover-inputs">
+                                            <div class="piutang-popover-field">
+                                                <label for="piutang-invoice-date-from-display">Dari</label>
+                                                <input type="text" id="piutang-invoice-date-from"
+                                                    class="piutang-fp-source" placeholder="dd/mm/yyyy" readonly>
+                                            </div>
+                                            <div class="piutang-popover-field">
+                                                <label for="piutang-invoice-date-to-display">Sampai</label>
+                                                <input type="text" id="piutang-invoice-date-to"
+                                                    class="piutang-fp-source" placeholder="dd/mm/yyyy" readonly>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="piutang-popover-footer">
+                                        <button type="button" class="btn-toolbar secondary piutang-popover-reset"
+                                            onclick="resetSinglePiutangDateFilter('invoice')">Reset</button>
+                                        <button type="button" class="btn-toolbar primary piutang-popover-apply"
+                                            onclick="applyManualPiutangDateFilter('invoice')">Terapkan</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Filter Jatuh Tempo (Popover + Flatpickr) -->
+                            <div class="piutang-date-filter-wrap" id="piutang-date-wrap-due" data-filter-key="due">
+                                <button type="button" class="piutang-date-btn" id="btn-piutang-date-due"
+                                    onclick="togglePiutangDatePopover('due')" aria-expanded="false">
+                                    <i data-lucide="calendar" class="piutang-date-btn-icon"></i>
+                                    <span class="piutang-date-btn-label" id="label-piutang-date-due">Jatuh Tempo</span>
+                                    <i data-lucide="chevron-down" class="piutang-date-btn-chevron"></i>
+                                </button>
+                                <div class="piutang-date-popover align-right" id="popover-piutang-date-due"
+                                    style="display: none;">
+                                    <div class="piutang-popover-section">
+                                        <div class="piutang-popover-title">Pilih cepat</div>
+                                        <div class="piutang-preset-grid">
+                                            <button type="button" class="piutang-preset-btn" data-filter="due"
+                                                data-preset="overdue"
+                                                onclick="applyPiutangDatePreset('due', 'overdue')">Lewat JT</button>
+                                            <button type="button" class="piutang-preset-btn" data-filter="due"
+                                                data-preset="today"
+                                                onclick="applyPiutangDatePreset('due', 'today')">Hari ini</button>
+                                            <button type="button" class="piutang-preset-btn" data-filter="due"
+                                                data-preset="next_7_days"
+                                                onclick="applyPiutangDatePreset('due', 'next_7_days')">7 hari ke
+                                                depan</button>
+                                            <button type="button" class="piutang-preset-btn" data-filter="due"
+                                                data-preset="this_month"
+                                                onclick="applyPiutangDatePreset('due', 'this_month')">Bulan ini</button>
+                                        </div>
+                                    </div>
+                                    <div class="piutang-popover-section">
+                                        <div class="piutang-popover-title">Atau pilih rentang</div>
+                                        <div class="piutang-popover-inputs">
+                                            <div class="piutang-popover-field">
+                                                <label for="piutang-due-date-from-display">Dari</label>
+                                                <input type="text" id="piutang-due-date-from" class="piutang-fp-source"
+                                                    placeholder="dd/mm/yyyy" readonly>
+                                            </div>
+                                            <div class="piutang-popover-field">
+                                                <label for="piutang-due-date-to-display">Sampai</label>
+                                                <input type="text" id="piutang-due-date-to" class="piutang-fp-source"
+                                                    placeholder="dd/mm/yyyy" readonly>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="piutang-popover-footer">
+                                        <button type="button" class="btn-toolbar secondary piutang-popover-reset"
+                                            onclick="resetSinglePiutangDateFilter('due')">Reset</button>
+                                        <button type="button" class="btn-toolbar primary piutang-popover-apply"
+                                            onclick="applyManualPiutangDateFilter('due')">Terapkan</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button type="button" class="btn-reset-filter" id="btn-reset-piutang-filter"
+                                style="display: none;" onclick="resetPiutangFilters()">
+                                <i data-lucide="rotate-ccw"></i> Reset
+                            </button>
                         </div>
                         <div class="page-toolbar-right">
-                            <button class="btn-toolbar secondary" id="btn-export-pdf-piutang" disabled
+                            <button class="btn-toolbar secondary" id="btn-export-pdf-piutang"
                                 onclick="exportPiutangPDF()">
                                 <i data-lucide="file-text"></i> Export PDF
                             </button>
@@ -923,6 +1039,7 @@
                                     <th style="width: 36px; text-align: center;"><input type="checkbox"
                                             id="check-all-piutang" onchange="toggleSelectAllPiutang(this)"></th>
                                     <th>Invoice</th>
+                                    <th>Tgl Invoice</th>
                                     <th>Pelanggan</th>
                                     <th>Total</th>
                                     <th>Dibayar</th>
@@ -1954,8 +2071,8 @@
                             style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
                             <div class="toolbar-search">
                                 <i data-lucide="search"></i>
-                                <input type="text" placeholder="Cari no. retur, no. invoice, nama pelanggan..." id="returns-search"
-                                    oninput="debounceReturnsSearch()">
+                                <input type="text" placeholder="Cari no. retur, no. invoice, nama pelanggan..."
+                                    id="returns-search" oninput="debounceReturnsSearch()">
                             </div>
                         </div>
                         <div class="page-toolbar-right"
@@ -1963,12 +2080,10 @@
                             <div style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.85rem;">
                                 <span>Dari:</span>
                                 <input type="date" id="returns-date-from" class="form-input"
-                                    style="padding: 0.35rem 0.5rem; font-size: 0.85rem;"
-                                    onchange="loadReturnsSales(1)">
+                                    style="padding: 0.35rem 0.5rem; font-size: 0.85rem;" onchange="loadReturnsSales(1)">
                                 <span>s/d</span>
                                 <input type="date" id="returns-date-to" class="form-input"
-                                    style="padding: 0.35rem 0.5rem; font-size: 0.85rem;"
-                                    onchange="loadReturnsSales(1)">
+                                    style="padding: 0.35rem 0.5rem; font-size: 0.85rem;" onchange="loadReturnsSales(1)">
                             </div>
                             <button class="btn-toolbar secondary" onclick="resetReturnsFilter()">
                                 <i data-lucide="rotate-ccw"></i> Reset
@@ -2015,8 +2130,8 @@
                             style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
                             <div class="toolbar-search">
                                 <i data-lucide="search"></i>
-                                <input type="text" placeholder="Cari no. retur, no. PO, nama vendor..." id="purchase-returns-search"
-                                    oninput="debounceReturnsPurchasesSearch()">
+                                <input type="text" placeholder="Cari no. retur, no. PO, nama vendor..."
+                                    id="purchase-returns-search" oninput="debounceReturnsPurchasesSearch()">
                             </div>
                         </div>
                         <div class="page-toolbar-right"
@@ -2047,7 +2162,8 @@
                                         <th>Tanggal</th>
                                         <th>No. PO Asal</th>
                                         <th>Vendor</th>
-                                        <th class="th-purchase-returns-finance" style="text-align: right;">Total Nilai Retur</th>
+                                        <th class="th-purchase-returns-finance" style="text-align: right;">Total Nilai
+                                            Retur</th>
                                         <th style="text-align: center;">Status</th>
                                         <th style="text-align: right;">Aksi</th>
                                     </tr>
@@ -2209,23 +2325,23 @@
                 <!-- Riwayat Penyesuaian HPP (Fase 6) -->
                 <section class="page-section" id="page-hpp-log">
                     <div class="page-toolbar" style="flex-wrap: wrap; gap: 0.75rem;">
-                        <div class="page-toolbar-left" style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                        <div class="page-toolbar-left"
+                            style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
                             <select id="hpp-log-filter-product" class="form-input"
                                 style="padding: 0.45rem 0.75rem; font-size: 0.85rem; min-width: 220px;"
                                 onchange="loadHppLogPage(1)">
                                 <option value="all">Semua Produk</option>
                             </select>
                         </div>
-                        <div class="page-toolbar-right" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                        <div class="page-toolbar-right"
+                            style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
                             <div style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.85rem;">
                                 <span>Dari:</span>
                                 <input type="date" id="hpp-log-date-from" class="form-input"
-                                    style="padding: 0.35rem 0.5rem; font-size: 0.85rem;"
-                                    onchange="loadHppLogPage(1)">
+                                    style="padding: 0.35rem 0.5rem; font-size: 0.85rem;" onchange="loadHppLogPage(1)">
                                 <span>s/d</span>
                                 <input type="date" id="hpp-log-date-to" class="form-input"
-                                    style="padding: 0.35rem 0.5rem; font-size: 0.85rem;"
-                                    onchange="loadHppLogPage(1)">
+                                    style="padding: 0.35rem 0.5rem; font-size: 0.85rem;" onchange="loadHppLogPage(1)">
                             </div>
                             <button class="btn-toolbar secondary" onclick="resetHppLogFilter()">
                                 <i data-lucide="rotate-ccw"></i> Reset
@@ -2253,8 +2369,10 @@
                         </table>
                     </div>
 
-                    <div id="hpp-log-empty-state" class="empty-state" style="display: none; padding: 2.5rem; text-align: center;">
-                        <i data-lucide="history" style="width: 48px; height: 48px; color: var(--gray-300); margin-bottom: 0.5rem;"></i>
+                    <div id="hpp-log-empty-state" class="empty-state"
+                        style="display: none; padding: 2.5rem; text-align: center;">
+                        <i data-lucide="history"
+                            style="width: 48px; height: 48px; color: var(--gray-300); margin-bottom: 0.5rem;"></i>
                         <p style="color: var(--gray-500); font-size: 0.95rem;">Belum ada riwayat penyesuaian HPP.</p>
                     </div>
 
@@ -4319,7 +4437,8 @@
                 style="padding: 16px 20px; border-top: 1px solid var(--gray-200); display: flex; justify-content: flex-end; gap: 12px;">
                 <button class="btn-toolbar secondary"
                     onclick="closeModal('modal-confirm-edit-invoice')">Batalkan</button>
-                <button class="btn-toolbar primary" onclick="confirmActivePaymentEditInvoice()"><i data-lucide="check"></i>
+                <button class="btn-toolbar primary" onclick="confirmActivePaymentEditInvoice()"><i
+                        data-lucide="check"></i>
                     Lanjutkan Simpan</button>
             </div>
         </div>
@@ -5539,7 +5658,8 @@
         <div class="modal" style="max-width: 780px; width: 95%;">
             <div class="modal-header">
                 <h3><i data-lucide="file-text"
-                        style="width: 20px; height: 20px; vertical-align: middle; margin-right: 6px;"></i> <span id="ret-detail-modal-title">Detail Dokumen Retur</span></h3>
+                        style="width: 20px; height: 20px; vertical-align: middle; margin-right: 6px;"></i> <span
+                        id="ret-detail-modal-title">Detail Dokumen Retur</span></h3>
                 <button class="modal-close" onclick="closeModal('modal-return-detail')"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body" style="padding: 1.25rem;">
@@ -5984,27 +6104,34 @@
     </div>
 
     <!-- Reusable Transaction Confirmation Modal -->
-    <div class="modal-overlay" id="modal-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
+    <div class="modal-overlay" id="modal-confirm-dialog" role="dialog" aria-modal="true"
+        aria-labelledby="confirm-dialog-title">
         <div class="modal" style="max-width: 460px;" tabindex="-1">
             <div class="modal-header">
                 <h3 id="confirm-dialog-title">Konfirmasi Simpan</h3>
-                <button type="button" class="modal-close" id="confirm-dialog-close-btn" onclick="cancelConfirmDialog()"><i data-lucide="x"></i></button>
+                <button type="button" class="modal-close" id="confirm-dialog-close-btn"
+                    onclick="cancelConfirmDialog()"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body" style="padding: 1.25rem 1.5rem; line-height: 1.5; color: var(--gray-700);">
-                <p id="confirm-dialog-message" style="margin: 0 0 0.75rem 0; font-size: 0.92rem; color: var(--gray-700);"></p>
+                <p id="confirm-dialog-message"
+                    style="margin: 0 0 0.75rem 0; font-size: 0.92rem; color: var(--gray-700);"></p>
                 <div id="confirm-dialog-summary"
                     style="padding: 0.85rem 1rem; background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 8px; font-size: 0.875rem; display: none;">
                 </div>
             </div>
             <div class="modal-footer" style="justify-content: flex-end; gap: 0.75rem;">
-                <button type="button" class="btn-toolbar secondary" id="confirm-dialog-cancel-btn" onclick="cancelConfirmDialog()">Batal</button>
+                <button type="button" class="btn-toolbar secondary" id="confirm-dialog-cancel-btn"
+                    onclick="cancelConfirmDialog()">Batal</button>
                 <button type="button" class="btn-toolbar primary" id="confirm-dialog-confirm-btn">Ya, Simpan</button>
             </div>
         </div>
     </div>
 
+    <!-- Flatpickr (Local Vendor) -->
+    <script src="assets/vendor/flatpickr/flatpickr.min.js"></script>
+    <script src="assets/vendor/flatpickr/id.js"></script>
     <!-- Application Script -->
-    <script src="dashboard.js?v=16"></script>
+    <script src="dashboard.js?v=17"></script>
 </body>
 
 </html>

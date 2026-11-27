@@ -73,7 +73,10 @@
                         <i data-lucide="file-text"></i> Transaksi / Invoice
                     </div>
                     <div class="nav-item" data-page="returns" id="nav-returns">
-                        <i data-lucide="rotate-ccw"></i> Retur
+                        <i data-lucide="rotate-ccw"></i> Retur Penjualan
+                    </div>
+                    <div class="nav-item" data-page="purchase-returns" id="nav-purchase-returns">
+                        <i data-lucide="rotate-ccw"></i> Retur Pembelian
                     </div>
                     <div class="nav-item" data-page="conversions" id="nav-conversions">
                         <i data-lucide="arrow-left-right"></i> Konversi Produk
@@ -1943,21 +1946,15 @@
                 </section>
 
                 <!-- ============================================================
-                 PAGE: DAFTAR RETUR (B4.1)
+                 PAGE: RETUR PENJUALAN (B4.1)
                  ============================================================ -->
                 <section class="page-section" id="page-returns">
                     <div class="page-toolbar" style="flex-wrap: wrap; gap: 0.75rem;">
                         <div class="page-toolbar-left"
                             style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
-                            <div class="tab-filters" id="returns-tabs">
-                                <button class="tab-filter active" id="tab-btn-returns-sales"
-                                    onclick="switchReturnsTab('sales')">Retur Penjualan</button>
-                                <button class="tab-filter" id="tab-btn-returns-purchases"
-                                    onclick="switchReturnsTab('purchases')">Retur Pembelian</button>
-                            </div>
                             <div class="toolbar-search">
                                 <i data-lucide="search"></i>
-                                <input type="text" placeholder="Cari no. retur, no. ref, nama..." id="returns-search"
+                                <input type="text" placeholder="Cari no. retur, no. invoice, nama pelanggan..." id="returns-search"
                                     oninput="debounceReturnsSearch()">
                             </div>
                         </div>
@@ -1967,11 +1964,11 @@
                                 <span>Dari:</span>
                                 <input type="date" id="returns-date-from" class="form-input"
                                     style="padding: 0.35rem 0.5rem; font-size: 0.85rem;"
-                                    onchange="loadReturnsCurrentTab()">
+                                    onchange="loadReturnsSales(1)">
                                 <span>s/d</span>
                                 <input type="date" id="returns-date-to" class="form-input"
                                     style="padding: 0.35rem 0.5rem; font-size: 0.85rem;"
-                                    onchange="loadReturnsCurrentTab()">
+                                    onchange="loadReturnsSales(1)">
                             </div>
                             <button class="btn-toolbar secondary" onclick="resetReturnsFilter()">
                                 <i data-lucide="rotate-ccw"></i> Reset
@@ -1979,7 +1976,7 @@
                         </div>
                     </div>
 
-                    <!-- Tab Content: Retur Penjualan -->
+                    <!-- Retur Penjualan Content -->
                     <div id="returns-sales-content">
                         <div class="data-table-wrapper">
                             <table class="data-table" id="returns-sales-table">
@@ -2007,33 +2004,64 @@
                         </div>
                         <div id="pagination-returns-sales" class="pagination-container"></div>
                     </div>
+                </section>
 
-                    <!-- Tab Content: Retur Pembelian -->
-                    <div id="returns-purchases-content" style="display: none;">
+                <!-- ============================================================
+                 PAGE: RETUR PEMBELIAN (B4.1b)
+                 ============================================================ -->
+                <section class="page-section" id="page-purchase-returns">
+                    <div class="page-toolbar" style="flex-wrap: wrap; gap: 0.75rem;">
+                        <div class="page-toolbar-left"
+                            style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                            <div class="toolbar-search">
+                                <i data-lucide="search"></i>
+                                <input type="text" placeholder="Cari no. retur, no. PO, nama vendor..." id="purchase-returns-search"
+                                    oninput="debounceReturnsPurchasesSearch()">
+                            </div>
+                        </div>
+                        <div class="page-toolbar-right"
+                            style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                            <div style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.85rem;">
+                                <span>Dari:</span>
+                                <input type="date" id="purchase-returns-date-from" class="form-input"
+                                    style="padding: 0.35rem 0.5rem; font-size: 0.85rem;"
+                                    onchange="loadReturnsPurchasesPage(1)">
+                                <span>s/d</span>
+                                <input type="date" id="purchase-returns-date-to" class="form-input"
+                                    style="padding: 0.35rem 0.5rem; font-size: 0.85rem;"
+                                    onchange="loadReturnsPurchasesPage(1)">
+                            </div>
+                            <button class="btn-toolbar secondary" onclick="resetReturnsPurchasesFilter()">
+                                <i data-lucide="rotate-ccw"></i> Reset
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Retur Pembelian Content -->
+                    <div id="purchase-returns-content">
                         <div class="data-table-wrapper">
-                            <table class="data-table" id="returns-purchases-table">
+                            <table class="data-table" id="purchase-returns-table">
                                 <thead>
                                     <tr>
                                         <th>No. Retur</th>
                                         <th>Tanggal</th>
-                                        <th>No. PO</th>
+                                        <th>No. PO Asal</th>
                                         <th>Vendor</th>
-                                        <th style="text-align: center;">Item</th>
-                                        <th>Alasan</th>
-                                        <th class="th-returns-finance" style="text-align: right;">Nilai Retur</th>
+                                        <th class="th-purchase-returns-finance" style="text-align: right;">Total Nilai Retur</th>
+                                        <th style="text-align: center;">Status</th>
                                         <th style="text-align: right;">Aksi</th>
                                     </tr>
                                 </thead>
-                                <tbody id="returns-purchases-body">
+                                <tbody id="purchase-returns-body">
                                     <!-- Rendered by JS -->
                                 </tbody>
                             </table>
                         </div>
-                        <div class="empty-state" id="returns-purchases-empty" style="display:none;">
+                        <div class="empty-state" id="purchase-returns-empty" style="display:none;">
                             <i data-lucide="rotate-ccw"></i>
                             <p>Belum ada data retur pembelian.</p>
                         </div>
-                        <div id="pagination-returns-purchases" class="pagination-container"></div>
+                        <div id="pagination-purchase-returns" class="pagination-container"></div>
                     </div>
                 </section>
 
@@ -4219,7 +4247,7 @@
                     <button class="btn-toolbar warning" id="btn-edit-invoice-return"
                         style="background: #f59e0b; color: white; border: none; margin-left: 0.5rem;"
                         onclick="openSalesReturnFromEditInvoice()">
-                        <i data-lucide="rotate-ccw"></i> Retur
+                        <i data-lucide="rotate-ccw"></i> Retur Penjualan
                     </button>
                 </div>
                 <div style="display: flex; gap: 0.5rem; align-items: center;">
@@ -4291,7 +4319,7 @@
                 style="padding: 16px 20px; border-top: 1px solid var(--gray-200); display: flex; justify-content: flex-end; gap: 12px;">
                 <button class="btn-toolbar secondary"
                     onclick="closeModal('modal-confirm-edit-invoice')">Batalkan</button>
-                <button class="btn-toolbar primary" onclick="executeSaveInvoiceEdits()"><i data-lucide="check"></i>
+                <button class="btn-toolbar primary" onclick="confirmActivePaymentEditInvoice()"><i data-lucide="check"></i>
                     Lanjutkan Simpan</button>
             </div>
         </div>
@@ -5511,8 +5539,7 @@
         <div class="modal" style="max-width: 780px; width: 95%;">
             <div class="modal-header">
                 <h3><i data-lucide="file-text"
-                        style="width: 20px; height: 20px; vertical-align: middle; margin-right: 6px;"></i> Detail
-                    Dokumen Retur</h3>
+                        style="width: 20px; height: 20px; vertical-align: middle; margin-right: 6px;"></i> <span id="ret-detail-modal-title">Detail Dokumen Retur</span></h3>
                 <button class="modal-close" onclick="closeModal('modal-return-detail')"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body" style="padding: 1.25rem;">
@@ -5956,8 +5983,28 @@
         </div>
     </div>
 
+    <!-- Reusable Transaction Confirmation Modal -->
+    <div class="modal-overlay" id="modal-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
+        <div class="modal" style="max-width: 460px;" tabindex="-1">
+            <div class="modal-header">
+                <h3 id="confirm-dialog-title">Konfirmasi Simpan</h3>
+                <button type="button" class="modal-close" id="confirm-dialog-close-btn" onclick="cancelConfirmDialog()"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body" style="padding: 1.25rem 1.5rem; line-height: 1.5; color: var(--gray-700);">
+                <p id="confirm-dialog-message" style="margin: 0 0 0.75rem 0; font-size: 0.92rem; color: var(--gray-700);"></p>
+                <div id="confirm-dialog-summary"
+                    style="padding: 0.85rem 1rem; background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 8px; font-size: 0.875rem; display: none;">
+                </div>
+            </div>
+            <div class="modal-footer" style="justify-content: flex-end; gap: 0.75rem;">
+                <button type="button" class="btn-toolbar secondary" id="confirm-dialog-cancel-btn" onclick="cancelConfirmDialog()">Batal</button>
+                <button type="button" class="btn-toolbar primary" id="confirm-dialog-confirm-btn">Ya, Simpan</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Application Script -->
-    <script src="dashboard.js?v=15"></script>
+    <script src="dashboard.js?v=16"></script>
 </body>
 
 </html>

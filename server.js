@@ -11533,8 +11533,10 @@ app.get('/api/returns/purchases', authenticateToken, authorizeRoles('admin', 'gu
         reason: r.reason,
         user_name: r.user_name || '-'
       };
-      if (canSeeFinance) {
+      if (canSeeFinance || role === 'gudang') {
         row.total_refund = parseFloat(r.total_refund || 0);
+      }
+      if (canSeeFinance) {
         row.hutang_deduction = parseFloat(r.hutang_deduction || 0);
         row.vendor_deposit_amount = parseFloat(r.vendor_deposit_amount || 0);
       }

@@ -188,25 +188,25 @@ function renderPagination({ containerId, currentPage, totalItems, pageSize = PAG
         return '<button type="button" class="pagination-btn ' + (isActive ? 'active' : '') + '" data-page="' + p + '">' + p + '</button>';
     }).join('');
 
-    container.innerHTML = 
+    container.innerHTML =
         '<div class="pagination-wrapper">' +
-            '<div class="pagination-info">' +
-                'Menampilkan <b>' + startItem + '–' + endItem + '</b> dari <b>' + totalItems + '</b> data' +
-            '</div>' +
-            '<div class="pagination-controls">' +
-                '<button type="button" class="pagination-btn pagination-prev" ' + (currentPage <= 1 ? 'disabled' : '') + '>' +
-                    '&laquo; Sebelumnya' +
-                '</button>' +
-                '<div class="pagination-pages desktop-only">' +
-                    pageButtonsHtml +
-                '</div>' +
-                '<div class="pagination-mobile-info mobile-only">' +
-                    'Hal. ' + currentPage + ' dari ' + totalPages +
-                '</div>' +
-                '<button type="button" class="pagination-btn pagination-next" ' + (currentPage >= totalPages ? 'disabled' : '') + '>' +
-                    'Berikutnya &raquo;' +
-                '</button>' +
-            '</div>' +
+        '<div class="pagination-info">' +
+        'Menampilkan <b>' + startItem + '–' + endItem + '</b> dari <b>' + totalItems + '</b> data' +
+        '</div>' +
+        '<div class="pagination-controls">' +
+        '<button type="button" class="pagination-btn pagination-prev" ' + (currentPage <= 1 ? 'disabled' : '') + '>' +
+        '&laquo; Sebelumnya' +
+        '</button>' +
+        '<div class="pagination-pages desktop-only">' +
+        pageButtonsHtml +
+        '</div>' +
+        '<div class="pagination-mobile-info mobile-only">' +
+        'Hal. ' + currentPage + ' dari ' + totalPages +
+        '</div>' +
+        '<button type="button" class="pagination-btn pagination-next" ' + (currentPage >= totalPages ? 'disabled' : '') + '>' +
+        'Berikutnya &raquo;' +
+        '</button>' +
+        '</div>' +
         '</div>';
 
     const prevBtn = container.querySelector('.pagination-prev');
@@ -232,7 +232,7 @@ function renderPagination({ containerId, currentPage, totalItems, pageSize = PAG
 // Debounce helper for server-side search input
 function debounce(fn, delay = 250) {
     let timer = null;
-    return function(...args) {
+    return function (...args) {
         clearTimeout(timer);
         timer = setTimeout(() => fn.apply(this, args), delay);
     };
@@ -266,7 +266,7 @@ function notifyDataChange(type = 'general', payload = {}) {
     // 2. Fallback: trigger storage event for tabs in same origin
     try {
         localStorage.setItem('supplierpro_sync_event', JSON.stringify(message));
-    } catch (_) {}
+    } catch (_) { }
 
     // 3. Immediately refresh local dashboard if on dashboard page
     if (currentPage === 'dashboard') {
@@ -298,7 +298,7 @@ window.addEventListener('storage', (e) => {
         try {
             const data = JSON.parse(e.newValue);
             handleSyncMessage(data);
-        } catch (_) {}
+        } catch (_) { }
     }
 });
 
@@ -315,7 +315,7 @@ window.addEventListener('hashchange', () => {
             navigateTo(defaultPage);
             try {
                 history.replaceState(null, '', window.location.pathname + (window.location.search ? window.location.search : ''));
-            } catch (_) {}
+            } catch (_) { }
         }
     }
 });
@@ -348,14 +348,14 @@ async function refreshDashboardData(silent = false) {
                 cache: 'no-store'
             }).then(r => r.ok ? r.json() : null).then(data => {
                 if (data) SALES_CHART_DATA = data;
-            }).catch(() => {});
+            }).catch(() => { });
 
             const compPromise = fetch('/api/dashboard/sales-composition?days=30', {
                 headers: getAuthHeaders(),
                 cache: 'no-store'
             }).then(r => r.ok ? r.json() : null).then(data => {
                 if (data) DONUT_DATA = data;
-            }).catch(() => {});
+            }).catch(() => { });
 
             promises.push(trendPromise, compPromise);
         }
@@ -670,16 +670,17 @@ const PAGE_TITLES = {
     roles: { title: 'Otoritas Akses', subtitle: 'Kelola hak akses dan peran staff' },
     'master-data': { title: 'Master Data', subtitle: 'Kelola kategori, satuan, dan tipe pembayaran' },
     pricelists: { title: 'Special Price', subtitle: 'Kelola daftar harga khusus untuk pelanggan' },
-    returns: { title: 'Daftar Retur', subtitle: 'Riwayat retur penjualan dan pembelian' },
+    returns: { title: 'Retur Penjualan', subtitle: 'Riwayat retur penjualan' },
+    'purchase-returns': { title: 'Retur Pembelian', subtitle: 'Riwayat retur pembelian ke vendor' },
     'stock-moves': { title: 'Stock Move', subtitle: 'Monitoring pergerakan fisik stok' },
     conversions: { title: 'Konversi Produk', subtitle: 'Pecah atau gabung stok produk antar satuan' },
 };
 
 // ---------- Role Based Access Control (RBAC) ----------
 const ROLE_PERMISSIONS = {
-    admin: ['dashboard', 'pos', 'products', 'customers', 'vendors', 'purchases', 'proformas', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'sales-report', 'reports', 'settings', 'roles', 'master-data', 'customerfee', 'pricelists', 'returns', 'stock-moves', 'conversions', 'hpp-log'],
+    admin: ['dashboard', 'pos', 'products', 'customers', 'vendors', 'purchases', 'proformas', 'invoices', 'piutang', 'hutang', 'cashflow', 'profitloss', 'balance', 'sales-report', 'reports', 'settings', 'roles', 'master-data', 'customerfee', 'pricelists', 'returns', 'purchase-returns', 'stock-moves', 'conversions', 'hpp-log'],
     finance: ['dashboard', 'piutang'],
-    gudang: ['dashboard', 'products', 'purchases', 'vendors', 'hutang', 'stock-moves', 'returns', 'conversions'],
+    gudang: ['dashboard', 'products', 'purchases', 'vendors', 'hutang', 'stock-moves', 'purchase-returns', 'conversions'],
     kasir: ['dashboard', 'pos', 'customers', 'proformas', 'invoices', 'sales-report', 'pricelists', 'returns']
 };
 
@@ -724,27 +725,15 @@ function applyRoleRestrictions() {
     const btnImportHutang = document.getElementById('btn-import-hutang');
     if (btnImportHutang) btnImportHutang.style.display = canImportHutang ? '' : 'none';
 
-    // Returns tabs & financial visibility:
-    const returnsSalesTabBtn = document.getElementById('tab-btn-returns-sales');
-    const returnsPurchasesTabBtn = document.getElementById('tab-btn-returns-purchases');
-    if (returnsSalesTabBtn && returnsPurchasesTabBtn) {
-        if (role === 'gudang') {
-            returnsSalesTabBtn.style.display = 'none';
-            returnsPurchasesTabBtn.style.display = '';
-            if (typeof switchReturnsTab === 'function') switchReturnsTab('purchases');
-        } else if (role === 'kasir') {
-            returnsPurchasesTabBtn.style.display = 'none';
-            returnsSalesTabBtn.style.display = '';
-            if (typeof switchReturnsTab === 'function') switchReturnsTab('sales');
-        } else {
-            returnsSalesTabBtn.style.display = '';
-            returnsPurchasesTabBtn.style.display = '';
-        }
-    }
-
+    // Returns financial visibility: hanya admin/finance/owner yang lihat kolom nilai detail/penjualan;
+    // gudang boleh lihat Total Nilai Retur (agregat) di daftar Retur Pembelian, tetapi tidak harga beli satuan di detail
     const canSeeFinance = role === 'admin' || role === 'finance' || role === 'owner';
     document.querySelectorAll('.th-returns-finance, .th-sales-return-finance, .th-purchase-return-finance, .th-ret-detail-finance').forEach(el => {
         el.style.display = canSeeFinance ? '' : 'none';
+    });
+    const canSeePurchaseReturnTotal = canSeeFinance || role === 'gudang';
+    document.querySelectorAll('.th-purchase-returns-finance').forEach(el => {
+        el.style.display = canSeePurchaseReturnTotal ? '' : 'none';
     });
 
     // Sembunyikan HPP untuk kasir saja (gudang boleh melihat/mengelola HPP produk, PO, dan Konversi)
@@ -883,6 +872,9 @@ function navigateTo(page) {
     if (page === 'returns') {
         if (typeof loadReturnsPage === 'function') loadReturnsPage();
     }
+    if (page === 'purchase-returns') {
+        if (typeof loadReturnsPurchasesPage === 'function') loadReturnsPurchasesPage();
+    }
     if (page === 'stock-moves') {
         if (typeof loadStockMovesPage === 'function') loadStockMovesPage(1);
     }
@@ -1016,11 +1008,30 @@ function closeModal(id) {
     }
 }
 
-// Global Esc key listener: closes topmost modal
+// Global Esc & Enter key listener for modal stack
 document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && openModalsStack.length > 0) {
-        const topModalId = openModalsStack[openModalsStack.length - 1];
+    if (openModalsStack.length === 0) return;
+    const topModalId = openModalsStack[openModalsStack.length - 1];
+    if (e.key === 'Escape') {
+        if (topModalId === 'modal-confirm-dialog') {
+            cancelConfirmDialog();
+            return;
+        }
         closeModal(topModalId);
+        return;
+    }
+    if (e.key === 'Enter' && topModalId === 'modal-confirm-dialog') {
+        const confirmBtn = document.getElementById('confirm-dialog-confirm-btn');
+        const cancelBtn = document.getElementById('confirm-dialog-cancel-btn');
+        if (document.activeElement === confirmBtn) {
+            e.preventDefault();
+            if (confirmBtn && !confirmBtn.disabled) confirmBtn.click();
+        } else if (document.activeElement === cancelBtn) {
+            e.preventDefault();
+            if (cancelBtn && !cancelBtn.disabled) cancelBtn.click();
+        } else {
+            e.preventDefault();
+        }
     }
 });
 
@@ -1028,10 +1039,126 @@ document.addEventListener('keydown', (e) => {
 document.querySelectorAll('.modal-overlay').forEach(overlay => {
     overlay.addEventListener('click', (e) => {
         if (e.target === overlay) {
+            if (overlay.id === 'modal-confirm-dialog') {
+                cancelConfirmDialog();
+                return;
+            }
             closeModal(overlay.id);
         }
     });
 });
+
+// ---------- Reusable Confirmation Dialog Component ----------
+let _confirmDialogState = null;
+
+function cancelConfirmDialog() {
+    if (_confirmDialogState && _confirmDialogState.isSubmitting) return;
+    _confirmDialogState = null;
+    closeModal('modal-confirm-dialog');
+}
+
+function showConfirmDialog({
+    title = 'Konfirmasi Simpan',
+    message = 'Apakah Anda yakin ingin menyimpan transaksi ini?',
+    summary = null,
+    confirmText = 'Ya, Simpan',
+    cancelText = 'Batal',
+    onConfirm
+} = {}) {
+    const modal = document.getElementById('modal-confirm-dialog');
+    if (!modal) {
+        if (typeof onConfirm === 'function') onConfirm();
+        return;
+    }
+
+    const titleEl = document.getElementById('confirm-dialog-title');
+    const msgEl = document.getElementById('confirm-dialog-message');
+    const summaryEl = document.getElementById('confirm-dialog-summary');
+    const cancelBtn = document.getElementById('confirm-dialog-cancel-btn');
+    const confirmBtn = document.getElementById('confirm-dialog-confirm-btn');
+    const closeBtn = document.getElementById('confirm-dialog-close-btn');
+
+    if (titleEl) titleEl.textContent = title;
+    if (msgEl) {
+        msgEl.textContent = message || '';
+        msgEl.style.display = message ? 'block' : 'none';
+    }
+
+    if (summaryEl) {
+        if (Array.isArray(summary) && summary.length > 0) {
+            summaryEl.innerHTML = summary.map((row, idx) => {
+                const isLast = idx === summary.length - 1;
+                const valStyle = row.highlight
+                    ? 'font-weight: 700; color: var(--blue-600); font-size: 0.95rem;'
+                    : 'font-weight: 600; color: var(--gray-900);';
+                const rowStyle = isLast
+                    ? 'display: flex; justify-content: space-between; align-items: center; gap: 1rem;'
+                    : 'display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 6px;';
+                return `<div style="${rowStyle}"><span style="color: var(--gray-600);">${escapeHtml(row.label)}</span><span style="text-align: right; ${valStyle}">${escapeHtml(String(row.value ?? '-'))}</span></div>`;
+            }).join('');
+            summaryEl.style.display = 'block';
+        } else if (typeof summary === 'string' && summary.trim() !== '') {
+            summaryEl.textContent = summary;
+            summaryEl.style.display = 'block';
+        } else {
+            summaryEl.innerHTML = '';
+            summaryEl.style.display = 'none';
+        }
+    }
+
+    if (cancelBtn) {
+        cancelBtn.textContent = cancelText || 'Batal';
+        cancelBtn.disabled = false;
+    }
+    if (closeBtn) closeBtn.disabled = false;
+    if (confirmBtn) {
+        confirmBtn.disabled = false;
+        confirmBtn.innerHTML = `<i data-lucide="check"></i> ${escapeHtml(confirmText || 'Ya, Simpan')}`;
+    }
+
+    _confirmDialogState = { isSubmitting: false };
+
+    if (confirmBtn) {
+        confirmBtn.onclick = async () => {
+            if (!_confirmDialogState || _confirmDialogState.isSubmitting) return;
+            _confirmDialogState.isSubmitting = true;
+            confirmBtn.disabled = true;
+            if (cancelBtn) cancelBtn.disabled = true;
+            if (closeBtn) closeBtn.disabled = true;
+            confirmBtn.innerHTML = '<i data-lucide="loader-2" class="spin" style="width:15px;height:15px;"></i> Menyimpan...';
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+
+            try {
+                if (typeof onConfirm === 'function') {
+                    await onConfirm();
+                }
+            } finally {
+                if (_confirmDialogState) _confirmDialogState.isSubmitting = false;
+                if (confirmBtn) {
+                    confirmBtn.disabled = false;
+                    confirmBtn.innerHTML = `<i data-lucide="check"></i> ${escapeHtml(confirmText || 'Ya, Simpan')}`;
+                }
+                if (cancelBtn) cancelBtn.disabled = false;
+                if (closeBtn) closeBtn.disabled = false;
+                closeModal('modal-confirm-dialog');
+            }
+        };
+    }
+
+    openModal('modal-confirm-dialog');
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+
+    // Focus Cancel button by default so accidental Enter does NOT confirm;
+    // Enter only confirms when user moves focus onto the Confirm button.
+    if (cancelBtn) cancelBtn.focus();
+    setTimeout(() => {
+        if (openModalsStack[openModalsStack.length - 1] === 'modal-confirm-dialog' && cancelBtn) {
+            cancelBtn.focus();
+        }
+    }, 30);
+}
+window.showConfirmDialog = showConfirmDialog;
+window.cancelConfirmDialog = cancelConfirmDialog;
 
 // ---------- Dashboard Rendering ----------
 let DASHBOARD_SUMMARY = null;
@@ -1146,7 +1273,7 @@ async function checkReconciliationStatus() {
             const alertEl = document.getElementById('reconciliation-alert');
             const alertText = document.getElementById('reconciliation-alert-text');
             if (data.success && data.status && !data.status.balanced) {
-                alertText.innerHTML = `Ditemukan ketidaksesuaian data keuangan pada pencatatan otomatis harian. Masalah:<br/>` + 
+                alertText.innerHTML = `Ditemukan ketidaksesuaian data keuangan pada pencatatan otomatis harian. Masalah:<br/>` +
                     data.status.issues.map(issue => `&bull; ${issue}`).join('<br/>') +
                     `<br/><span style="font-weight: 600; margin-top: 0.5rem; display: inline-block;">Silakan periksa laporan keuangan dan log transaksi cash flow.</span>`;
                 alertEl.style.display = 'block';
@@ -1195,7 +1322,7 @@ function renderSummaryCards() {
     const totalOmzet = DASHBOARD_SUMMARY?.revenue ?? INVOICES.filter(i => i.status && i.status.toLowerCase() !== 'batal').reduce((s, i) => s + i.total, 0);
     const totalPiutang = DASHBOARD_SUMMARY?.receivables ?? INVOICES.filter(i => i.status && i.status.toLowerCase() !== 'lunas' && i.status.toLowerCase() !== 'batal').reduce((s, i) => s + (i.total - i.paid), 0);
     const totalHutang = DASHBOARD_SUMMARY?.payables ?? PURCHASES.filter(p => p.status && p.status.toLowerCase() !== 'selesai' && p.status.toLowerCase() !== 'batal').reduce((s, p) => s + (p.total - p.paid), 0);
-    
+
     // A1 & A2: Produk nonaktif TIDAK ikut dihitung di Stok Menipis
     const lowStockCount = DASHBOARD_SUMMARY?.lowStockCount ?? PRODUCTS.filter(p => (p.is_active !== 0 && p.is_active !== false) && p.stock <= p.minStock).length;
     const labaKotor = DASHBOARD_SUMMARY?.grossProfit ?? (totalOmzet * 0.28);
@@ -1717,8 +1844,8 @@ function _renderCustomersLocal_UNUSED(filter = '', type = '') {
                 <td><span class="badge-status aman">${c.type}</span></td>
                 <td>
                     ${(c.tipePembayaranName || c.tipe_pembayaran_name)
-                        ? `<span class="badge-status" style="background:var(--slate-100);color:var(--slate-700);font-size:0.75rem;">${c.tipePembayaranName || c.tipe_pembayaran_name}</span>`
-                        : `<span style="color:var(--slate-400);font-size:0.75rem;font-style:italic;">Belum diatur (Kredit 30 Hari)</span>`}
+                    ? `<span class="badge-status" style="background:var(--slate-100);color:var(--slate-700);font-size:0.75rem;">${c.tipePembayaranName || c.tipe_pembayaran_name}</span>`
+                    : `<span style="color:var(--slate-400);font-size:0.75rem;font-style:italic;">Belum diatur (Kredit 30 Hari)</span>`}
                 </td>
                 <td>${c.city}</td>
                 <td>${c.phone}</td>
@@ -2019,16 +2146,16 @@ function _renderPiutangLocal_UNUSED(filter) {
 
     document.getElementById('piutang-summary').innerHTML =
         '<div class="finance-summary-card highlight">' +
-            '<div class="fs-value">' + rp(totalPiutang) + '</div>' +
-            '<div class="fs-label">Total Piutang</div>' +
+        '<div class="fs-value">' + rp(totalPiutang) + '</div>' +
+        '<div class="fs-label">Total Piutang</div>' +
         '</div>' +
         '<div class="finance-summary-card">' +
-            '<div class="fs-value" style="color:var(--rose-500);">' + rp(belumBayar) + '</div>' +
-            '<div class="fs-label">Belum Dibayar</div>' +
+        '<div class="fs-value" style="color:var(--rose-500);">' + rp(belumBayar) + '</div>' +
+        '<div class="fs-label">Belum Dibayar</div>' +
         '</div>' +
         '<div class="finance-summary-card">' +
-            '<div class="fs-value" style="color:var(--amber-500);">' + rp(sebagian) + '</div>' +
-            '<div class="fs-label">Dibayar Sebagian</div>' +
+        '<div class="fs-value" style="color:var(--amber-500);">' + rp(sebagian) + '</div>' +
+        '<div class="fs-label">Dibayar Sebagian</div>' +
         '</div>';
 
     // Populate customer filter dropdown (preserving current selection)
@@ -2812,6 +2939,99 @@ function renderPOSProducts(searchTerm = '', category = '') {
     `).join('');
 }
 
+function sanitizeDecimalInput(raw) {
+    let s = String(raw ?? '').replace(/,/g, '.').replace(/[^0-9.]/g, '');
+    const firstDot = s.indexOf('.');
+    if (firstDot !== -1) {
+        s = s.slice(0, firstDot + 1) + s.slice(firstDot + 1).replace(/\./g, '');
+    }
+    return s;
+}
+
+function getPOSItemDefaultPrice(item) {
+    if (!item) return 0;
+    const eff = (typeof currentPOSCustomerEffectivePrices !== 'undefined' && currentPOSCustomerEffectivePrices)
+        ? currentPOSCustomerEffectivePrices[item.id]
+        : null;
+    if (eff && eff.harga_efektif !== undefined && eff.harga_efektif !== null) {
+        return parseFloat(eff.harga_efektif) || 0;
+    }
+    if (item.snapshotPrice && item.defaultPrice !== undefined && item.defaultPrice !== null) {
+        return parseFloat(item.defaultPrice) || 0;
+    }
+    const prod = (Array.isArray(PRODUCTS) ? PRODUCTS : []).find(p => String(p.id) === String(item.id));
+    if (prod && prod.price !== undefined && prod.price !== null) {
+        return parseFloat(prod.price) || 0;
+    }
+    return parseFloat(item.originalPrice ?? item.defaultPrice ?? item.price ?? 0) || 0;
+}
+
+function getCartItemEffectivePrice(item) {
+    if (!item) return 0;
+    if (item.customPrice !== null && item.customPrice !== undefined && item.customPrice !== '') {
+        const parsed = parseFloat(item.customPrice);
+        if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+    }
+    return getPOSItemDefaultPrice(item);
+}
+
+function calculateSalesSummary(items, discountInput = 0, getUnitPriceFn = null) {
+    const list = Array.isArray(items) ? items : [];
+    const resolvePrice = typeof getUnitPriceFn === 'function' ? getUnitPriceFn : getCartItemEffectivePrice;
+    let subtotal = 0;
+    let totalQty = 0;
+    const itemSummaries = list.map(item => {
+        const qty = parseFloat(item.qty ?? item.quantity ?? 0) || 0;
+        const unitPrice = Math.max(0, parseFloat(resolvePrice(item)) || 0);
+        const lineTotal = unitPrice * qty;
+        subtotal += lineTotal;
+        totalQty += qty;
+        return { item, qty, unitPrice, lineTotal };
+    });
+    const discount = Math.max(0, parseFloat(discountInput) || 0);
+    const afterDiscount = subtotal - discount;
+    const ppnEnabled = (typeof currentPpnEnabled !== 'undefined') && Boolean(currentPpnEnabled);
+    const ppnRate = (typeof currentPpnRate !== 'undefined') ? (parseFloat(currentPpnRate) || 0) : 11;
+    const ppnAmount = ppnEnabled ? Math.round(afterDiscount * (ppnRate / 100)) : 0;
+    const total = afterDiscount + ppnAmount;
+    return {
+        items: itemSummaries,
+        totalQty: Math.round(totalQty * 1000) / 1000,
+        subtotal,
+        discount,
+        afterDiscount,
+        ppnEnabled,
+        ppnRate,
+        ppnAmount,
+        total
+    };
+}
+
+function calculateCartSummary(items = cart, discountInput = 0) {
+    return calculateSalesSummary(items, discountInput, getCartItemEffectivePrice);
+}
+
+function showTransactionSuccessModal({ title, messageHtml, subtext = '', invoiceId = null } = {}) {
+    const modal = document.getElementById('modal-checkout-success');
+    if (!modal) return;
+    const titleEl = modal.querySelector('.modal-header h3');
+    const bodyPs = modal.querySelectorAll('.modal-body p');
+    const printBtn = document.getElementById('btn-print-new-invoice');
+    if (titleEl && title) titleEl.textContent = title;
+    if (bodyPs[0] && messageHtml !== undefined) bodyPs[0].innerHTML = messageHtml;
+    if (bodyPs[1] && subtext !== undefined) bodyPs[1].textContent = subtext;
+    if (printBtn) {
+        if (invoiceId) {
+            printBtn.dataset.invoiceId = invoiceId;
+            printBtn.style.display = '';
+        } else {
+            delete printBtn.dataset.invoiceId;
+            printBtn.style.display = 'none';
+        }
+    }
+    openModal('modal-checkout-success');
+}
+
 function addToCart(productId) {
     const product = PRODUCTS.find(p => p.id === productId);
     if (!product) return;
@@ -2836,6 +3056,8 @@ function addToCart(productId) {
             ...product,
             price: effectivePrice,
             originalPrice: parseFloat(product.price),
+            defaultPrice: effectivePrice,
+            customPrice: null,
             sumberHarga,
             pricelistNama,
             cost,
@@ -2868,17 +3090,56 @@ function updateCartQty(productId, delta) {
     if (item.qty <= 0) {
         cart = cart.filter(c => c.id !== productId);
     }
+    if (posEditMode) posEditCartDirty = true;
     renderCart();
+}
+
+function _updateCartRowVisual(item) {
+    if (!item) return;
+    const rowEl = document.querySelector(`.cart-item[data-product-id="${item.id}"]`);
+    if (!rowEl) return;
+    const effPrice = getCartItemEffectivePrice(item);
+    const totalCell = rowEl.querySelector('.cart-item-total');
+    if (totalCell) totalCell.textContent = rp(effPrice * (parseFloat(item.qty) || 0));
+    const badgesEl = rowEl.querySelector('.cart-item-badges');
+    if (badgesEl) {
+        badgesEl.innerHTML = _buildCartItemBadgesHtml(item, effPrice);
+    }
+}
+
+function updateCartQtyInput(productId, rawValue, inputEl) {
+    const sanitized = sanitizeDecimalInput(rawValue);
+    if (inputEl && sanitized !== rawValue) {
+        inputEl.value = sanitized;
+    }
+    const item = cart.find(c => c.id === productId);
+    if (!item || sanitized === '' || sanitized === '.') return;
+    const val = parseFloat(sanitized);
+    if (isNaN(val) || val <= 0) return;
+
+    const qty = Math.round(val * 1000) / 1000;
+    const product = PRODUCTS.find(p => p.id === productId);
+    if (product && qty > parseFloat(product.stock || 0)) {
+        showToast(`Qty melebihi stok tersedia (${formatNumberTrim(product.stock)} ${product.unit || ''})`, 'warning');
+        item.qty = parseFloat(product.stock || 0);
+        if (inputEl) inputEl.value = formatNumberTrim(item.qty);
+    } else {
+        item.qty = qty;
+    }
+    if (posEditMode) posEditCartDirty = true;
+    _updateCartRowVisual(item);
+    updateCartTotals();
 }
 
 function updateCartQtyDirect(productId, rawValue) {
     // Normalisasi: koma → titik, lalu parse float
-    const val = parseFloat(String(rawValue).replace(',', '.'));
+    const val = parseFloat(sanitizeDecimalInput(rawValue));
     const item = cart.find(c => c.id === productId);
     if (!item) return;
     if (isNaN(val) || val <= 0) {
         // Hapus item jika qty tidak valid atau 0
         cart = cart.filter(c => c.id !== productId);
+        if (posEditMode) posEditCartDirty = true;
         renderCart();
         return;
     }
@@ -2892,57 +3153,64 @@ function updateCartQtyDirect(productId, rawValue) {
     } else {
         item.qty = qty;
     }
-    // Update total display tanpa rebuild DOM penuh (agar input tidak kehilangan fokus)
-    const cartItemTotal = document.querySelector(`.cart-item-qty input[data-id="${productId}"]`)
-        ?.closest('.cart-item-row')?.querySelector('.cart-item-total');
-    if (cartItemTotal) cartItemTotal.textContent = rp(item.price * item.qty);
-    // Update subtotal + total di panel bawah
+    if (posEditMode) posEditCartDirty = true;
+    _updateCartRowVisual(item);
     updateCartTotals();
 }
 
 function removeFromCart(productId) {
     cart = cart.filter(c => c.id !== productId);
+    if (posEditMode) posEditCartDirty = true;
     renderCart();
+}
+
+function _buildCartItemBadgesHtml(item, effPrice) {
+    const isAdmin = (localStorage.getItem('role') || 'kasir').toLowerCase() === 'admin';
+    const hasCustom = item.customPrice !== null && item.customPrice !== undefined && item.customPrice !== '';
+    const sourceBadge = (hasCustom || item.manual_override)
+        ? '<span class="badge-manual-source" style="font-size:0.65rem; margin-left:4px;">✏️ Manual</span>'
+        : (item.sumberHarga === 'pricelist' ? `<span class="badge-pricelist-source" style="font-size:0.65rem; margin-left:4px;">${item.pricelistNama || 'Pricelist'}</span>` : '');
+    const hppBadge = (isAdmin && item.cost > 0 && effPrice < item.cost)
+        ? '<span class="badge-hpp-warning" style="font-size:0.65rem; margin-left:4px;">⚠️ Bawah HPP</span>'
+        : '';
+    const feeBadge = (isAdmin && item.fee > 0)
+        ? `<span class="fee-indicator">Fee: ${rp(item.fee)}</span>`
+        : '';
+    return `${sourceBadge}${hppBadge}${feeBadge}`;
 }
 
 function renderCart() {
     const container = document.getElementById('pos-cart-items');
-    const emptyState = document.getElementById('cart-empty');
     const countEl = document.getElementById('cart-count');
     const isAdmin = (localStorage.getItem('role') || 'kasir').toLowerCase() === 'admin';
 
-    countEl.textContent = cart.reduce((s, c) => s + c.qty, 0);
-
     if (cart.length === 0) {
+        if (countEl) countEl.textContent = '0';
         container.innerHTML = `<div class="empty-state" id="cart-empty"><i data-lucide="shopping-bag"></i><p>Keranjang masih kosong</p></div>`;
-        document.getElementById('cart-subtotal').textContent = 'Rp 0';
-        document.getElementById('cart-discount').textContent = 'Rp 0';
-        
-        const ppnRowEl = document.getElementById('cart-ppn-row');
-        const ppnEl = document.getElementById('cart-ppn');
-        const ppnLabelEl = document.getElementById('cart-ppn-label');
-        if (ppnRowEl) ppnRowEl.style.display = currentPpnEnabled ? 'flex' : 'none';
-        if (ppnEl) ppnEl.textContent = 'Rp 0';
-        if (ppnLabelEl) ppnLabelEl.textContent = `(${currentPpnRate}%)`;
-        
-        document.getElementById('cart-total').textContent = 'Rp 0';
+        updateCartTotals();
         lucide.createIcons();
         return;
     }
 
-    container.innerHTML = cart.map(item => `
-        <div class="cart-item">
+    container.innerHTML = cart.map(item => {
+        const effPrice = getCartItemEffectivePrice(item);
+        return `
+        <div class="cart-item" data-product-id="${item.id}">
             <div class="cart-item-row">
                 <div class="cart-item-info">
                     <div class="cart-item-name">
                         ${item.emoji ? item.emoji + ' ' : ''}${item.name}
-                        ${item.manual_override ? '<span class="badge-manual-source" style="font-size:0.65rem; margin-left:4px;">✏️ Manual</span>' : (item.sumberHarga === 'pricelist' ? `<span class="badge-pricelist-source" style="font-size:0.65rem; margin-left:4px;">${item.pricelistNama || 'Pricelist'}</span>` : '')}
-                        ${(isAdmin && item.cost > 0 && item.price < item.cost) ? '<span class="badge-hpp-warning" style="font-size:0.65rem; margin-left:4px;">⚠️ Bawah HPP</span>' : ''}
-                        ${isAdmin && item.fee > 0 ? `<span class="fee-indicator">Fee: ${rp(item.fee)}</span>` : ''}
+                        <span class="cart-item-badges">${_buildCartItemBadgesHtml(item, effPrice)}</span>
                     </div>
                     <div class="cart-item-price-edit" style="display:flex; align-items:center; gap:0.25rem;">
                         <span style="font-size:0.75rem; color:var(--gray-500);">Rp</span>
-                        <input type="number" step="any" value="${formatNumberTrim(item.price)}" onchange="updateCartPrice('${item.id}', this.value)" style="width:70px; padding:0.1rem 0.25rem; font-size:0.875rem; border:1px solid var(--gray-200); border-radius:0.25rem;" />
+                        <input type="text" inputmode="decimal" class="cart-price-input" data-id="${item.id}"
+                            value="${formatNumberTrim(effPrice)}"
+                            oninput="updateCartPrice('${item.id}', this.value, this)"
+                            onchange="commitCartPrice('${item.id}', this.value, this)"
+                            onkeydown="if(event.key==='Enter'){this.blur();}"
+                            onclick="this.select()"
+                            style="width:76px; padding:0.1rem 0.25rem; font-size:0.875rem; border:1px solid var(--gray-200); border-radius:0.25rem;" />
                         <span style="font-size:0.75rem; color:var(--gray-500);">/ ${item.unit}</span>
                     </div>
                 </div>
@@ -2952,11 +3220,12 @@ function renderCart() {
                         value="${formatNumberTrim(item.qty)}"
                         style="width:52px; text-align:center; padding:0.1rem 0.2rem; font-size:0.9rem; border:1px solid var(--gray-300); border-radius:0.25rem;"
                         onkeydown="if(event.key==='Enter'){this.blur();}"
+                        oninput="updateCartQtyInput(this.dataset.id, this.value, this)"
                         onblur="updateCartQtyDirect(this.dataset.id, this.value)"
                         onclick="this.select()" />
                     <button class="cart-qty-btn" onclick="updateCartQty('${item.id}', 1)">+</button>
                 </div>
-                <div class="cart-item-total">${rp(item.price * item.qty)}</div>
+                <div class="cart-item-total">${rp(effPrice * item.qty)}</div>
                 ${isAdmin ? `<button class="cart-fee-toggle" onclick="toggleFeeRow('${item.id}')" title="Toggle fee">fee</button>` : ''}
                 <button class="cart-item-remove" onclick="removeFromCart('${item.id}')"><i data-lucide="trash-2"></i></button>
             </div>
@@ -2965,6 +3234,7 @@ function renderCart() {
                 <span class="cart-item-fee-label">Fee (Rp)</span>
                 <input type="number" min="0" value="${item.fee || 0}" placeholder="0"
                     class="cart-item-fee-input"
+                    oninput="updateCartFee('${item.id}', this.value)"
                     onchange="updateCartFee('${item.id}', this.value)"
                     title="Fee internal per item (hanya terlihat admin, tidak tampil di invoice)" />
                 <input type="text" value="${item.feeNotes || ''}" placeholder="Catatan fee..."
@@ -2973,76 +3243,93 @@ function renderCart() {
                     oninput="updateCartFeeNotes('${item.id}', this.value)"
                     title="Catatan fee (opsional)" />
             </div>` : ''}
-        </div>
-    `).join('');
+        </div>`;
+    }).join('');
 
-    window.updateCartPrice = (id, newPrice) => {
-        const item = cart.find(c => c.id === id);
-        if (item) {
-            item.price = parseFloat(newPrice) || 0;
-            item.manual_override = true; // R3: track manual edit
-            // Re-render without full re-render so input focus is kept
-        }
-    };
-
-    window.updateCartFee = (id, newFee) => {
-        const item = cart.find(c => c.id === id);
-        if (item) {
-            item.fee = Math.max(0, parseFloat(newFee) || 0);
-        }
-    };
-
-    window.updateCartFeeNotes = (id, notes) => {
-        const item = cart.find(c => c.id === id);
-        if (item) {
-            item.feeNotes = notes || '';
-        }
-    };
-
-    // A5: Toggle visibility fee row (hanya admin)
-    window.toggleFeeRow = (id) => {
-        const row = document.getElementById(`fee-row-${id}`);
-        if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
-    };
-
-    const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
-    const discount = 0; // if there is discount logic
-    const afterDiscount = subtotal - discount;
-    const ppnAmount = currentPpnEnabled ? afterDiscount * (currentPpnRate / 100) : 0;
-    const total = afterDiscount + ppnAmount;
-
-    document.getElementById('cart-subtotal').textContent = rp(subtotal);
-    document.getElementById('cart-discount').textContent = 'Rp 0';
-
-    const ppnRowEl = document.getElementById('cart-ppn-row');
-    const ppnEl = document.getElementById('cart-ppn');
-    const ppnLabelEl = document.getElementById('cart-ppn-label');
-    if (ppnRowEl) ppnRowEl.style.display = currentPpnEnabled ? 'flex' : 'none';
-    if (ppnEl) ppnEl.textContent = rp(ppnAmount);
-    if (ppnLabelEl) ppnLabelEl.textContent = `(${currentPpnRate}%)`;
-
-    document.getElementById('cart-total').textContent = rp(total);
-
+    updateCartTotals();
     lucide.createIcons();
 }
+
+window.updateCartPrice = (id, rawPrice, inputEl) => {
+    const item = cart.find(c => String(c.id) === String(id));
+    if (!item) return;
+    const sanitized = sanitizeDecimalInput(rawPrice);
+    if (inputEl && sanitized !== rawPrice) {
+        inputEl.value = sanitized;
+    }
+    if (sanitized.trim() === '') {
+        item.customPrice = null;
+        item.manual_override = false;
+        item.price = getPOSItemDefaultPrice(item);
+    } else if (sanitized !== '.') {
+        const parsed = parseFloat(sanitized);
+        if (Number.isFinite(parsed) && parsed >= 0) {
+            item.customPrice = parsed;
+            item.manual_override = true;
+            item.price = parsed;
+        }
+    }
+    if (posEditMode) posEditCartDirty = true;
+    _updateCartRowVisual(item);
+    updateCartTotals();
+};
+
+window.commitCartPrice = (id, rawPrice, inputEl) => {
+    const item = cart.find(c => String(c.id) === String(id));
+    if (!item) return;
+    window.updateCartPrice(id, rawPrice, inputEl);
+    const effPrice = getCartItemEffectivePrice(item);
+    item.price = effPrice;
+    if (inputEl) {
+        inputEl.value = formatNumberTrim(effPrice);
+    }
+    _updateCartRowVisual(item);
+    updateCartTotals();
+};
+
+window.updateCartFee = (id, newFee) => {
+    const item = cart.find(c => String(c.id) === String(id));
+    if (item) {
+        item.fee = Math.max(0, parseFloat(newFee) || 0);
+        if (posEditMode) posEditCartDirty = true;
+        _updateCartRowVisual(item);
+    }
+};
+
+window.updateCartFeeNotes = (id, notes) => {
+    const item = cart.find(c => String(c.id) === String(id));
+    if (item) {
+        item.feeNotes = notes || '';
+        if (posEditMode) posEditCartDirty = true;
+    }
+};
+
+// A5: Toggle visibility fee row (hanya admin)
+window.toggleFeeRow = (id) => {
+    const row = document.getElementById(`fee-row-${id}`);
+    if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+};
 
 // Old Settings PPN binding removed
 
 // Helper: update subtotal/ppn/total di panel bawah keranjang tanpa rebuild DOM
 function updateCartTotals() {
     if (typeof cart === 'undefined') return;
-    const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
-    const afterDiscount = subtotal;
-    const ppnAmount = currentPpnEnabled ? afterDiscount * (currentPpnRate / 100) : 0;
-    const total = afterDiscount + ppnAmount;
+    const summary = calculateCartSummary(cart);
     const countEl = document.getElementById('cart-count');
-    if (countEl) countEl.textContent = cart.reduce((s, c) => s + c.qty, 0);
+    if (countEl) countEl.textContent = formatNumberTrim(summary.totalQty) || '0';
     const subEl = document.getElementById('cart-subtotal');
-    if (subEl) subEl.textContent = rp(subtotal);
+    if (subEl) subEl.textContent = rp(summary.subtotal);
+    const discEl = document.getElementById('cart-discount');
+    if (discEl) discEl.textContent = rp(summary.discount);
+    const ppnRowEl = document.getElementById('cart-ppn-row');
     const ppnEl = document.getElementById('cart-ppn');
-    if (ppnEl) ppnEl.textContent = rp(ppnAmount);
+    const ppnLabelEl = document.getElementById('cart-ppn-label');
+    if (ppnRowEl) ppnRowEl.style.display = summary.ppnEnabled ? 'flex' : 'none';
+    if (ppnEl) ppnEl.textContent = rp(summary.ppnAmount);
+    if (ppnLabelEl) ppnLabelEl.textContent = `(${summary.ppnRate}%)`;
     const totalEl = document.getElementById('cart-total');
-    if (totalEl) totalEl.textContent = rp(total);
+    if (totalEl) totalEl.textContent = rp(summary.total);
 }
 
 // POS search
@@ -3091,7 +3378,10 @@ document.addEventListener('change', (e) => {
 
 // Checkout
 document.getElementById('btn-checkout')?.addEventListener('click', async () => {
-    if (cart.length === 0) return;
+    if (cart.length === 0) {
+        showToast('Keranjang masih kosong.', 'warning');
+        return;
+    }
 
     const customerId = document.getElementById('pos-customer-id').value;
     if (!customerId) {
@@ -3112,21 +3402,19 @@ document.getElementById('btn-checkout')?.addEventListener('click', async () => {
     }
 
     // Detect payment behaviour by name (not hardcoded PT-2 ID)
-    const payTypeName = getPaymentTypeName(paymentTypeSelect).toLowerCase();
+    const payTypeNameRaw = getPaymentTypeName(paymentTypeSelect);
+    const payTypeName = payTypeNameRaw.toLowerCase();
     // Kredit/Tempo = deferred payment (paid=0 on creation); Transfer/Tunai = full paid
     const isTempo = payTypeName.includes('tempo') || payTypeName.includes('credit') || payTypeName.includes('kredit');
     // Transfer = full immediate payment (same as Tunai for amount purposes)
     // Tunai = full immediate payment
 
-    const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
-    const ppnAmount = (typeof currentPpnEnabled !== 'undefined' && currentPpnEnabled) ? Math.round(subtotal * (currentPpnRate / 100)) : 0;
-    const total = subtotal + ppnAmount;
+    const summary = calculateCartSummary(cart);
+    const total = summary.total;
 
     // Tempo/credit: if DP entered use it, otherwise 0; Tunai/Transfer = full paid
     const dpAmount = isTempo ? (parseFloat(document.getElementById('cart-dp-amount')?.value) || 0) : 0;
     const paid = isTempo ? dpAmount : total;
-
-    console.log(`[Checkout] payment_type_id=${payment_type_id} | name=${payTypeName} | isTempo=${isTempo} | paid=${paid} | total=${total}`);
 
     // Get order date from input; fallback to today (WITA) if empty
     const orderDateInput = document.getElementById('cart-order-date');
@@ -3142,83 +3430,98 @@ document.getElementById('btn-checkout')?.addEventListener('click', async () => {
         return;
     }
 
+    const customerObj = (typeof CUSTOMERS !== 'undefined' && Array.isArray(CUSTOMERS))
+        ? CUSTOMERS.find(c => String(c.id) === String(customerId))
+        : null;
+    const customerName = customerObj?.name || document.getElementById('pos-customer-search')?.value || customerId;
+
     const payload = {
         customer_id: customerId,
         date: orderDate,
         total: total,
         paid: paid,
         payment_type_id: payment_type_id,
-        due_date: calculateDueDate(getPaymentTypeName(paymentTypeSelect), orderDate),
-        items: cart.map(item => ({
+        due_date: calculateDueDate(payTypeNameRaw, orderDate),
+        items: summary.items.map(({ item, qty, unitPrice }) => ({
             id: item.id,
-            quantity: item.qty,
-            price: item.price,
+            quantity: qty,
+            price: unitPrice,
             customer_fee: item.fee || 0,
             fee_notes: item.feeNotes || ''
         }))
     };
 
-    console.log(`[Checkout Submission] Submitting checkout payload to backend:`, JSON.stringify(payload, null, 2));
-
-    try {
-        const res = await fetch('/api/invoices', {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify(payload)
-        });
-
-        if (res.ok) {
-            const result = await res.json();
-            const successDesc = document.querySelector('#modal-checkout-success p');
-            if (successDesc) successDesc.innerHTML = `Transaksi berhasil.<br>Nomor Invoice: <b>${result.invoiceId}</b>`;
-            
-            const printBtn = document.getElementById('btn-print-new-invoice');
-            if (printBtn) {
-                printBtn.dataset.invoiceId = result.invoiceId;
-            }
-
-            openModal('modal-checkout-success');
-            notifyDataChange('sales');
-
-            cart = [];
-            currentPOSCustomerEffectivePrices = {};
-            document.getElementById('pos-customer-id').value = '';
-            document.getElementById('pos-customer-search').value = '';
-            const clearBtn = document.getElementById('pos-customer-clear');
-            if (clearBtn) clearBtn.style.display = 'none';
-            // Reset Tanggal Order to today
-            const resetDateEl = document.getElementById('cart-order-date');
-            if (resetDateEl) {
-                const todayStr = getTodayWITA();
-                resetDateEl.value = todayStr;
-                resetDateEl.max = getMaxOrderDateWITA();
-            }
-            const posBadge = document.getElementById('pos-customer-pricelist-badge');
-            if (posBadge) posBadge.innerHTML = '';
-            selectedCartPaymentTypeId = 'PT-1';
-            document.getElementById('cart-payment-type').value = 'PT-1';
-
-            renderCart();
-            await fetchProducts();
-            renderPOSProducts();
-            await fetchInvoices();
-            await fetchCashTransactions();
-            await renderDashboard();
-        } else {
-            let errMsg = 'Terjadi kesalahan';
+    showConfirmDialog({
+        title: 'Simpan Invoice?',
+        message: 'Pastikan detail penjualan sudah sesuai sebelum invoice disimpan.',
+        summary: [
+            { label: 'Pelanggan', value: customerName },
+            { label: 'Jumlah Item', value: `${cart.length} produk (${formatNumberTrim(summary.totalQty)} qty)` },
+            { label: 'Pembayaran', value: payTypeNameRaw || '-' },
+            { label: 'Total Nilai', value: rp(total), highlight: true }
+        ],
+        confirmText: 'Ya, Simpan',
+        cancelText: 'Batal',
+        onConfirm: async () => {
             try {
-                const errData = await res.json();
-                if (errData.error) errMsg = errData.error;
-            } catch (e) {
-                if (res.status === 401 || res.status === 403) errMsg = 'Sesi telah habis, silakan login kembali.';
-                else errMsg = `Error ${res.status}: Server gagal merespon.`;
+                const res = await fetch('/api/invoices', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify(payload)
+                });
+
+                if (res.ok) {
+                    const result = await res.json();
+                    closeModal('modal-confirm-dialog');
+                    showTransactionSuccessModal({
+                        title: '✅ Invoice Berhasil Dibuat!',
+                        messageHtml: `Transaksi berhasil.<br>Nomor Invoice: <b>${escapeHtml(result.invoiceId)}</b>`,
+                        subtext: 'Stok produk telah diperbarui secara otomatis.',
+                        invoiceId: result.invoiceId
+                    });
+                    notifyDataChange('sales');
+
+                    cart = [];
+                    currentPOSCustomerEffectivePrices = {};
+                    document.getElementById('pos-customer-id').value = '';
+                    document.getElementById('pos-customer-search').value = '';
+                    const clearBtn = document.getElementById('pos-customer-clear');
+                    if (clearBtn) clearBtn.style.display = 'none';
+                    // Reset Tanggal Order to today
+                    const resetDateEl = document.getElementById('cart-order-date');
+                    if (resetDateEl) {
+                        const todayStr = getTodayWITA();
+                        resetDateEl.value = todayStr;
+                        resetDateEl.max = getMaxOrderDateWITA();
+                    }
+                    const posBadge = document.getElementById('pos-customer-pricelist-badge');
+                    if (posBadge) posBadge.innerHTML = '';
+                    selectedCartPaymentTypeId = 'PT-1';
+                    document.getElementById('cart-payment-type').value = 'PT-1';
+
+                    renderCart();
+                    await fetchProducts();
+                    renderPOSProducts();
+                    await fetchInvoices();
+                    await fetchCashTransactions();
+                    await renderDashboard();
+                } else {
+                    let errMsg = 'Terjadi kesalahan';
+                    try {
+                        const errData = await res.json();
+                        if (errData.error) errMsg = errData.error;
+                    } catch (e) {
+                        if (res.status === 401 || res.status === 403) errMsg = 'Sesi telah habis, silakan login kembali.';
+                        else errMsg = `Error ${res.status}: Server gagal merespon.`;
+                    }
+                    showToast('Gagal membuat invoice: ' + errMsg, 'error');
+                }
+            } catch (err) {
+                console.error(err);
+                showToast('Gagal menghubungi server', 'error');
             }
-            showToast('Gagal membuat invoice: ' + errMsg, 'error');
         }
-    } catch (err) {
-        console.error(err);
-        showToast('Gagal menghubungi server', 'error');
-    }
+    });
 });
 
 // ─── FITUR PROFORMA INVOICE (BAGIAN B) ─────────────────────────────────────────
@@ -3265,17 +3568,18 @@ document.getElementById('btn-create-proforma')?.addEventListener('click', async 
         if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 
+    const proformaSummary = calculateCartSummary(cart);
     const payload = {
         customer_id: customerId,
         order_date: orderDate,
         payment_type_id: payment_type_id,
         discount: 0,
-        items: cart.map(item => ({
+        items: proformaSummary.items.map(({ item, qty, unitPrice }) => ({
             id: item.id,
             product_id: item.id,
             name: item.name,
-            quantity: item.qty,
-            price: item.price,
+            quantity: qty,
+            price: unitPrice,
             customer_fee: item.fee || 0,
             fee_notes: item.feeNotes || ''
         }))
@@ -3321,7 +3625,7 @@ document.getElementById('btn-create-proforma')?.addEventListener('click', async 
             try {
                 const errData = await res.json();
                 if (errData.error) errMsg = errData.error;
-            } catch (_) {}
+            } catch (_) { }
             console.error('[Proforma Create] Server error:', res.status, errMsg);
             showToast(`Gagal membuat proforma: ${errMsg}`, 'error');
         }
@@ -3371,7 +3675,7 @@ async function fetchProformas(page = 1) {
             try {
                 const errData = await res.json();
                 if (errData.error) errMsg = errData.error;
-            } catch (_) {}
+            } catch (_) { }
             console.error('[fetchProformas] Server error:', res.status, errMsg);
             if (res.status === 401 || res.status === 403) {
                 showToast('Sesi telah berakhir, silakan login kembali.', 'error');
@@ -3522,7 +3826,7 @@ async function enterProformaEditMode(pk) {
         const res = await fetch(`/api/proformas/${pk}/print-data`, { headers: getAuthHeaders() });
         if (!res.ok) {
             let errMsg = `Error ${res.status}`;
-            try { const d = await res.json(); if (d.error) errMsg = d.error; } catch(_) {}
+            try { const d = await res.json(); if (d.error) errMsg = d.error; } catch (_) { }
             showToast(`Gagal memuat data proforma: ${errMsg}`, 'error');
             return;
         }
@@ -3576,6 +3880,8 @@ async function enterProformaEditMode(pk) {
             id: item.product_id,
             name: item.product_name_snapshot || 'Produk',
             price: parseFloat(item.price),
+            defaultPrice: parseFloat(item.price),
+            customPrice: null,
             qty: parseFloat(item.quantity),
             unit: item.unit_name_snapshot || '-',
             fee: parseFloat(item.customer_fee || 0),
@@ -3706,16 +4012,17 @@ async function saveProformaEdit(printAfter = false) {
     const payTypeEl = document.getElementById('cart-payment-type');
     const paymentTypeId = payTypeEl ? payTypeEl.value : selectedCartPaymentTypeId;
 
+    const proformaEditSummary = calculateCartSummary(cart);
     const payload = {
         revisi: posEditProformaRevisi,
         order_date: orderDate,
         payment_type_id: paymentTypeId,
         discount: 0,
-        items: cart.map(item => ({
+        items: proformaEditSummary.items.map(({ item, qty, unitPrice }) => ({
             product_id: item.id,
             name: item.name,
-            quantity: item.qty,
-            price: item.price,
+            quantity: qty,
+            price: unitPrice,
             customer_fee: item.fee || 0,
             fee_notes: item.feeNotes || ''
         }))
@@ -3743,7 +4050,7 @@ async function saveProformaEdit(printAfter = false) {
 
         if (!res.ok) {
             let errMsg = `Error ${res.status}`;
-            try { const d = await res.json(); if (d.error) errMsg = d.error; } catch(_) {}
+            try { const d = await res.json(); if (d.error) errMsg = d.error; } catch (_) { }
             showToast(`Gagal menyimpan: ${errMsg}`, 'error');
             saveBtns.forEach(b => { b.disabled = false; });
             return;
@@ -3809,7 +4116,7 @@ async function confirmBuatProformaDariInvoice() {
         });
 
         let result;
-        try { result = await res.json(); } catch(_) { result = {}; }
+        try { result = await res.json(); } catch (_) { result = {}; }
 
         if (!res.ok) {
             showToast(`Gagal membuat proforma: ${result.error || 'Terjadi kesalahan'}`, 'error');
@@ -3885,7 +4192,7 @@ async function openConvertProformaModal(pk) {
                     ALL_PAYMENT_TYPES = await ptRes.json();
                     window.paymentTypes = ALL_PAYMENT_TYPES;
                 }
-            } catch (_) {}
+            } catch (_) { }
         }
 
         if (paymentSelect && Array.isArray(ALL_PAYMENT_TYPES) && ALL_PAYMENT_TYPES.length > 0) {
@@ -3901,7 +4208,7 @@ async function openConvertProformaModal(pk) {
             try {
                 const errData = await res.json();
                 if (errData.error) errMsg = errData.error;
-            } catch (_) {}
+            } catch (_) { }
             throw new Error(errMsg);
         }
         const data = await res.json();
@@ -4028,7 +4335,7 @@ async function submitConvertProforma() {
         let result = {};
         try {
             result = await res.json();
-        } catch (_) {}
+        } catch (_) { }
 
         if (res.ok) {
             closeModal('modal-convert-proforma');
@@ -4515,7 +4822,7 @@ async function init() {
             if (window.location.hash) {
                 try {
                     history.replaceState(null, '', window.location.pathname + (window.location.search ? window.location.search : ''));
-                } catch (_) {}
+                } catch (_) { }
             }
         }
     }
@@ -5071,38 +5378,61 @@ async function openStockOpnameModal(id) {
 
 async function submitStockOpname() {
     if (!stockOpnameProductId) return;
+    const nameEl = document.getElementById('stock-opname-name') || document.querySelector('#modal-stock-opname .form-group:nth-child(1) input');
+    const stockEl = document.getElementById('stock-opname-stock') || document.querySelector('#modal-stock-opname .form-row .form-group:first-child input');
     const actualEl = document.getElementById('stock-opname-actual') || document.querySelector('#modal-stock-opname .form-row .form-group:last-child input');
     const noteEl = document.getElementById('stock-opname-note') || document.querySelector('#modal-stock-opname textarea');
-    const actual = parseFloat(actualEl ? actualEl.value : '');
-    if (isNaN(actual) || actual < 0) {
+    const rawActual = actualEl ? String(actualEl.value).trim() : '';
+    const actual = parseFloat(rawActual);
+    if (rawActual === '' || isNaN(actual) || actual < 0) {
         showToast('Masukkan jumlah stok fisik yang valid!', 'warning');
+        if (actualEl) actualEl.focus();
         return;
     }
     const note = noteEl ? noteEl.value : '';
-    try {
-        const res = await fetch('/api/stock-adjust', {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ product_id: stockOpnameProductId, actual_stock: actual, note })
-        });
-        if (res.ok) {
-            closeModal('modal-stock-opname');
-            showToast('Stok berhasil disesuaikan!', 'success');
-            notifyDataChange('stock_opname');
-            stockOpnameProductId = null;
-            await fetchProducts(paginationState.products.page);
-            PRODUCTS = [];
-            if (typeof renderPOSProducts === 'function' && currentPage === 'pos') {
-                ensureProductsLoadedForPOS().then(() => renderPOSProducts());
+    const productName = nameEl ? nameEl.value : stockOpnameProductId;
+    const sysStock = parseFloat(String(stockEl ? stockEl.value : '0').replace(',', '.')) || 0;
+    const diff = Math.round((actual - sysStock) * 1000) / 1000;
+    const diffStr = diff > 0 ? `+${formatNumberTrim(diff)}` : formatNumberTrim(diff);
+
+    showConfirmDialog({
+        title: 'Simpan Penyesuaian Stok?',
+        message: 'Stok sistem produk ini akan disesuaikan sesuai hasil opname fisik.',
+        summary: [
+            { label: 'Produk', value: productName },
+            { label: 'Jumlah Produk Disesuaikan', value: '1 produk' },
+            { label: 'Stok Sistem → Aktual', value: `${formatNumberTrim(sysStock)} → ${formatNumberTrim(actual)} (${diffStr})`, highlight: true }
+        ],
+        confirmText: 'Ya, Simpan',
+        cancelText: 'Batal',
+        onConfirm: async () => {
+            try {
+                const res = await fetch('/api/stock-adjust', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ product_id: stockOpnameProductId, actual_stock: actual, note })
+                });
+                if (res.ok) {
+                    closeModal('modal-confirm-dialog');
+                    closeModal('modal-stock-opname');
+                    showToast('Stok berhasil disesuaikan!', 'success');
+                    notifyDataChange('stock_opname');
+                    stockOpnameProductId = null;
+                    await fetchProducts(paginationState.products.page);
+                    PRODUCTS = [];
+                    if (typeof renderPOSProducts === 'function' && currentPage === 'pos') {
+                        ensureProductsLoadedForPOS().then(() => renderPOSProducts());
+                    }
+                } else {
+                    const err = await res.json();
+                    showToast('Gagal: ' + (err.error || 'Terjadi kesalahan'), 'error');
+                }
+            } catch (err) {
+                console.error(err);
+                showToast('Gagal menghubungi server', 'error');
             }
-        } else {
-            const err = await res.json();
-            showToast('Gagal: ' + (err.error || 'Terjadi kesalahan'), 'error');
         }
-    } catch (err) {
-        console.error(err);
-        showToast('Gagal menghubungi server', 'error');
-    }
+    });
 }
 
 function deleteProduct(id) {
@@ -5259,8 +5589,8 @@ async function fetchCustomers(page) {
                     <td><span class="badge-status aman">${c.type}</span></td>
                     <td>
                         ${(c.tipePembayaranName || c.tipe_pembayaran_name)
-                            ? `<span class="badge-status" style="background:var(--slate-100);color:var(--slate-700);font-size:0.75rem;">${c.tipePembayaranName || c.tipe_pembayaran_name}</span>`
-                            : `<span style="color:var(--slate-400);font-size:0.75rem;font-style:italic;">Belum diatur (Kredit 30 Hari)</span>`}
+                        ? `<span class="badge-status" style="background:var(--slate-100);color:var(--slate-700);font-size:0.75rem;">${c.tipePembayaranName || c.tipe_pembayaran_name}</span>`
+                        : `<span style="color:var(--slate-400);font-size:0.75rem;font-style:italic;">Belum diatur (Kredit 30 Hari)</span>`}
                     </td>
                     <td>${c.city}</td>
                     <td>${c.phone}</td>
@@ -5843,7 +6173,7 @@ function highlightMatch(text, query) {
     let result = '';
     let startIndex = 0;
     let index = lowerText.indexOf(lowerQ, startIndex);
-    
+
     while (index !== -1) {
         result += escapeHtml(text.substring(startIndex, index));
         result += `<mark class="po-search-highlight">${escapeHtml(text.substring(index, index + query.length))}</mark>`;
@@ -5860,22 +6190,22 @@ function _recalcAddPurchaseTotals() {
     if (!container) return;
     let subtotal = 0;
     addPurchaseItems.forEach((item, index) => {
-        const qty   = parseFloat(item.quantity) || 0;
-        const price = parseFloat(item.price)    || 0;
+        const qty = parseFloat(item.quantity) || 0;
+        const price = parseFloat(item.price) || 0;
         const itemTotal = qty * price;
         subtotal += itemTotal;
         // Update kolom "Total" baris ke-index tanpa rebuild
         const rows = container.querySelectorAll('tr[data-po-index]');
-        const row  = rows[index];
+        const row = rows[index];
         if (row) {
             const totalCell = row.querySelector('[data-po-total]');
             if (totalCell) totalCell.textContent = rp(itemTotal);
         }
     });
     const subtotalEl = document.getElementById('add-purchase-subtotal-display');
-    const totalEl    = document.getElementById('add-purchase-total-display');
+    const totalEl = document.getElementById('add-purchase-total-display');
     if (subtotalEl) subtotalEl.textContent = rp(subtotal);
-    if (totalEl)    totalEl.textContent    = rp(subtotal);
+    if (totalEl) totalEl.textContent = rp(subtotal);
 }
 
 function renderAddPurchaseItems(highlightProductId = null) {
@@ -5972,8 +6302,8 @@ class ProductAutocomplete {
         this.dropdownId = config.dropdownId;
         this.wrapperId = config.wrapperId || null;
         this.modalSelector = config.modalSelector || null;
-        this.getPrice = config.getPrice || function(p) { return parseFloat(p.price || 0); };
-        this.onSelect = config.onSelect || function() {};
+        this.getPrice = config.getPrice || function (p) { return parseFloat(p.price || 0); };
+        this.onSelect = config.onSelect || function () { };
         this.matches = [];
         this.activeIndex = 0;
         this.debounceTimer = null;
@@ -6010,13 +6340,13 @@ class ProductAutocomplete {
         if (left < 8) left = 8;
 
         dd.style.width = width + 'px';
-        dd.style.left  = left + 'px';
+        dd.style.left = left + 'px';
 
         if (openUpward) {
             dd.style.bottom = (window.innerHeight - inputRect.top + GAP) + 'px';
-            dd.style.top    = 'auto';
+            dd.style.top = 'auto';
         } else {
-            dd.style.top    = (inputRect.bottom + GAP) + 'px';
+            dd.style.top = (inputRect.bottom + GAP) + 'px';
             dd.style.bottom = 'auto';
         }
     }
@@ -6036,8 +6366,8 @@ class ProductAutocomplete {
         if (Array.isArray(PRODUCTS) && PRODUCTS.length > 0) {
             const productList = PRODUCTS.filter(p => (p.is_active !== 0 && p.is_active !== false));
             matches = productList.filter(p =>
-                (p.name || '').toLowerCase().includes(q) ||
-                (p.sku || '').toLowerCase().includes(q)
+                String(p.name || '').toLowerCase().includes(q) ||
+                String(p.sku || '').toLowerCase().includes(q)
             );
         } else {
             try {
@@ -6047,22 +6377,40 @@ class ProductAutocomplete {
                 if (res.ok) {
                     const json = await res.json();
                     const rows = Array.isArray(json) ? json : (json.data || []);
-                    matches = rows.map(p => ({
-                        id: p.id,
-                        sku: p.sku,
-                        name: p.name,
-                        price: parseFloat(p.sell_price || 0),
-                        cost: parseFloat(p.cost_price || 0),
-                        stock: parseFloat(p.stock || 0),
-                        unit: p.unit || 'pcs',
-                        is_active: p.is_active !== 0 && p.is_active !== false
-                    }));
+                    matches = rows
+                        .map(p => ({
+                            id: p.id,
+                            sku: p.sku,
+                            name: p.name,
+                            price: parseFloat(p.sell_price || 0),
+                            cost: parseFloat(p.cost_price || 0),
+                            stock: parseFloat(p.stock || 0),
+                            unit: p.unit || 'pcs',
+                            is_active: p.is_active !== 0 && p.is_active !== false
+                        }))
+                        .filter(p =>
+                            String(p.name || '').toLowerCase().includes(q) ||
+                            String(p.sku || '').toLowerCase().includes(q)
+                        );
                 }
             } catch (e) {
                 console.error('Product search error:', e);
                 matches = [];
             }
         }
+
+        // Urutan hasil: exact SKU match (case-insensitive) muncul paling atas
+        const exactSkuMatches = [];
+        const otherMatches = [];
+        for (const p of matches) {
+            const skuNorm = (p.sku !== null && p.sku !== undefined) ? String(p.sku).trim().toLowerCase() : '';
+            if (skuNorm && skuNorm === q) {
+                exactSkuMatches.push(p);
+            } else {
+                otherMatches.push(p);
+            }
+        }
+        matches = exactSkuMatches.concat(otherMatches);
 
         this.matches = matches;
         this.activeIndex = 0;
@@ -6079,6 +6427,10 @@ class ProductAutocomplete {
         const hideAcPrice = !canViewHpp();
         const itemsHtml = displayed.map((p, idx) => {
             const highlightedName = highlightMatch(p.name, q);
+            const rawSku = (p.sku !== null && p.sku !== undefined) ? String(p.sku).trim() : '';
+            const skuHtml = rawSku
+                ? '<div class="po-item-sku" style="font-size:0.75rem; color:var(--gray-500, #6b7280); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:1px;">SKU: ' + highlightMatch(rawSku, q) + '</div>'
+                : '';
             const price = self.getPrice(p);
             const metaText = hideAcPrice
                 ? ('Stok ' + (p.stock != null ? p.stock : 0))
@@ -6086,18 +6438,21 @@ class ProductAutocomplete {
             const selectedClass = idx === self.activeIndex ? 'po-item-selected' : '';
 
             return '<div class="po-dropdown-item ' + selectedClass + '" data-index="' + idx + '" data-product-id="' + escapeHtml(p.id) + '">' +
+                '<div style="min-width:0; flex:1;">' +
                 '<div class="po-item-name" style="font-size:0.85rem; font-weight:500; color:var(--gray-800); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' +
-                    highlightedName +
+                highlightedName +
                 '</div>' +
-                '<div class="po-item-meta" style="font-size:0.78rem; color:var(--gray-500); white-space:nowrap; margin-left:0.5rem;">' +
-                    escapeHtml(metaText) +
+                skuHtml +
                 '</div>' +
-            '</div>';
+                '<div class="po-item-meta" style="font-size:0.78rem; color:var(--gray-500); white-space:nowrap; margin-left:0.5rem; flex-shrink:0;">' +
+                escapeHtml(metaText) +
+                '</div>' +
+                '</div>';
         }).join('');
 
         const countText = matches.length + ' hasil · ↑↓ pilih · Enter tambah';
         dd.innerHTML = '<div class="po-dropdown-list">' + itemsHtml + '</div>' +
-                       '<div class="po-dropdown-footer">' + countText + '</div>';
+            '<div class="po-dropdown-footer">' + countText + '</div>';
 
         dd.querySelectorAll('.po-dropdown-item').forEach(el => {
             el.addEventListener('mousedown', (e) => {
@@ -6212,8 +6567,8 @@ function getPoProductAutocomplete() {
             inputId: 'add-purchase-product-search',
             dropdownId: 'add-purchase-product-dropdown',
             modalSelector: '#modal-add-purchase .modal',
-            getPrice: function(p) { return p.cost || 0; },
-            onSelect: function(p) { addProductToPo(p); }
+            getPrice: function (p) { return p.cost || 0; },
+            onSelect: function (p) { addProductToPo(p); }
         });
     }
     return poProductAutocomplete;
@@ -6319,12 +6674,12 @@ function _recalcEditPurchaseTotals() {
     if (!container) return;
     let subtotal = 0;
     editPurchaseItems.forEach((item, index) => {
-        const qty   = parseFloat(item.quantity) || 0;
+        const qty = parseFloat(item.quantity) || 0;
         const price = parseFloat(item.price ?? item.cost ?? 0);
         const itemTotal = qty * price;
         subtotal += itemTotal;
         const rows = container.querySelectorAll('tr[data-po-index]');
-        const row  = rows[index];
+        const row = rows[index];
         if (row) {
             const totalCell = row.querySelector('[data-po-total]');
             if (totalCell) totalCell.textContent = rp(itemTotal);
@@ -6543,6 +6898,14 @@ async function savePurchase(isEdit, bypassSoftLock = false, correctionReason = n
         return;
     }
     const newDateVal = document.getElementById(`${prefix}-purchase-date`)?.value || '';
+    if (!newDateVal) {
+        showToast('Tanggal PO wajib diisi!', 'warning');
+        return;
+    }
+    if (itemsToSave.some(i => !(parseFloat(i.qty) > 0))) {
+        showToast('Qty setiap item harus lebih besar dari 0!', 'warning');
+        return;
+    }
     const newPaymentTypeVal = document.getElementById(`${prefix}-purchase-payment-type`)?.value || '';
 
     // ── Fase 3: Pratinjau & Konfirmasi sebelum simpan (tanpa pengurangan qty) ──
@@ -6606,7 +6969,9 @@ async function savePurchase(isEdit, bypassSoftLock = false, correctionReason = n
         dueDate = calculateDueDate(getPaymentTypeName(document.getElementById(`${prefix}-purchase-payment-type`)), newDateVal);
     }
 
-    const payTypeName = getPaymentTypeName(document.getElementById(`${prefix}-purchase-payment-type`)).toLowerCase();
+    const payTypeSelectEl = document.getElementById(`${prefix}-purchase-payment-type`);
+    const payTypeNameRaw = getPaymentTypeName(payTypeSelectEl);
+    const payTypeName = payTypeNameRaw.toLowerCase();
     const isKredit = payTypeName.includes('kredit') || payTypeName.includes('credit');
     const paidInput = parseFloat(document.getElementById(`${prefix}-purchase-paid`)?.value || 0);
     const paid = isKredit ? (isEdit ? paidInput : 0) : total;
@@ -6628,50 +6993,100 @@ async function savePurchase(isEdit, bypassSoftLock = false, correctionReason = n
         payload.alasan = alasanHpp;
     }
 
+    const vendorObj = (typeof VENDORS !== 'undefined' && Array.isArray(VENDORS))
+        ? VENDORS.find(v => String(v.id) === String(vendorVal))
+        : null;
+    const vendorSelectEl = document.getElementById(`${prefix}-purchase-vendor`);
+    const vendorName = vendorObj?.name
+        || (!isEdit ? document.getElementById('add-purchase-vendor-input')?.value : vendorSelectEl?.options?.[vendorSelectEl.selectedIndex]?.text)
+        || vendorVal;
+    const totalQty = Math.round(itemsToSave.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0) * 1000) / 1000;
+
+    const summaryRows = isEdit
+        ? [
+            { label: 'No. PO', value: id },
+            { label: 'Vendor', value: vendorName },
+            { label: 'Jumlah Item', value: `${itemsToSave.length} produk (${formatNumberTrim(totalQty)} qty)` },
+            { label: 'Total Nilai', value: rp(total), highlight: true }
+        ]
+        : [
+            { label: 'Vendor', value: vendorName },
+            { label: 'Jumlah Item', value: `${itemsToSave.length} produk (${formatNumberTrim(totalQty)} qty)` },
+            { label: 'Pembayaran', value: payTypeNameRaw || '-' },
+            { label: 'Total Nilai', value: rp(total), highlight: true }
+        ];
+
     const url = isEdit ? `/api/purchases/${encodeURIComponent(id)}` : '/api/purchases';
     const method = isEdit ? 'PUT' : 'POST';
 
-    try {
-        const res = await fetch(url, {
-            method,
-            headers: getAuthHeaders(),
-            body: JSON.stringify(payload)
-        });
-        if (res.ok) {
-            const resData = await res.json().catch(() => ({}));
-            closeModal(`modal-${isEdit ? 'edit' : 'add'}-purchase`);
-            showToast(isEdit ? 'Purchase Order berhasil diperbarui!' : 'Purchase Order berhasil dibuat!', 'success');
-            if (resData.overpayWarning) {
-                showToast(`Peringatan kelebihan bayar (${rp(resData.overpayAmount || 0)}): total baru lebih kecil dari yang sudah dibayar. Tidak ada refund otomatis.`, 'warning');
-            }
-            notifyDataChange('purchase');
-            await fetchPurchases();
-            await fetchProducts();
-            renderHutang();
-            if (typeof fetchDashboardSummary === 'function') await fetchDashboardSummary();
-            if (typeof fetchCashTransactions === 'function') await fetchCashTransactions();
-            if (currentPage === 'profitloss' && typeof renderProfitLoss === 'function') await renderProfitLoss();
-            if (currentPage === 'balance' && typeof renderBalance === 'function') await renderBalance();
-            if (currentPage === 'sales-report' && typeof fetchSalesReport === 'function') await fetchSalesReport(1);
-            if (currentPage === 'hpp-log' && typeof loadHppLogPage === 'function') await loadHppLogPage(1);
-        } else {
-            let errMsg = 'Gagal menyimpan PO';
+    showConfirmDialog({
+        title: isEdit ? 'Simpan Perubahan PO?' : 'Simpan Purchase Order?',
+        message: isEdit
+            ? 'Perubahan pada Purchase Order ini akan memperbarui data pembelian dan stok.'
+            : 'Pastikan data vendor, item, dan harga beli sudah sesuai sebelum PO disimpan.',
+        summary: summaryRows,
+        confirmText: isEdit ? 'Ya, Simpan Perubahan' : 'Ya, Simpan',
+        cancelText: 'Batal',
+        onConfirm: async () => {
             try {
-                const errData = await res.json();
-                if (errData.error) errMsg = errData.error;
-            } catch (e) {
-                if (res.status === 401 || res.status === 403) errMsg = 'Sesi telah habis, silakan login kembali.';
-                else errMsg = `Error ${res.status}: Terjadi kesalahan di server.`;
-            }
-            showToast('Error: ' + errMsg, 'error');
-            if (res.status === 401 || res.status === 403) {
-                setTimeout(() => window.location.reload(), 1500);
+                const res = await fetch(url, {
+                    method,
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify(payload)
+                });
+                if (res.ok) {
+                    const resData = await res.json().catch(() => ({}));
+                    const poNumber = isEdit ? id : (resData.id || resData.poId || '');
+                    const successMsg = isEdit
+                        ? (poNumber ? `PO ${poNumber} berhasil diperbarui` : 'Purchase Order berhasil diperbarui')
+                        : (poNumber ? `PO ${poNumber} berhasil disimpan` : 'Purchase Order berhasil disimpan');
+
+                    closeModal('modal-confirm-dialog');
+                    closeModal(`modal-${isEdit ? 'edit' : 'add'}-purchase`);
+                    showToast(successMsg, 'success');
+                    if (!isEdit) {
+                        showTransactionSuccessModal({
+                            title: '✅ Purchase Order Berhasil Disimpan!',
+                            messageHtml: poNumber
+                                ? `PO <b>${escapeHtml(poNumber)}</b> berhasil disimpan.`
+                                : 'Purchase Order berhasil disimpan.',
+                            subtext: 'Stok produk dan data pembelian telah diperbarui secara otomatis.',
+                            invoiceId: null
+                        });
+                    }
+                    if (resData.overpayWarning) {
+                        showToast(`Peringatan kelebihan bayar (${rp(resData.overpayAmount || 0)}): total baru lebih kecil dari yang sudah dibayar. Tidak ada refund otomatis.`, 'warning');
+                    }
+                    notifyDataChange('purchase');
+                    await fetchPurchases();
+                    await fetchProducts();
+                    renderHutang();
+                    if (typeof fetchDashboardSummary === 'function') await fetchDashboardSummary();
+                    if (typeof fetchCashTransactions === 'function') await fetchCashTransactions();
+                    if (currentPage === 'profitloss' && typeof renderProfitLoss === 'function') await renderProfitLoss();
+                    if (currentPage === 'balance' && typeof renderBalance === 'function') await renderBalance();
+                    if (currentPage === 'sales-report' && typeof fetchSalesReport === 'function') await fetchSalesReport(1);
+                    if (currentPage === 'hpp-log' && typeof loadHppLogPage === 'function') await loadHppLogPage(1);
+                } else {
+                    let errMsg = 'Gagal menyimpan PO';
+                    try {
+                        const errData = await res.json();
+                        if (errData.error) errMsg = errData.error;
+                    } catch (e) {
+                        if (res.status === 401 || res.status === 403) errMsg = 'Sesi telah habis, silakan login kembali.';
+                        else errMsg = `Error ${res.status}: Terjadi kesalahan di server.`;
+                    }
+                    showToast('Error: ' + errMsg, 'error');
+                    if (res.status === 401 || res.status === 403) {
+                        setTimeout(() => window.location.reload(), 1500);
+                    }
+                }
+            } catch (err) {
+                console.error(err);
+                showToast('Gagal menghubungi server', 'error');
             }
         }
-    } catch (err) {
-        console.error(err);
-        showToast('Gagal menghubungi server', 'error');
-    }
+    });
 }
 
 // ── Modal Pratinjau HPP sebelum simpan perubahan harga PO (Fase 3 & Fase 5) ──
@@ -6868,7 +7283,7 @@ async function fetchInvoices(page) {
                     if (pf.invoice_id) INVOICE_PROFORMA_MAP[pf.invoice_id] = pf.pk;
                 });
             }
-        } catch(_) { /* silent — map hanya untuk UI hint */ }
+        } catch (_) { /* silent — map hanya untuk UI hint */ }
 
         // Paginated fetch for invoices table
         if (page !== undefined) paginationState.invoices.page = page;
@@ -6935,10 +7350,10 @@ async function fetchInvoices(page) {
                             <i data-lucide="edit-2" style="width: 14px; height: 14px; margin: 0;"></i>
                         </button>` : ''}
                         ${statusLower !== 'batal' && statusLower !== 'cancel' ? (
-                            INVOICE_PROFORMA_MAP[inv.id]
+                        INVOICE_PROFORMA_MAP[inv.id]
                             ? `<button class="btn-toolbar secondary" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-right:0.25rem; color:var(--blue-700); border-color:var(--blue-300);" title="Cetak Proforma" onclick="printProformaDariInvoice(${INVOICE_PROFORMA_MAP[inv.id]})"><i data-lucide="file-text" style="width:13px;height:13px;margin:0;"></i></button>`
                             : `<button class="btn-toolbar secondary" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-right:0.25rem;" title="Buat Proforma" onclick="openBuatProformaDariInvoice('${inv.id}')"><i data-lucide="file-plus" style="width:13px;height:13px;margin:0;"></i></button>`
-                        ) : ''}
+                    ) : ''}
                         ${statusLower !== 'lunas' && statusLower !== 'batal' && statusLower !== 'cancel' ? `<button class="btn-toolbar primary" style="padding:0.25rem 0.5rem; font-size:0.75rem;" onclick="openPiutangPaymentModal('${inv.id}', ${sisa})">Bayar</button>` : ''}
                     </td>
                 </tr>`;
@@ -6991,16 +7406,16 @@ async function fetchPiutang(page) {
         if (summEl) {
             summEl.innerHTML =
                 '<div class="finance-summary-card highlight">' +
-                    '<div class="fs-value">' + rp(parseFloat(summary.total_piutang || 0)) + '</div>' +
-                    '<div class="fs-label">Total Piutang</div>' +
+                '<div class="fs-value">' + rp(parseFloat(summary.total_piutang || 0)) + '</div>' +
+                '<div class="fs-label">Total Piutang</div>' +
                 '</div>' +
                 '<div class="finance-summary-card">' +
-                    '<div class="fs-value" style="color:var(--rose-500);">' + rp(parseFloat(summary.belum_bayar || 0)) + '</div>' +
-                    '<div class="fs-label">Belum Dibayar</div>' +
+                '<div class="fs-value" style="color:var(--rose-500);">' + rp(parseFloat(summary.belum_bayar || 0)) + '</div>' +
+                '<div class="fs-label">Belum Dibayar</div>' +
                 '</div>' +
                 '<div class="finance-summary-card">' +
-                    '<div class="fs-value" style="color:var(--amber-500);">' + rp(parseFloat(summary.sebagian || 0)) + '</div>' +
-                    '<div class="fs-label">Dibayar Sebagian</div>' +
+                '<div class="fs-value" style="color:var(--amber-500);">' + rp(parseFloat(summary.sebagian || 0)) + '</div>' +
+                '<div class="fs-label">Dibayar Sebagian</div>' +
                 '</div>';
         }
 
@@ -7088,6 +7503,56 @@ let editInvoicePoCurrentMatches = [];
 let editInvoicePoSearchActiveIndex = 0;
 let editInvoicePoSearchDebounce = null;
 
+function getEditInvoiceItemDefaultPrice(item) {
+    if (!item) return 0;
+    const prod = (Array.isArray(PRODUCTS) ? PRODUCTS : []).find(p => String(p.id) === String(item.product_id));
+    if (editInvoiceCurrentCustomerId && typeof currentPOSCustomerEffectivePrices !== 'undefined' && currentPOSCustomerEffectivePrices) {
+        const eff = currentPOSCustomerEffectivePrices[item.product_id];
+        if (eff && eff.harga_efektif !== undefined && eff.harga_efektif !== null) {
+            return parseFloat(eff.harga_efektif) || 0;
+        }
+    }
+    if (prod && prod.price !== undefined && prod.price !== null) {
+        return parseFloat(prod.price) || 0;
+    }
+    return parseFloat(item.defaultPrice ?? item.sell_price ?? item.price ?? 0) || 0;
+}
+
+function getEditInvoiceItemEffectivePrice(item) {
+    if (!item) return 0;
+    if (item.customPrice !== null && item.customPrice !== undefined && item.customPrice !== '') {
+        const parsed = parseFloat(item.customPrice);
+        if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+    }
+    if (item.price !== null && item.price !== undefined && item.price !== '') {
+        const parsed = parseFloat(item.price);
+        if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+    }
+    return getEditInvoiceItemDefaultPrice(item);
+}
+
+function calculateEditInvoiceSummary(items = editInvoiceItems, discountInput = 0) {
+    return calculateSalesSummary(items, discountInput, getEditInvoiceItemEffectivePrice);
+}
+
+function updateEditInvoiceTotalsUI() {
+    const summary = calculateEditInvoiceSummary(editInvoiceItems, 0);
+    const ppnRowEl = document.getElementById('edit-invoice-ppn-row');
+    if (ppnRowEl) ppnRowEl.style.display = summary.ppnEnabled ? '' : 'none';
+    const ppnLabelEl = document.getElementById('edit-invoice-ppn-label');
+    if (ppnLabelEl) ppnLabelEl.textContent = `(${summary.ppnRate}%)`;
+
+    const subEl = document.getElementById('edit-invoice-subtotal');
+    if (subEl) subEl.textContent = rp(summary.subtotal);
+    const discEl = document.getElementById('edit-invoice-discount');
+    if (discEl) discEl.textContent = rp(summary.discount);
+    const ppnEl = document.getElementById('edit-invoice-ppn');
+    if (ppnEl) ppnEl.textContent = rp(summary.ppnAmount);
+    const totalEl = document.getElementById('edit-invoice-total');
+    if (totalEl) totalEl.textContent = rp(summary.total);
+    return summary;
+}
+
 function renderEditInvoiceItems() {
     const container = document.getElementById('edit-invoice-items-container');
     if (!container) return;
@@ -7098,28 +7563,36 @@ function renderEditInvoiceItems() {
     }
 
     container.innerHTML = '';
-    let subtotal = 0;
 
     editInvoiceItems.forEach((item, index) => {
         const product = PRODUCTS.find(p => p.id === item.product_id) || { name: item.product_name || item.product_id, unit: 'pcs' };
-        const itemTotal = (parseFloat(item.quantity) || 0) * (parseFloat(item.price) || 0);
-        subtotal += itemTotal;
+        const effPrice = getEditInvoiceItemEffectivePrice(item);
+        const itemTotal = (parseFloat(item.quantity) || 0) * effPrice;
 
         const tr = document.createElement('tr');
+        tr.dataset.editInvIndex = index;
         tr.innerHTML = `
             <td style="padding: 0.5rem;">
                 <div style="font-weight: 500; color: var(--gray-900);">${product.name}</div>
             </td>
             <td style="padding: 0.5rem; text-align: center;">
-                <input type="number" min="1" value="${formatNumTrim(item.quantity)}" onchange="updateEditInvoiceItemQty(${index}, this.value)" step="any" style="width: 80px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: center;">
+                <input type="text" inputmode="decimal" value="${formatNumTrim(item.quantity)}"
+                    oninput="updateEditInvoiceItemQtyInput(${index}, this.value, this)"
+                    onblur="updateEditInvoiceItemQty(${index}, this.value, this)"
+                    onkeydown="if(event.key==='Enter'){this.blur();}"
+                    style="width: 80px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: center;">
             </td>
             <td style="padding: 0.5rem; text-align: right;">
                 <div style="display:flex; align-items:center; justify-content:flex-end; gap:0.25rem;">
                     <span style="font-size:0.75rem; color:var(--gray-500);">Rp</span>
-                    <input type="number" value="${formatNumTrim(item.price)}" onchange="updateEditInvoiceItemPrice(${index}, this.value)" step="any" style="width: 90px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: right;">
+                    <input type="text" inputmode="decimal" value="${formatNumTrim(effPrice)}"
+                        oninput="updateEditInvoiceItemPrice(${index}, this.value, this)"
+                        onchange="commitEditInvoiceItemPrice(${index}, this.value, this)"
+                        onkeydown="if(event.key==='Enter'){this.blur();}"
+                        style="width: 90px; padding: 0.25rem; border: 1px solid var(--gray-200); border-radius: 0.25rem; text-align: right;">
                 </div>
             </td>
-            <td style="padding: 0.5rem; text-align: right; font-weight: 600; color: var(--gray-900);">
+            <td style="padding: 0.5rem; text-align: right; font-weight: 600; color: var(--gray-900);" data-edit-inv-total>
                 ${rp(itemTotal)}
             </td>
             ${isAdmin ? `
@@ -7147,20 +7620,7 @@ function renderEditInvoiceItems() {
         container.innerHTML = `<tr><td colspan="${colspan}" style="text-align: center; padding: 1rem; color: var(--gray-500);">Belum ada item.</td></tr>`;
     }
 
-    const ppnActive = (typeof currentPpnEnabled !== 'undefined') ? currentPpnEnabled : false;
-    const ppnRateEff = (typeof currentPpnRate !== 'undefined') ? currentPpnRate : 11;
-    const ppn = ppnActive ? Math.round(subtotal * (ppnRateEff / 100)) : 0;
-    const grandTotal = subtotal + ppn;
-
-    // Show/hide PPN row in edit invoice modal based on settings
-    const ppnRowEl = document.getElementById('edit-invoice-ppn-row');
-    if (ppnRowEl) ppnRowEl.style.display = ppnActive ? '' : 'none';
-    const ppnLabelEl = document.getElementById('edit-invoice-ppn-label');
-    if (ppnLabelEl) ppnLabelEl.textContent = `(${ppnRateEff}%)`;
-
-    document.getElementById('edit-invoice-subtotal').textContent = rp(subtotal);
-    document.getElementById('edit-invoice-ppn').textContent = rp(ppn);
-    document.getElementById('edit-invoice-total').textContent = rp(grandTotal);
+    updateEditInvoiceTotalsUI();
 
     if (typeof lucide !== 'undefined') lucide.createIcons();
 }
@@ -7174,8 +7634,8 @@ function getEditInvoiceProductAutocomplete() {
             dropdownId: 'edit-invoice-product-dropdown',
             wrapperId: 'edit-invoice-search-wrapper',
             modalSelector: '#modal-edit-invoice .modal',
-            getPrice: function(p) { return getEditInvoiceProductPrice(p); },
-            onSelect: function(p) { addEditInvoiceItemFromSearch(p); }
+            getPrice: function (p) { return getEditInvoiceProductPrice(p); },
+            onSelect: function (p) { addEditInvoiceItemFromSearch(p); }
         });
     }
     return editInvoiceProductAutocomplete;
@@ -7207,15 +7667,18 @@ function getEditInvoiceProductPrice(prod) {
 
 function addEditInvoiceItemFromSearch(prod) {
     if (!prod) return;
-    var existing = editInvoiceItems.find(function(i) { return String(i.product_id) === String(prod.id); });
+    var existing = editInvoiceItems.find(function (i) { return String(i.product_id) === String(prod.id); });
     if (existing) {
         existing.quantity = (parseFloat(existing.quantity) || 0) + 1;
     } else {
+        const defPrice = getEditInvoiceProductPrice(prod);
         editInvoiceItems.push({
             product_id: prod.id,
             product_name: prod.name,
             quantity: 1,
-            price: getEditInvoiceProductPrice(prod)
+            price: defPrice,
+            defaultPrice: defPrice,
+            customPrice: null
         });
     }
     renderEditInvoiceItems();
@@ -7225,29 +7688,82 @@ function addEditInvoiceItemFromSearch(prod) {
 }
 
 // Legacy stub
-window.addEditInvoiceItem = function() {};
+window.addEditInvoiceItem = function () { };
 
 window.removeEditInvoiceItem = (index) => {
     editInvoiceItems.splice(index, 1);
     renderEditInvoiceItems();
 };
 
-window.updateEditInvoiceItemQty = (index, val) => {
-    const qty = parseFloat(val);
-    if (qty > 0) {
-        editInvoiceItems[index].quantity = qty;
-    } else {
-        editInvoiceItems[index].quantity = 1;
+function _updateEditInvoiceRowVisual(index) {
+    const item = editInvoiceItems[index];
+    if (!item) return;
+    const row = document.querySelector(`#edit-invoice-items-container tr[data-edit-inv-index="${index}"]`);
+    if (row) {
+        const totalCell = row.querySelector('[data-edit-inv-total]');
+        if (totalCell) {
+            totalCell.textContent = rp((parseFloat(item.quantity) || 0) * getEditInvoiceItemEffectivePrice(item));
+        }
     }
-    renderEditInvoiceItems();
+    updateEditInvoiceTotalsUI();
+}
+
+window.updateEditInvoiceItemQtyInput = (index, rawVal, inputEl) => {
+    const item = editInvoiceItems[index];
+    if (!item) return;
+    const sanitized = sanitizeDecimalInput(rawVal);
+    if (inputEl && sanitized !== rawVal) {
+        inputEl.value = sanitized;
+    }
+    if (sanitized === '' || sanitized === '.') return;
+    const qty = parseFloat(sanitized);
+    if (qty > 0) {
+        item.quantity = Math.round(qty * 1000) / 1000;
+        _updateEditInvoiceRowVisual(index);
+    }
 };
 
-window.updateEditInvoiceItemPrice = (index, val) => {
-    const price = parseFloat(val);
-    if (price >= 0) {
-        editInvoiceItems[index].price = price;
+window.updateEditInvoiceItemQty = (index, val, inputEl) => {
+    const item = editInvoiceItems[index];
+    if (!item) return;
+    const qty = parseFloat(sanitizeDecimalInput(val));
+    if (qty > 0) {
+        item.quantity = Math.round(qty * 1000) / 1000;
+    } else {
+        item.quantity = 1;
     }
-    renderEditInvoiceItems();
+    if (inputEl) inputEl.value = formatNumTrim(item.quantity);
+    _updateEditInvoiceRowVisual(index);
+};
+
+window.updateEditInvoiceItemPrice = (index, val, inputEl) => {
+    const item = editInvoiceItems[index];
+    if (!item) return;
+    const sanitized = sanitizeDecimalInput(val);
+    if (inputEl && sanitized !== val) {
+        inputEl.value = sanitized;
+    }
+    if (sanitized.trim() === '') {
+        item.customPrice = null;
+        item.price = getEditInvoiceItemDefaultPrice(item);
+    } else if (sanitized !== '.') {
+        const price = parseFloat(sanitized);
+        if (Number.isFinite(price) && price >= 0) {
+            item.customPrice = price;
+            item.price = price;
+        }
+    }
+    _updateEditInvoiceRowVisual(index);
+};
+
+window.commitEditInvoiceItemPrice = (index, val, inputEl) => {
+    const item = editInvoiceItems[index];
+    if (!item) return;
+    window.updateEditInvoiceItemPrice(index, val, inputEl);
+    const effPrice = getEditInvoiceItemEffectivePrice(item);
+    item.price = effPrice;
+    if (inputEl) inputEl.value = formatNumTrim(effPrice);
+    _updateEditInvoiceRowVisual(index);
 };
 
 window.updateEditInvoiceItemFee = (index, val) => {
@@ -7303,7 +7819,7 @@ async function openEditInvoiceModal(id) {
                     const pts = await r.json();
                     ptEl.innerHTML = pts.map(pt => `<option value="${pt.id}">${pt.name}</option>`).join('');
                 }
-            } catch (_) {}
+            } catch (_) { }
         }
         // Set nilai awal = tipe pembayaran saat ini
         ptEl.value = inv.paymentTypeId || 'PT-1';
@@ -7324,9 +7840,9 @@ async function openEditInvoiceModal(id) {
                 var effData = await effRes.json();
                 var effRows = Array.isArray(effData) ? effData : (Array.isArray(effData.prices) ? effData.prices : []);
                 currentPOSCustomerEffectivePrices = {};
-                effRows.forEach(function(row) { currentPOSCustomerEffectivePrices[row.product_id] = row; });
+                effRows.forEach(function (row) { currentPOSCustomerEffectivePrices[row.product_id] = row; });
             }
-        } catch(_) {}
+        } catch (_) { }
     }
 
     // Reset search input (allow re-init)
@@ -7388,6 +7904,19 @@ async function saveInvoiceEdits(bypassSoftLock = false, correctionReason = null)
     }
 
     const date = document.getElementById('edit-invoice-date').value;
+    if (!date) {
+        showToast('Tanggal invoice wajib diisi!', 'warning');
+        return;
+    }
+    if (!Array.isArray(editInvoiceItems) || editInvoiceItems.length === 0) {
+        showToast('Tambahkan minimal satu item produk!', 'warning');
+        return;
+    }
+    if (editInvoiceItems.some(i => !(parseFloat(i.quantity || i.qty || 0) > 0))) {
+        showToast('Qty setiap item harus lebih besar dari 0!', 'warning');
+        return;
+    }
+
     const statusVal = document.getElementById('edit-invoice-status').value;  // 'lunas' | 'belum' | 'sebagian'
 
     // Ambil tipe pembayaran dari dropdown baru
@@ -7397,9 +7926,8 @@ async function saveInvoiceEdits(bypassSoftLock = false, correctionReason = null)
     const inv = INVOICES.find(x => x.id === id);
     const customer_id = inv ? inv.customerId : null;
 
-    const subtotal = editInvoiceItems.reduce((s, i) => s + (parseFloat(i.price || i.sell_price || 0) * parseFloat(i.quantity || i.qty || 0)), 0);
-    const ppnRate = (typeof currentPpnEnabled !== 'undefined' && !currentPpnEnabled) ? 0 : ((typeof currentPpnRate !== 'undefined' ? currentPpnRate : 11) / 100);
-    const newTotal = subtotal + Math.round(subtotal * ppnRate);
+    const editSummary = calculateEditInvoiceSummary(editInvoiceItems, 0);
+    const newTotal = editSummary.total;
 
     const paidAmount = inv ? parseFloat(inv.paid || 0) : 0;
 
@@ -7419,15 +7947,18 @@ async function saveInvoiceEdits(bypassSoftLock = false, correctionReason = null)
         date,
         requested_status: statusVal,   // ← dikirim ke backend untuk sinkronisasi
         customer_id,
+        customer_name: inv?.customer || document.getElementById('edit-invoice-customer-display')?.value || '-',
+        item_count: editInvoiceItems.length,
+        total_qty: editSummary.totalQty,
         total: newTotal,
         paid_amount: paidAmount,
         payment_type_id: paymentTypeId || (inv ? inv.paymentTypeId : 'PT-1'),
         due_date: newDueDate || undefined,
-        items: editInvoiceItems,
+        items: editInvoiceItems.map(i => ({ ...i, price: getEditInvoiceItemEffectivePrice(i) })),
         correction_reason: correctionReason || undefined
     };
 
-    // Jika invoice sudah ada cicilan aktif, tampilkan soft-lock modal peringatan
+    // Jika invoice sudah ada cicilan aktif, tampilkan soft-lock modal peringatan terlebih dahulu
     if (paidAmount > 0) {
         const statsEl = document.getElementById('confirm-edit-invoice-stats');
         if (statsEl) {
@@ -7454,13 +7985,39 @@ async function saveInvoiceEdits(bypassSoftLock = false, correctionReason = null)
         }
         openModal('modal-confirm-edit-invoice');
     } else {
-        await executeSaveInvoiceEdits();
+        openConfirmEditInvoiceFinalDialog();
     }
+}
+
+function confirmActivePaymentEditInvoice() {
+    closeModal('modal-confirm-edit-invoice');
+    openConfirmEditInvoiceFinalDialog();
+}
+window.confirmActivePaymentEditInvoice = confirmActivePaymentEditInvoice;
+
+function openConfirmEditInvoiceFinalDialog() {
+    if (!pendingSaveInvoicePayload) return;
+    const p = pendingSaveInvoicePayload;
+    showConfirmDialog({
+        title: 'Simpan Perubahan Invoice?',
+        message: 'Perubahan pada invoice ini akan memperbarui tagihan dan stok produk.',
+        summary: [
+            { label: 'No. Invoice', value: p.id },
+            { label: 'Pelanggan', value: p.customer_name || '-' },
+            { label: 'Jumlah Item', value: `${p.item_count} produk (${formatNumberTrim(p.total_qty)} qty)` },
+            { label: 'Total Nilai', value: rp(p.total), highlight: true }
+        ],
+        confirmText: 'Ya, Simpan Perubahan',
+        cancelText: 'Batal',
+        onConfirm: async () => {
+            await executeSaveInvoiceEdits();
+        }
+    });
 }
 
 async function executeSaveInvoiceEdits() {
     if (!pendingSaveInvoicePayload) return;
-    const { id, ...bodyData } = pendingSaveInvoicePayload;
+    const { id, customer_name, item_count, total_qty, ...bodyData } = pendingSaveInvoicePayload;
     closeModal('modal-confirm-edit-invoice');
 
     try {
@@ -7470,6 +8027,8 @@ async function executeSaveInvoiceEdits() {
             body: JSON.stringify(bodyData)
         });
         if (res.ok) {
+            pendingSaveInvoicePayload = null;
+            closeModal('modal-confirm-dialog');
             closeModal('modal-edit-invoice');
             showToast('Invoice berhasil diperbarui!', 'success');
             notifyDataChange('invoice_edit');
@@ -7493,8 +8052,6 @@ async function executeSaveInvoiceEdits() {
     } catch (err) {
         console.error(err);
         showToast('Gagal menghubungi server', 'error');
-    } finally {
-        pendingSaveInvoicePayload = null;
     }
 }
 
@@ -8909,10 +9466,10 @@ async function loadInvoicePreferences() {
             const settings = await resSet.json();
             currentPpnEnabled = settings.ppn_enabled === 'true' || settings.ppn_enabled === '1' || settings.ppn_enabled === true;
             currentPpnRate = parseFloat(settings.pajak_default || 11);
-            
+
             const ppnCheck = document.getElementById('settings-ppn-enabled');
             if (ppnCheck) ppnCheck.checked = currentPpnEnabled;
-            
+
             const ppnInput = document.getElementById('settings-ppn');
             if (ppnInput) {
                 ppnInput.value = currentPpnRate;
@@ -8927,8 +9484,8 @@ async function loadInvoicePreferences() {
                 transactionCount = parseInt(countData.count || 0, 10);
                 console.log('Loaded transaction count for PPN toggle:', transactionCount);
             }
-        } catch (_) {}
-        
+        } catch (_) { }
+
         // Update the cart view in POS to reflect initial PPN settings
         if (typeof renderCart === 'function') {
             renderCart();
@@ -8968,7 +9525,7 @@ async function loadLandingDemoSetting() {
     }
 }
 
-window.saveLandingDemoSetting = async function(value) {
+window.saveLandingDemoSetting = async function (value) {
     syncLandingToggleUI(value);
     try {
         const res = await fetch('/api/pengaturan/landing-demo', {
@@ -9026,7 +9583,7 @@ async function saveInvoicePreferences() {
     }
 }
 
-window.handlePpnToggle = function(el) {
+window.handlePpnToggle = function (el) {
     const isChecked = el.checked;
     console.log('PPN toggle changed to:', isChecked, 'transactionCount:', transactionCount);
     if (transactionCount > 0) {
@@ -9038,7 +9595,7 @@ window.handlePpnToggle = function(el) {
     }
 };
 
-window.confirmPpnToggle = function() {
+window.confirmPpnToggle = function () {
     const ppnCheck = document.getElementById('settings-ppn-enabled');
     const ppnInput = document.getElementById('settings-ppn');
     if (ppnCheck) ppnCheck.checked = pendingPpnToggleState;
@@ -9046,7 +9603,7 @@ window.confirmPpnToggle = function() {
     closeModal('modal-confirm-ppn');
 };
 
-window.cancelPpnToggle = function() {
+window.cancelPpnToggle = function () {
     closeModal('modal-confirm-ppn');
 };
 
@@ -9123,39 +9680,58 @@ async function saveManualInvoice() {
     };
 
     if (!payload.id || !payload.customer_id || !payload.total) {
-        alert('Mohon isi No Invoice, Customer, dan Total Transaksi.');
+        showToast('Mohon isi No Invoice, Customer, dan Total Transaksi.', 'warning');
         return;
     }
 
-    try {
-        const res = await fetch('/api/invoices/manual', {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify(payload)
-        });
+    const custName = document.getElementById('manual-invoice-customer-search')?.value || payload.customer_id;
+    const ptEl = document.getElementById('manual-invoice-payment-type');
+    const ptName = ptEl && ptEl.selectedIndex >= 0 ? ptEl.options[ptEl.selectedIndex].text : '-';
 
-        if (res.ok) {
-            closeModal('modal-manual-invoice');
-            showToast('Invoice outstanding berhasil dicatat', 'success');
-            document.getElementById('manual-invoice-id').value = '';
-            document.getElementById('manual-invoice-total').value = '';
-            document.getElementById('manual-invoice-customer').value = '';
-            document.getElementById('manual-invoice-customer-search').value = '';
-            const dropdown = document.getElementById('manual-invoice-customer-dropdown');
-            if (dropdown) {
-                dropdown.style.display = 'none';
-                dropdown.innerHTML = '';
+    showConfirmDialog({
+        title: 'Simpan Invoice Outstanding?',
+        message: 'Data invoice outstanding ini akan dicatat ke daftar piutang pelanggan.',
+        summary: [
+            { label: 'No. Invoice', value: payload.id },
+            { label: 'Pelanggan', value: custName },
+            { label: 'Pembayaran', value: ptName },
+            { label: 'Total Nilai', value: rp(payload.total), highlight: true }
+        ],
+        confirmText: 'Ya, Simpan',
+        cancelText: 'Batal',
+        onConfirm: async () => {
+            try {
+                const res = await fetch('/api/invoices/manual', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify(payload)
+                });
+
+                if (res.ok) {
+                    closeModal('modal-confirm-dialog');
+                    closeModal('modal-manual-invoice');
+                    showToast('Invoice outstanding berhasil dicatat', 'success');
+                    document.getElementById('manual-invoice-id').value = '';
+                    document.getElementById('manual-invoice-total').value = '';
+                    document.getElementById('manual-invoice-customer').value = '';
+                    document.getElementById('manual-invoice-customer-search').value = '';
+                    const dropdown = document.getElementById('manual-invoice-customer-dropdown');
+                    if (dropdown) {
+                        dropdown.style.display = 'none';
+                        dropdown.innerHTML = '';
+                    }
+                    await fetchInvoices();
+                    if (typeof fetchPiutang === 'function') await fetchPiutang();
+                } else {
+                    const err = await res.json();
+                    showToast('Gagal: ' + (err.error || 'Terjadi kesalahan'), 'error');
+                }
+            } catch (err) {
+                console.error(err);
+                showToast('Terjadi kesalahan jaringan.', 'error');
             }
-            await fetchInvoices();
-            if (typeof fetchPiutang === 'function') await fetchPiutang();
-        } else {
-            const err = await res.json();
-            alert('Gagal: ' + err.error);
         }
-    } catch (err) {
-        console.error(err);
-        alert('Terjadi kesalahan jaringan.');
-    }
+    });
 }
 window.saveManualInvoice = saveManualInvoice;
 
@@ -10428,32 +11004,32 @@ async function exportSection(section) {
             headers.push("Stok", "Stok Minimum", "Satuan");
 
             rows = PRODUCTS.map(p => {
-                const row = [p.sku||'', p.name||'', p.brand||'', p.category||''];
-                if (canSeeHpp) row.push(p.cost||0);
-                if (canSeeSellPrice) row.push(p.price||0);
-                row.push(p.stock||0, p.minStock||0, p.unit||'');
+                const row = [p.sku || '', p.name || '', p.brand || '', p.category || ''];
+                if (canSeeHpp) row.push(p.cost || 0);
+                if (canSeeSellPrice) row.push(p.price || 0);
+                row.push(p.stock || 0, p.minStock || 0, p.unit || '');
                 return row;
             });
             filename = "export_produk.xlsx";
         } else if (section === 'pelanggan') {
             headers = ["Nama", "Tipe", "Telepon", "Kota", "Alamat", "Limit Piutang"];
-            rows = CUSTOMERS.map(c => [c.name||'', c.type||'', c.phone||'', c.city||'', c.address||'', c.creditLimit||0]);
+            rows = CUSTOMERS.map(c => [c.name || '', c.type || '', c.phone || '', c.city || '', c.address || '', c.creditLimit || 0]);
             filename = "export_pelanggan.xlsx";
         } else if (section === 'vendor') {
             headers = ["Nama", "Kategori", "Telepon", "Kota", "Alamat", "No. Identitas", "Bank", "No. Rekening", "Pemilik Rekening"];
-            rows = VENDORS.map(v => [v.name||'', v.category||'', v.phone||'', v.city||'', v.address||'', v.idNumber||'', v.bank||'', v.rekening||'', v.pemilik||'']);
+            rows = VENDORS.map(v => [v.name || '', v.category || '', v.phone || '', v.city || '', v.address || '', v.idNumber || '', v.bank || '', v.rekening || '', v.pemilik || '']);
             filename = "export_vendor.xlsx";
         } else if (section === 'pembelian') {
             const res = await fetch('/api/purchases?all=true', { headers: getAuthHeaders() });
             const data = await res.json();
             headers = ["Tanggal", "Nama Vendor", "Total", "Terbayar", "Tipe Pembayaran", "Jatuh Tempo"];
-            rows = (Array.isArray(data) ? data : []).map(p => [p.date||'', p.vendor||'', p.total||0, p.paid||0, p.type||'', p.dueDate||'']);
+            rows = (Array.isArray(data) ? data : []).map(p => [p.date || '', p.vendor || '', p.total || 0, p.paid || 0, p.type || '', p.dueDate || '']);
             filename = "export_pembelian.xlsx";
         } else if (section === 'invoice') {
             const res = await fetch('/api/invoices?all=true', { headers: getAuthHeaders() });
             const data = await res.json();
             headers = ["Tanggal", "Nama Customer", "Total", "Terbayar", "Tipe Pembayaran", "Jatuh Tempo"];
-            rows = (Array.isArray(data) ? data : []).map(i => [i.date||'', i.customer||'', i.total||0, i.paid||0, i.type||'', i.dueDate||'']);
+            rows = (Array.isArray(data) ? data : []).map(i => [i.date || '', i.customer || '', i.total || 0, i.paid || 0, i.type || '', i.dueDate || '']);
             filename = "export_invoice.xlsx";
         }
     } catch (err) {
@@ -10556,7 +11132,7 @@ function closePrintInvoiceView() {
     document.body.style.overflow = 'auto';
 }
 
-window.printNewlyCreatedInvoice = function() {
+window.printNewlyCreatedInvoice = function () {
     const printBtn = document.getElementById('btn-print-new-invoice');
     if (printBtn && printBtn.dataset.invoiceId) {
         // Open in new tab synchronously (must be in click handler to avoid popup blocker).
@@ -12320,7 +12896,7 @@ function updateSalesReturnCalc() {
 
     let totalGross = 0;
     const qtyInputs = document.querySelectorAll('.sales-ret-qty-input');
-    
+
     qtyInputs.forEach(input => {
         const idx = parseInt(input.dataset.idx, 10);
         const item = currentSalesReturnItems[idx];
@@ -12416,40 +12992,52 @@ async function submitSalesReturn() {
         return;
     }
 
-    const btnSubmit = document.getElementById('btn-submit-sales-return');
-    if (btnSubmit) btnSubmit.disabled = true;
-
-    try {
-        const res = await fetch(`/api/invoices/${encodeURIComponent(invId)}/returns`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({
-                return_date: returnDate,
-                reason: reason,
-                items: items
-            })
-        });
-
-        const data = await res.json();
-        if (res.ok) {
-            closeModal('modal-sales-return');
-            closeModal('modal-edit-invoice');
-            showToast(`Retur penjualan berhasil disimpan! (${data.returnId})`, 'success');
-
-            // Dynamic refresh without page reload
-            await fetchInvoices();
-            await fetchProducts();
-            if (typeof fetchPiutang === 'function') await fetchPiutang();
-            if (currentPage === 'returns') loadReturnsSales(1);
-        } else {
-            showToast('Gagal simpan retur: ' + (data.error || 'Terjadi kesalahan server'), 'error');
+    const totalRetQty = items.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
+    showConfirmDialog({
+        title: 'Konfirmasi Retur Penjualan?',
+        message: 'Retur ini akan memulihkan stok dan mengurangi nilai invoice.',
+        summary: [
+            { label: 'No. Invoice', value: invId },
+            { label: 'Item Diretur', value: `${items.length} produk (${totalRetQty} qty)` },
+            { label: 'Alasan', value: reason }
+        ],
+        confirmText: 'Ya, Simpan',
+        cancelText: 'Batal',
+        onConfirm: async () => {
+            const btnSubmit = document.getElementById('btn-submit-sales-return');
+            if (btnSubmit) btnSubmit.disabled = true;
+            try {
+                const res = await fetch(`/api/invoices/${encodeURIComponent(invId)}/returns`, {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({
+                        return_date: returnDate,
+                        reason: reason,
+                        items: items
+                    })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    closeModal('modal-confirm-dialog');
+                    closeModal('modal-sales-return');
+                    closeModal('modal-edit-invoice');
+                    showToast(`Retur penjualan berhasil disimpan! (${data.returnId})`, 'success');
+                    await fetchInvoices();
+                    await fetchProducts();
+                    if (typeof fetchPiutang === 'function') await fetchPiutang();
+                    if (currentPage === 'returns') loadReturnsSales(1);
+                } else {
+                    showToast('Gagal simpan retur: ' + (data.error || 'Terjadi kesalahan server'), 'error');
+                }
+            } catch (err) {
+                console.error('Error submitting sales return', err);
+                showToast('Terjadi kesalahan koneksi', 'error');
+            } finally {
+                const btnFinal = document.getElementById('btn-submit-sales-return');
+                if (btnFinal) btnFinal.disabled = false;
+            }
         }
-    } catch (err) {
-        console.error('Error submitting sales return', err);
-        showToast('Terjadi kesalahan koneksi', 'error');
-    } finally {
-        if (btnSubmit) btnSubmit.disabled = false;
-    }
+    });
 }
 
 // ---------- B2. Retur Pembelian ----------
@@ -12557,7 +13145,7 @@ function updatePurchaseReturnCalc() {
     let totalGross = 0;
     let totalRefund = 0;
     const qtyInputs = document.querySelectorAll('.purchase-ret-qty-input');
-    
+
     qtyInputs.forEach(input => {
         const idx = parseInt(input.dataset.idx, 10);
         const item = currentPurchaseReturnItems[idx];
@@ -12631,82 +13219,61 @@ async function submitPurchaseReturn() {
         return;
     }
 
-    const btnSubmit = document.getElementById('btn-submit-purchase-return');
-    if (btnSubmit) btnSubmit.disabled = true;
-
-    try {
-        const res = await fetch(`/api/purchases/${encodeURIComponent(poId)}/returns`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({
-                return_date: returnDate,
-                reason: reason,
-                items: items
-            })
-        });
-
-        const data = await res.json();
-        if (res.ok) {
-            closeModal('modal-purchase-return');
-            closeModal('modal-edit-purchase');
-            showToast(`Retur pembelian berhasil disimpan! (${data.returnId})`, 'success');
-
-            // Dynamic refresh without page reload
-            await fetchPurchases();
-            await fetchProducts();
-            if (typeof renderHutang === 'function') await renderHutang();
-            if (currentPage === 'returns') loadReturnsPurchases(1);
-        } else {
-            showToast('Gagal simpan retur pembelian: ' + (data.error || 'Terjadi kesalahan server'), 'error');
+    const totalPoRetQty = items.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
+    showConfirmDialog({
+        title: 'Konfirmasi Retur Pembelian?',
+        message: 'Retur ini akan mengurangi stok dan memperbarui data pembelian.',
+        summary: [
+            { label: 'No. PO', value: poId },
+            { label: 'Item Diretur', value: `${items.length} produk (${totalPoRetQty} qty)` },
+            { label: 'Alasan', value: reason }
+        ],
+        confirmText: 'Ya, Simpan',
+        cancelText: 'Batal',
+        onConfirm: async () => {
+            const btnSubmit = document.getElementById('btn-submit-purchase-return');
+            if (btnSubmit) btnSubmit.disabled = true;
+            try {
+                const res = await fetch(`/api/purchases/${encodeURIComponent(poId)}/returns`, {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({
+                        return_date: returnDate,
+                        reason: reason,
+                        items: items
+                    })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    closeModal('modal-confirm-dialog');
+                    closeModal('modal-purchase-return');
+                    closeModal('modal-edit-purchase');
+                    showToast(`Retur pembelian berhasil disimpan! (${data.returnId})`, 'success');
+                    await fetchPurchases();
+                    await fetchProducts();
+                    if (currentPage === 'purchase-returns') loadReturnsPurchasesPage(1);
+                } else {
+                    showToast('Gagal simpan retur pembelian: ' + (data.error || 'Terjadi kesalahan server'), 'error');
+                }
+            } catch (err) {
+                console.error('Error submitting purchase return', err);
+                showToast('Terjadi kesalahan koneksi', 'error');
+            } finally {
+                const btnFinal = document.getElementById('btn-submit-purchase-return');
+                if (btnFinal) btnFinal.disabled = false;
+            }
         }
-    } catch (err) {
-        console.error('Error submitting purchase return', err);
-        showToast('Terjadi kesalahan koneksi', 'error');
-    } finally {
-        if (btnSubmit) btnSubmit.disabled = false;
-    }
+    });
 }
 
-// ---------- B4.1 Halaman Daftar Retur ----------
-let currentReturnsTab = 'sales';
+// ---------- B4.1 Halaman Retur Penjualan ----------
 
 function loadReturnsPage() {
-    const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
-    if (role === 'gudang') {
-        switchReturnsTab('purchases');
-    } else {
-        switchReturnsTab('sales');
-    }
-}
-
-function switchReturnsTab(tab) {
-    currentReturnsTab = tab;
-    const btnSales = document.getElementById('tab-btn-returns-sales');
-    const btnPurchases = document.getElementById('tab-btn-returns-purchases');
-    const contentSales = document.getElementById('returns-sales-content');
-    const contentPurchases = document.getElementById('returns-purchases-content');
-
-    if (tab === 'sales') {
-        if (btnSales) btnSales.classList.add('active');
-        if (btnPurchases) btnPurchases.classList.remove('active');
-        if (contentSales) contentSales.style.display = '';
-        if (contentPurchases) contentPurchases.style.display = 'none';
-        loadReturnsSales(1);
-    } else {
-        if (btnPurchases) btnPurchases.classList.add('active');
-        if (btnSales) btnSales.classList.remove('active');
-        if (contentPurchases) contentPurchases.style.display = '';
-        if (contentSales) contentSales.style.display = 'none';
-        loadReturnsPurchases(1);
-    }
+    loadReturnsSales(1);
 }
 
 const debounceReturnsSearch = debounce(() => {
-    if (currentReturnsTab === 'sales') {
-        loadReturnsSales(1);
-    } else {
-        loadReturnsPurchases(1);
-    }
+    loadReturnsSales(1);
 }, 300);
 
 function resetReturnsFilter() {
@@ -12716,8 +13283,7 @@ function resetReturnsFilter() {
     if (searchEl) searchEl.value = '';
     if (fromEl) fromEl.value = '';
     if (toEl) toEl.value = '';
-    if (currentReturnsTab === 'sales') loadReturnsSales(1);
-    else loadReturnsPurchases(1);
+    loadReturnsSales(1);
 }
 
 async function loadReturnsSales(page = 1) {
@@ -12728,9 +13294,9 @@ async function loadReturnsSales(page = 1) {
     const canSeeFinance = role === 'admin' || role === 'finance' || role === 'owner';
 
     let url = `/api/returns/sales?page=${page}&limit=80`;
-    if (search) url += `&search=${encodeURIComponent(search)}`;
-    if (from) url += `&startDate=${encodeURIComponent(from)}`;
-    if (to) url += `&endDate=${encodeURIComponent(to)}`;
+    if (search) url += `&q=${encodeURIComponent(search)}`;
+    if (from) url += `&date_from=${encodeURIComponent(from)}`;
+    if (to) url += `&date_to=${encodeURIComponent(to)}`;
 
     const tbody = document.getElementById('returns-sales-body');
     const emptyEl = document.getElementById('returns-sales-empty');
@@ -12739,7 +13305,7 @@ async function loadReturnsSales(page = 1) {
     try {
         const res = await fetch(url, { headers: getAuthHeaders() });
         if (!res.ok) {
-            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:1.5rem; color:var(--rose-500);">Gagal memuat data retur penjualan.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:1.5rem; color:var(--rose-500);">Gagal memuat data retur penjualan.</td></tr>';
             return;
         }
         const json = await res.json();
@@ -12752,12 +13318,13 @@ async function loadReturnsSales(page = 1) {
         } else {
             if (emptyEl) emptyEl.style.display = 'none';
             tbody.innerHTML = rows.map(r => {
-                const dateStr = (r.return_date || '').split('T')[0];
-                const condBadge = r.condition_summary === 'kembali_ke_stok'
+                const dateStr = (r.date || r.return_date || '').split('T')[0];
+                const condSummary = r.conditions || r.condition_summary || 'kembali_ke_stok';
+                const condBadge = condSummary === 'kembali_ke_stok'
                     ? '<span class="badge-status kembali_ke_stok">Kembali ke Stok</span>'
-                    : (r.condition_summary === 'rusak' 
-                        ? '<span class="badge-status rusak">Rusak</span>' 
-                        : `<span class="badge-status opname">${capitalize(r.condition_summary || '-')}</span>`);
+                    : (condSummary === 'rusak'
+                        ? '<span class="badge-status rusak">Rusak</span>'
+                        : `<span class="badge-status opname">${capitalize(condSummary || '-')}</span>`);
                 const financeCol = canSeeFinance ? `<td style="text-align:right; font-weight:600;">${rp(r.total_refund || 0)}</td>` : '';
                 return `
                     <tr style="cursor: pointer;" onclick="openReturnDetail('sales', '${r.id}')">
@@ -12769,6 +13336,10 @@ async function loadReturnsSales(page = 1) {
                         <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${r.reason || '-'}</td>
                         <td>${condBadge}</td>
                         ${financeCol}
+                        <td style="text-align:right;">
+                            <button class="btn-toolbar secondary" style="padding:0.25rem 0.6rem; font-size:0.78rem;"
+                                onclick="event.stopPropagation(); openReturnDetail('sales', '${r.id}')">Detail</button>
+                        </td>
                     </tr>
                 `;
             }).join('');
@@ -12793,20 +13364,35 @@ async function loadReturnsSales(page = 1) {
     }
 }
 
-async function loadReturnsPurchases(page = 1) {
-    const search = document.getElementById('returns-search')?.value || '';
-    const from = document.getElementById('returns-date-from')?.value || '';
-    const to = document.getElementById('returns-date-to')?.value || '';
+// ---------- B4.1b Halaman Retur Pembelian ----------
+const debounceReturnsPurchasesSearch = debounce(() => {
+    loadReturnsPurchasesPage(1);
+}, 300);
+
+function resetReturnsPurchasesFilter() {
+    const searchEl = document.getElementById('purchase-returns-search');
+    const fromEl = document.getElementById('purchase-returns-date-from');
+    const toEl = document.getElementById('purchase-returns-date-to');
+    if (searchEl) searchEl.value = '';
+    if (fromEl) fromEl.value = '';
+    if (toEl) toEl.value = '';
+    loadReturnsPurchasesPage(1);
+}
+
+async function loadReturnsPurchasesPage(page = 1) {
+    const search = document.getElementById('purchase-returns-search')?.value || '';
+    const from = document.getElementById('purchase-returns-date-from')?.value || '';
+    const to = document.getElementById('purchase-returns-date-to')?.value || '';
     const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
-    const canSeeFinance = role === 'admin' || role === 'finance' || role === 'owner';
+    const canSeePurchaseReturnTotal = role === 'admin' || role === 'finance' || role === 'owner' || role === 'gudang';
 
     let url = `/api/returns/purchases?page=${page}&limit=80`;
-    if (search) url += `&search=${encodeURIComponent(search)}`;
-    if (from) url += `&startDate=${encodeURIComponent(from)}`;
-    if (to) url += `&endDate=${encodeURIComponent(to)}`;
+    if (search) url += `&q=${encodeURIComponent(search)}`;
+    if (from) url += `&date_from=${encodeURIComponent(from)}`;
+    if (to) url += `&date_to=${encodeURIComponent(to)}`;
 
-    const tbody = document.getElementById('returns-purchases-body');
-    const emptyEl = document.getElementById('returns-purchases-empty');
+    const tbody = document.getElementById('purchase-returns-body');
+    const emptyEl = document.getElementById('purchase-returns-empty');
     if (!tbody) return;
 
     try {
@@ -12825,33 +13411,38 @@ async function loadReturnsPurchases(page = 1) {
         } else {
             if (emptyEl) emptyEl.style.display = 'none';
             tbody.innerHTML = rows.map(r => {
-                const dateStr = (r.return_date || '').split('T')[0];
-                const financeCol = canSeeFinance ? `<td style="text-align:right; font-weight:600;">${rp(r.total_refund || 0)}</td>` : '';
+                const dateStr = (r.date || r.return_date || '').split('T')[0];
+                const totalCol = canSeePurchaseReturnTotal
+                    ? `<td style="text-align:right; font-weight:600;">${rp(r.total_refund || 0)}</td>`
+                    : '';
                 return `
                     <tr style="cursor: pointer;" onclick="openReturnDetail('purchases', '${r.id}')">
                         <td style="font-weight:600; color:var(--blue-700);">${r.id}</td>
                         <td>${dateStr}</td>
-                        <td style="color:var(--blue-600); font-weight:500;">${r.purchase_id}</td>
+                        <td style="color:var(--blue-600); font-weight:500;">${r.purchase_order_id || r.purchase_id || '-'}</td>
                         <td style="font-weight:600;">${r.vendor_name || '-'}</td>
-                        <td style="text-align:center;">${r.item_count || 1} item</td>
-                        <td style="max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${r.reason || '-'}</td>
-                        ${financeCol}
+                        ${totalCol}
+                        <td style="text-align:center;"><span class="badge-status selesai">Selesai</span></td>
+                        <td style="text-align:right;">
+                            <button class="btn-toolbar secondary" style="padding:0.25rem 0.6rem; font-size:0.78rem;"
+                                onclick="event.stopPropagation(); openReturnDetail('purchases', '${r.id}')">Detail</button>
+                        </td>
                     </tr>
                 `;
             }).join('');
         }
 
         renderPagination({
-            containerId: 'pagination-returns-purchases',
+            containerId: 'pagination-purchase-returns',
             currentPage: page,
             totalItems: pag.total || 0,
             pageSize: 80,
-            onPageChange: (p) => loadReturnsPurchases(p)
+            onPageChange: (p) => loadReturnsPurchasesPage(p)
         });
 
-        // Hide/show financial table header
-        document.querySelectorAll('#returns-purchases-table .th-returns-finance').forEach(th => {
-            th.style.display = canSeeFinance ? '' : 'none';
+        // Hide/show Total Nilai Retur table header
+        document.querySelectorAll('#purchase-returns-table .th-purchase-returns-finance').forEach(th => {
+            th.style.display = canSeePurchaseReturnTotal ? '' : 'none';
         });
 
         if (typeof lucide !== 'undefined') lucide.createIcons();
@@ -12874,13 +13465,17 @@ async function openReturnDetail(type, id) {
         const role = (localStorage.getItem('role') || 'kasir').toLowerCase();
         const canSeeFinance = role === 'admin' || role === 'finance' || role === 'owner';
 
+        const isSales = type === 'sales';
+        const modalTitleEl = document.getElementById('ret-detail-modal-title');
+        if (modalTitleEl) {
+            modalTitleEl.textContent = isSales ? 'Detail Retur Penjualan' : 'Detail Retur Pembelian';
+        }
+
         document.getElementById('ret-detail-id').textContent = ret.id || '-';
         document.getElementById('ret-detail-date').textContent = (ret.return_date || ret.date || '').split('T')[0] || '-';
-        
-        const isSales = type === 'sales';
         document.getElementById('ret-detail-ref-label').textContent = isSales ? 'No. Invoice' : 'No. PO';
         const refId = isSales ? (ret.invoice_id || '-') : (ret.purchase_id || ret.purchase_order_id || '-');
-        
+
         // Link to invoice/PO if role has permission
         const canViewRef = isSales ? (role === 'admin' || role === 'finance' || role === 'kasir') : (role === 'admin' || role === 'finance' || role === 'gudang');
         if (canViewRef && refId !== '-') {
@@ -12898,7 +13493,7 @@ async function openReturnDetail(type, id) {
         const tbody = document.getElementById('ret-detail-items-body');
         tbody.innerHTML = items.map((i, idx) => {
             const cond = i.condition || i.condition_type || '';
-            const condDisplay = isSales 
+            const condDisplay = isSales
                 ? (cond === 'rusak' ? '<span class="badge-status rusak">Rusak</span>' : '<span class="badge-status kembali_ke_stok">Kembali ke Stok</span>')
                 : '<span class="badge-status kembali_ke_stok">Retur ke Vendor</span>';
             const finCells = canSeeFinance ? `
@@ -13067,11 +13662,12 @@ async function loadStockMovesPage(page = 1) {
 }
 
 // Window attachments for inline HTML onclick/oninput handlers
-window.switchReturnsTab = switchReturnsTab;
 window.debounceReturnsSearch = debounceReturnsSearch;
 window.resetReturnsFilter = resetReturnsFilter;
 window.loadReturnsSales = loadReturnsSales;
-window.loadReturnsPurchases = loadReturnsPurchases;
+window.debounceReturnsPurchasesSearch = debounceReturnsPurchasesSearch;
+window.resetReturnsPurchasesFilter = resetReturnsPurchasesFilter;
+window.loadReturnsPurchasesPage = loadReturnsPurchasesPage;
 window.openReturnDetail = openReturnDetail;
 window.debounceStockMovesSearch = debounceStockMovesSearch;
 window.resetStockMovesFilter = resetStockMovesFilter;
@@ -13756,7 +14352,7 @@ async function _srPopulateFilterDropdowns() {
                     const data = await r.json();
                     custs = Array.isArray(data) ? data : (data.data || []);
                 }
-            } catch (_) {}
+            } catch (_) { }
         }
         const curVal = custEl.value || 'all';
         custEl.innerHTML = '<option value="all">Semua Pelanggan</option>' +
@@ -13771,7 +14367,7 @@ async function _srPopulateFilterDropdowns() {
             try {
                 const r = await fetch('/api/master/payment-types', { headers: getAuthHeaders() });
                 if (r.ok) pts = await r.json();
-            } catch (_) {}
+            } catch (_) { }
         }
         const curPt = ptEl.value || 'all';
         ptEl.innerHTML = '<option value="all">Semua Tipe</option>' +
@@ -14316,7 +14912,7 @@ async function loadHppLogPage(page = 1) {
                     const pJson = await pr.json();
                     prods = Array.isArray(pJson) ? pJson : (pJson.data || []);
                 }
-            } catch (_) {}
+            } catch (_) { }
         }
         prodSelect.innerHTML = '<option value="all">Semua Produk</option>' +
             prods.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join('');

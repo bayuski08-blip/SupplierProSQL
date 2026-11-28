@@ -84,8 +84,29 @@ function addDaysToDateStr(dateStr, days) {
 
 /**
  * Deterministic pagination algorithm for Epson LQ-590 continuous form (24.13 x 13.97 cm).
- * Layout "Opsi C": header lebih ringkas (kiri: logo+perusahaan, kanan: customer saja),
- * info invoice di satu baris teks, tanda tangan lebih pendek → kapasitas naik.
+ * Kertas "special": 241.3mm x 139.7mm. @page margin 0 → usable = 138mm (safety 1.7mm).
+ * Padding halaman: 4mm top+bottom, 6mm left+right → content height = 130mm.
+ *
+ * Kalkulasi kapasitas baris (8.5pt font, line-height 1.3, pad 2.5pt top+bot per sel):
+ *   tinggi 1 baris ≈ (8.5pt * 1.3) + 2*2.5pt = 11.05pt + 5pt = 16.05pt ≈ 5.66mm
+ *
+ * Komponen tetap halaman 1 (single/multi):
+ *   - Header (logo+perusahaan+customer): ~32mm
+ *   - Info row (No.invoice, tanggal, payment): ~5mm
+ *   - Thead tabel: ~6mm
+ *   - Footer halaman (Hal X dari N): ~4mm
+ *   - Bersambung row: ~4mm
+ *   → Fixed overhead p1 (multi) = 32+5+6+4+4 = 51mm → sisa untuk baris = 79mm → ~13 baris ✓
+ *   → Fixed overhead p1 (single, ada total+ttd ~25mm) = 32+5+6+25+4 = 72mm → sisa = 58mm → ~10 baris ✓
+ *
+ * Halaman lanjutan (compact header ~8mm):
+ *   - Compact header: ~8mm
+ *   - Thead: ~6mm
+ *   - Footer: ~4mm
+ *   - Bersambung: ~4mm (kecuali halaman terakhir)
+ *   → Fixed overhead mid = 8+6+4+4 = 22mm → sisa = 108mm → ~19 baris; set C_MID=17 (konservatif)
+ *   → Fixed overhead last = 8+6+4+25 = 43mm → sisa = 87mm → ~15 baris; set C_LAST=13 (konservatif)
+ *
  * - C_SINGLE: max items if invoice fits entirely on 1 page (includes full header, totals & signatures)
  * - C_P1: max items on Page 1 of multi-page (full header + items + "Bersambung", no totals/signatures)
  * - C_MID: max items on intermediate page (compact header + items + "Bersambung")
@@ -95,8 +116,8 @@ function addDaysToDateStr(dateStr, days) {
 function paginateItems(items, config = {}) {
     const C_SINGLE = config.C_SINGLE || 10;
     const C_P1 = config.C_P1 || 13;
-    const C_MID = config.C_MID || 16;
-    const C_LAST = config.C_LAST || 12;
+    const C_MID = config.C_MID || 17;
+    const C_LAST = config.C_LAST || 13;
 
     const totalItems = items.length;
     if (totalItems === 0) return [[]];
@@ -181,8 +202,8 @@ function renderInvoice(data, ppnEnabled, isProforma = false) {
     const pages = paginateItems(items, {
         C_SINGLE: 10,
         C_P1: 13,
-        C_MID: 16,
-        C_LAST: 12
+        C_MID: 17,
+        C_LAST: 13
     });
 
     const totalPages = pages.length;
@@ -370,26 +391,26 @@ function renderInvoice(data, ppnEnabled, isProforma = false) {
             const signaturesHtml = isProforma ? `
                 <div class="invoice-signatures" style="display: flex; gap: 2rem; font-size: 8.5pt;">
                     <div style="text-align: center;">
-                        <div style="margin-bottom: 1.75rem;">Hormat kami,</div>
+                        <div style="margin-bottom: 14mm;">Hormat kami,</div>
                         <div>(__________________)</div>
                     </div>
                     <div style="text-align: center;">
-                        <div style="margin-bottom: 1.75rem;">Customer,</div>
+                        <div style="margin-bottom: 14mm;">Customer,</div>
                         <div>(__________________)</div>
                     </div>
                 </div>
             ` : `
                 <div class="invoice-signatures" style="display: flex; gap: 1.5rem; font-size: 8.5pt;">
                     <div style="text-align: center;">
-                        <div style="margin-bottom: 1.75rem;">Regards,</div>
+                        <div style="margin-bottom: 14mm;">Regards,</div>
                         <div>(__________________)</div>
                     </div>
                     <div style="text-align: center;">
-                        <div style="margin-bottom: 1.75rem;">Driver,</div>
+                        <div style="margin-bottom: 14mm;">Driver,</div>
                         <div>(__________________)</div>
                     </div>
                     <div style="text-align: center;">
-                        <div style="margin-bottom: 1.75rem;">Customer,</div>
+                        <div style="margin-bottom: 14mm;">Customer,</div>
                         <div>(__________________)</div>
                     </div>
                 </div>
@@ -435,6 +456,7 @@ function renderInvoice(data, ppnEnabled, isProforma = false) {
         <div class="invoice-page ${isLastPage ? 'is-last-page' : ''}">
             ${headerHtml}
             ${infoRowHtml}
+            <div class="invoice-items-table-wrap">
             <table class="invoice-items-table">
                 <thead>
                     <tr>
@@ -450,6 +472,7 @@ function renderInvoice(data, ppnEnabled, isProforma = false) {
                     ${rowsHtml}
                 </tbody>
             </table>
+            </div>
             ${bersambungHtml}
             ${bottomHtml}
             ${footerHtml}

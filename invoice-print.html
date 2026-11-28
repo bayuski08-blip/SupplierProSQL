@@ -178,59 +178,71 @@
         }
 
         /* Print: clean page for continuous form dot matrix (Epson LQ-590) */
+        /* Kertas "special": 24.13cm x 13.97cm (9.5" x 5.5") */
+        @page {
+            size: 241.3mm 139.7mm;
+            margin: 0;
+        }
+
         @media print {
-            :root {
-                --print-content-width: 19.5cm;  /* LQ-590 printable area ~20.3cm; safety margin */
-                --print-offset-left: 0cm;
-            }
             html, body {
                 background: white !important;
-                width: auto !important;
+                width: 241.3mm !important;
                 height: auto !important;
                 margin: 0 !important;
                 padding: 0 !important;
                 display: block !important;
                 overflow: visible !important;
+                box-sizing: border-box !important;
             }
             /* Cancel dashboard.css overrides that hide everything */
             body > *:not(.dashboard-wrapper),
             .sidebar, .topbar, .sidebar-overlay, .modal-overlay, .page-section, .page-toolbar {
                 display: revert !important;
             }
+            * {
+                box-sizing: border-box !important;
+            }
             #print-invoice-view {
                 display: block !important;
                 position: static !important;
                 inset: auto !important;
-                width: 100% !important;
-                max-width: var(--print-content-width) !important;
-                margin-left: var(--print-offset-left) !important;
-                margin-right: 0 !important;
+                width: 241.3mm !important;
+                max-width: 241.3mm !important;
+                margin: 0 !important;
+                padding: 0 !important;
                 height: auto !important;
                 min-height: 0 !important;
-                padding: 0 !important;
                 overflow: visible !important;
                 box-shadow: none !important;
-                box-sizing: border-box !important;
             }
+            /* Setiap .invoice-page = 1 lembar fisik kertas */
             .invoice-page {
-                display: block !important;
+                display: flex !important;
+                flex-direction: column !important;
                 background: white !important;
                 box-shadow: none !important;
-                width: 100% !important;
-                max-width: var(--print-content-width) !important;
-                margin: 0 !important;
-                padding: 4mm 5mm !important;
-                height: auto !important;
+                width: 241.3mm !important;
+                height: 138mm !important;       /* 139.7mm - 1.7mm safety */
                 min-height: 0 !important;
+                max-height: 138mm !important;
+                margin: 0 !important;
+                padding: 4mm 6mm !important;
                 page-break-after: always !important;
                 break-after: page !important;
                 box-sizing: border-box !important;
-                overflow: visible !important;
+                overflow: hidden !important;
             }
             .invoice-page.is-last-page,
             .invoice-page:last-child {
                 page-break-after: auto !important;
                 break-after: auto !important;
+            }
+            /* Tabel item mengisi ruang tersisa dalam flex column */
+            .invoice-items-table-wrap {
+                flex: 1 1 auto;
+                overflow: hidden;
+                min-height: 0;
             }
             .invoice-items-table {
                 table-layout: fixed;
@@ -246,11 +258,21 @@
             .invoice-bottom {
                 break-inside: avoid !important;
                 page-break-inside: avoid !important;
+                flex-shrink: 0 !important;
             }
             .invoice-signatures,
             .invoice-totals {
                 break-inside: avoid !important;
                 page-break-inside: avoid !important;
+            }
+            /* Footer halaman selalu di bawah, tidak terdorong keluar */
+            .invoice-page-footer {
+                flex-shrink: 0 !important;
+                margin-top: auto !important;
+                padding-top: 2pt !important;
+            }
+            .invoice-bersambung {
+                flex-shrink: 0 !important;
             }
             .no-print {
                 display: none !important;
